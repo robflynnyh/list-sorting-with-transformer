@@ -592,6 +592,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--rotary-base", type=float, default=10_000.0)
     parser.add_argument(
+        "--rotate-values-with-rope",
+        action="store_true",
+        help="apply RoPE to value vectors in rotary attention layers",
+    )
+    parser.add_argument(
         "--trace-snapshot-mode",
         choices=SNAPSHOT_MODES,
         default="partition",
@@ -650,6 +655,7 @@ def main() -> None:
             dropout=args.dropout,
             position_pattern=args.position_pattern,
             rotary_base=args.rotary_base,
+            rotate_values_with_rope=args.rotate_values_with_rope,
         )
     else:
         model_config = LSTMConfig(

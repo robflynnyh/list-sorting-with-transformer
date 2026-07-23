@@ -26,6 +26,7 @@ class ModelConfig:
     dropout: float = 0.0
     position_pattern: str = "alternating"
     rotary_base: float = 10_000.0
+    rotate_values_with_rope: bool = False
 
     def __post_init__(self) -> None:
         if self.representation not in {"alphabet", "numbers"}:
@@ -98,6 +99,7 @@ class CausalSelfAttention(nn.Module):
         self.head_dim = config.d_model // config.n_heads
         self.dropout = config.dropout
         self.use_rotary = use_rotary
+        self.rotate_values_with_rope = config.rotate_values_with_rope
         self.qkv = nn.Linear(config.d_model, 3 * config.d_model, bias=False)
         self.output = nn.Linear(config.d_model, config.d_model, bias=False)
         self.rotary = (
@@ -130,6 +132,8 @@ class CausalSelfAttention(nn.Module):
         if self.rotary is not None:
             query = self.rotary(query, position_offset=position_offset)
             key = self.rotary(key, position_offset=position_offset)
+            if self.rotate_values_with_rope:
+                value = self.rotary(value, position_offset=position_offset)
         if cache is not None:
             if sequence_length != 1:
                 raise ValueError(
@@ -229,7 +233,14 @@ class DecoderTransformer(nn.Module):
     @property
     def layer_position_modes(self) -> tuple[str, ...]:
         return tuple(
-            "rotary" if block.attention.use_rotary else "none"
+            (
+                "rotary+value"
+                if block.attention.use_rotary
+                and block.attention.rotate_values_with_rope
+                else "rotary"
+                if block.attention.use_rotary
+                else "none"
+            )
             for block in self.blocks
         )
 

@@ -9,7 +9,11 @@ from list_sorting_transformer.recurrent import LSTMConfig, LSTMSorter
 from list_sorting_transformer.tokens import SymbolVocabulary
 
 
-def small_config(representation: str = "numbers") -> ModelConfig:
+def small_config(
+    representation: str = "numbers",
+    *,
+    rotate_values_with_rope: bool = False,
+) -> ModelConfig:
     vocabulary = SymbolVocabulary(representation, 10)
     return ModelConfig(
         vocab_size=vocabulary.size,
@@ -19,12 +23,23 @@ def small_config(representation: str = "numbers") -> ModelConfig:
         n_layers=4,
         n_heads=4,
         ffn_multiplier=2.0,
+        rotate_values_with_rope=rotate_values_with_rope,
     )
 
 
 def test_default_layers_interleave_rotary_and_nope() -> None:
     model = DecoderTransformer(small_config())
     assert model.layer_position_modes == ("rotary", "none", "rotary", "none")
+
+
+def test_value_rotary_mode_is_reported_for_rotary_layers() -> None:
+    model = DecoderTransformer(small_config(rotate_values_with_rope=True))
+    assert model.layer_position_modes == (
+        "rotary+value",
+        "none",
+        "rotary+value",
+        "none",
+    )
 
 
 def test_causal_mask_prevents_future_tokens_changing_prefix_logits() -> None:
@@ -97,6 +112,32 @@ def test_transformer_cache_matches_full_prefix_logits() -> None:
         rtol=1e-4,
     )
     assert all(cache[0].shape[-2] == 10 for cache in caches)
+
+
+def test_transformer_cache_matches_full_prefix_logits_with_value_rope() -> None:
+    torch.manual_seed(14)
+    model = DecoderTransformer(
+        small_config(rotate_values_with_rope=True)
+    ).eval()
+    prompt = torch.randint(0, model.config.vocab_size, (2, 9))
+    next_token = torch.randint(0, model.config.vocab_size, (2, 1))
+
+    prompt_logits, caches = model.forward_with_cache(prompt)
+    full_prompt_logits = model(prompt)
+    torch.testing.assert_close(prompt_logits, full_prompt_logits)
+
+    cached_logits, caches = model.forward_with_cache(
+        next_token,
+        caches=caches,
+    )
+    full_logits = model(torch.cat((prompt, next_token), dim=1))
+    torch.testing.assert_close(
+        cached_logits[:, -1],
+        full_logits[:, -1],
+        atol=1e-5,
+        rtol=1e-4,
+    )
+    assert all(cache[1].shape[-2] == 10 for cache in caches)
 
 
 def test_transformer_cached_generation_matches_full_prefix_generation() -> None:

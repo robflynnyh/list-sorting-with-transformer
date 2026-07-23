@@ -288,7 +288,9 @@ layers alternate between:
 4. NoPE.
 
 The implementation can also run all-RoPE or all-NoPE ablations through
-`--position-pattern`.
+`--position-pattern`. By default RoPE is applied to attention queries and keys
+only; `--rotate-values-with-rope` also rotates value vectors in RoPE layers for
+an additional positional-attention ablation.
 
 Direct, textual-trace, and no-tool machine generation is unconstrained and
 greedy. Executor-assisted generation is greedy but restricted to the relevant
