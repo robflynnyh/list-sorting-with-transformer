@@ -8,8 +8,15 @@ import torch
 from torch import Tensor
 
 from .data import IGNORE_INDEX
+from .pointer_quicksort import PointerQuicksortRollout, PointerQuicksortTrace
 from .quicksort import QuicksortTrace, split_generated_events
-from .tokens import EOS, PAD, QuicksortTraceVocabulary, SymbolVocabulary
+from .tokens import (
+    EOS,
+    PAD,
+    PointerQuicksortVocabulary,
+    QuicksortTraceVocabulary,
+    SymbolVocabulary,
+)
 
 
 def masked_token_accuracy(logits: Tensor, labels: Tensor) -> float:
@@ -174,6 +181,96 @@ def generated_quicksort_metrics(
         full_token_total,
         1,
     )
+    return metrics
+
+
+def generated_pointer_quicksort_metrics(
+    values: Tensor,
+    rollouts: Sequence[PointerQuicksortRollout],
+    vocabulary: PointerQuicksortVocabulary,
+    traces: Sequence[PointerQuicksortTrace],
+) -> dict[str, float]:
+    """Score executed machine state and canonical action-sequence fidelity."""
+
+    if values.ndim != 2:
+        raise ValueError("values must be rank two")
+    if len(rollouts) != values.shape[0] or len(traces) != values.shape[0]:
+        raise ValueError("one rollout and reference trace are required per row")
+
+    totals = {
+        "valid_syntax": 0.0,
+        "correct_length": 0.0,
+        "sorted": 0.0,
+        "multiset_preserved": 0.0,
+        "exact_match": 0.0,
+        "trace_syntax_valid": 0.0,
+        "trace_exact_match": 0.0,
+        "full_exact_match": 0.0,
+        "operation_prefix_fraction": 0.0,
+        "execution_completed": 0.0,
+        "timed_out": 0.0,
+    }
+    action_correct = 0
+    action_total = 0
+    action_tokens = frozenset(vocabulary.action_tokens)
+
+    for input_row, rollout, trace in zip(values.tolist(), rollouts, traces):
+        expected_values = sorted(int(value) for value in input_row)
+        generated_actions = rollout.action_tokens
+        expected_actions = trace.action_tokens
+        valid_action_tokens = all(
+            action in action_tokens for action in generated_actions
+        )
+        completed = rollout.completed and rollout.valid_execution
+        final_values = list(rollout.final_values)
+
+        totals["valid_syntax"] += float(completed)
+        totals["trace_syntax_valid"] += float(
+            valid_action_tokens and rollout.valid_execution
+        )
+        totals["execution_completed"] += float(completed)
+        totals["timed_out"] += float(rollout.timed_out)
+        totals["correct_length"] += float(len(final_values) == len(input_row))
+        totals["sorted"] += float(
+            all(
+                left <= right
+                for left, right in zip(final_values, final_values[1:])
+            )
+        )
+        totals["multiset_preserved"] += float(
+            sorted(final_values) == expected_values
+        )
+        exact = completed and final_values == expected_values
+        totals["exact_match"] += float(exact)
+
+        valid_prefix = 0
+        for generated_action, expected_action in zip(
+            generated_actions,
+            expected_actions,
+        ):
+            if generated_action != expected_action:
+                break
+            valid_prefix += 1
+        totals["operation_prefix_fraction"] += valid_prefix / max(
+            len(expected_actions),
+            1,
+        )
+        trace_exact = completed and generated_actions == expected_actions
+        totals["trace_exact_match"] += float(trace_exact)
+        totals["full_exact_match"] += float(trace_exact and exact)
+
+        for index, expected_action in enumerate(expected_actions):
+            if (
+                index < len(generated_actions)
+                and generated_actions[index] == expected_action
+            ):
+                action_correct += 1
+            action_total += 1
+
+    batch_size = values.shape[0]
+    metrics = {name: value / batch_size for name, value in totals.items()}
+    metrics["target_token_accuracy"] = action_correct / max(action_total, 1)
+    metrics["full_target_token_accuracy"] = metrics["target_token_accuracy"]
     return metrics
 
 

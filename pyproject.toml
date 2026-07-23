@@ -21,6 +21,7 @@ tracking = [
 sort-transformer-train = "list_sorting_transformer.experiment:main"
 sort-transformer-eval = "list_sorting_transformer.evaluate:main"
 sort-transformer-compare = "list_sorting_transformer.compare:main"
+sort-pointer-trace = "list_sorting_transformer.render_pointer_trace:main"
 
 [build-system]
 requires = ["setuptools>=68"]

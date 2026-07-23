@@ -12,18 +12,30 @@ from torch import Tensor
 
 from .data import (
     IGNORE_INDEX,
+    PointerQuicksortBatch,
+    make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
     make_sorting_batch,
 )
 from .metrics import (
+    generated_pointer_quicksort_metrics,
     generated_quicksort_metrics,
     generated_sorting_metrics,
     masked_token_accuracy,
 )
 from .model import DecoderTransformer, ModelConfig
+from .pointer_quicksort import (
+    PointerQuicksortMachine,
+    PointerQuicksortRollout,
+)
 from .quicksort import SnapshotMode
 from .recurrent import LSTMConfig, LSTMSorter
-from .tokens import QuicksortTraceVocabulary, SymbolVocabulary
+from .tokens import (
+    PAD,
+    PointerQuicksortVocabulary,
+    QuicksortTraceVocabulary,
+    SymbolVocabulary,
+)
 
 
 def autocast_context(device: torch.device, enabled: bool = True):
@@ -37,6 +49,102 @@ def output_cross_entropy(logits: Tensor, labels: Tensor) -> Tensor:
         logits.reshape(-1, logits.shape[-1]),
         labels.reshape(-1),
         ignore_index=IGNORE_INDEX,
+    )
+
+
+@torch.inference_mode()
+def generate_pointer_quicksort_rollouts(
+    model: DecoderTransformer | LSTMSorter,
+    batch: PointerQuicksortBatch,
+    vocabulary: PointerQuicksortVocabulary,
+    *,
+    max_actions: int | None = None,
+) -> tuple[PointerQuicksortRollout, ...]:
+    """Alternate model actions with observations from batched executors."""
+
+    if max_actions is None:
+        max_actions = max(len(trace.action_tokens) for trace in batch.traces)
+    if max_actions < 1:
+        raise ValueError("max_actions must be positive")
+
+    machines = [
+        PointerQuicksortMachine(row, vocabulary)
+        for row in batch.values.tolist()
+    ]
+    generated_actions: list[list[int]] = [[] for _ in machines]
+    action_candidates = torch.tensor(
+        vocabulary.action_tokens,
+        dtype=torch.long,
+        device=batch.prompt_ids.device,
+    )
+
+    if isinstance(model, DecoderTransformer):
+        next_logits, decode_state = model.forward_with_cache(batch.prompt_ids)
+        recurrent = False
+    else:
+        next_logits, decode_state = model.forward_with_state(batch.prompt_ids)
+        recurrent = True
+
+    for _ in range(max_actions):
+        candidate_logits = next_logits[:, -1].index_select(
+            dim=-1,
+            index=action_candidates,
+        )
+        selected = action_candidates[candidate_logits.argmax(dim=-1)]
+        selected_actions = selected.tolist()
+        action_values = [PAD] * len(machines)
+        observation_values = [PAD] * len(machines)
+
+        for row_index, machine in enumerate(machines):
+            if machine.finished:
+                continue
+            action = int(selected_actions[row_index])
+            generated_actions[row_index].append(action)
+            action_values[row_index] = action
+            observation = machine.step(action)
+            if observation is not None:
+                observation_values[row_index] = observation
+
+        if all(machine.finished for machine in machines):
+            break
+        action_column = torch.tensor(
+            action_values,
+            dtype=torch.long,
+            device=selected.device,
+        )
+        observation_column = torch.tensor(
+            observation_values,
+            dtype=torch.long,
+            device=selected.device,
+        )
+        if recurrent:
+            _, decode_state = model.forward_with_state(
+                action_column[:, None],
+                decode_state,
+            )
+            next_logits, decode_state = model.forward_with_state(
+                observation_column[:, None],
+                decode_state,
+            )
+        else:
+            _, decode_state = model.forward_with_cache(
+                action_column[:, None],
+                caches=decode_state,
+            )
+            next_logits, decode_state = model.forward_with_cache(
+                observation_column[:, None],
+                caches=decode_state,
+            )
+
+    return tuple(
+        PointerQuicksortRollout(
+            action_tokens=tuple(actions),
+            final_values=tuple(machine.array),
+            completed=machine.completed,
+            valid_execution=machine.valid,
+            timed_out=not machine.finished,
+        )
+        for actions, machine in zip(generated_actions, machines)
     )
 
 
@@ -90,26 +198,57 @@ def evaluate_lengths(
                 max_new_tokens = max(
                     len(trace.target_tokens) for trace in batch.traces
                 ) + 8
+            elif task == "pointer_quicksort":
+                if not isinstance(vocabulary, PointerQuicksortVocabulary):
+                    raise TypeError(
+                        "pointer_quicksort requires PointerQuicksortVocabulary"
+                    )
+                batch = make_pointer_quicksort_batch(
+                    current_batch_size,
+                    int(length),
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    device=device,
+                )
+                max_new_tokens = 0
             else:
                 raise ValueError(f"unsupported sorting task: {task}")
             with autocast_context(device, enabled=use_autocast):
                 logits = model(batch.model_inputs)
                 loss = output_cross_entropy(logits, batch.labels)
-                generated = model.generate(
-                    batch.prompt_ids,
-                    max_new_tokens=max_new_tokens,
-                )
+                if task == "pointer_quicksort":
+                    assert isinstance(batch, PointerQuicksortBatch)
+                    assert isinstance(vocabulary, PointerQuicksortVocabulary)
+                    rollouts = generate_pointer_quicksort_rollouts(
+                        model,
+                        batch,
+                        vocabulary,
+                    )
+                else:
+                    generated = model.generate(
+                        batch.prompt_ids,
+                        max_new_tokens=max_new_tokens,
+                    )
             if task == "direct":
                 metrics = generated_sorting_metrics(
                     batch.values.cpu(),
                     generated.cpu(),
                     vocabulary,
                 )
-            else:
+            elif task == "quicksort_trace":
                 assert isinstance(vocabulary, QuicksortTraceVocabulary)
                 metrics = generated_quicksort_metrics(
                     batch.values.cpu(),
                     generated.cpu(),
+                    vocabulary,
+                    batch.traces,
+                )
+            else:
+                assert isinstance(batch, PointerQuicksortBatch)
+                assert isinstance(vocabulary, PointerQuicksortVocabulary)
+                metrics = generated_pointer_quicksort_metrics(
+                    batch.values.cpu(),
+                    rollouts,
                     vocabulary,
                     batch.traces,
                 )

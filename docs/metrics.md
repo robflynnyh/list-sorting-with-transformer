@@ -17,7 +17,7 @@ so charts should use the project metric `step` as their x-axis.
 
 | Metric | Meaning |
 | --- | --- |
-| `train/loss` | Mean teacher-forced cross-entropy over generated trace and answer tokens. Input and padding tokens are excluded. Lower is better. |
+| `train/loss` | Mean teacher-forced cross-entropy over predicted outputs. Inputs and padding are excluded; executor observations are also excluded for `pointer_quicksort`. Lower is better. |
 | `train/token_accuracy` | Teacher-forced next-token accuracy over the same included tokens. Correct preceding target tokens are supplied to the model. |
 | `train/length` | Mean problem length across the accumulated microbatches in this optimizer update. |
 | `train/minimum_length` | Shortest accumulated microbatch length in this optimizer update. |
@@ -43,17 +43,19 @@ intermediate tokens.
 
 | Metric | Meaning |
 | --- | --- |
-| `exact_match` | The final answer exactly equals the correctly sorted input. Trace correctness is not required. |
-| `trace_exact_match` | Every generated quicksort event and argument exactly matches the deterministic reference trace. |
-| `full_exact_match` | The entire generated trace and final answer exactly match the reference target. |
+| `exact_match` | The final answer exactly equals the correctly sorted input. For `pointer_quicksort`, the executor must also reach a valid `DONE`. |
+| `trace_exact_match` | Every generated quicksort event or pointer action exactly matches the deterministic reference trace. |
+| `full_exact_match` | Both execution trace and final result are exact. |
 | `operation_prefix_fraction` | Fraction of reference operations generated correctly before the first incorrect operation. |
-| `valid_syntax` | The answer after `<ANSWER>` follows the value/comma grammar and ends in `<eos>`. |
+| `valid_syntax` | The answer follows the required grammar. For `pointer_quicksort`, this means the executor reached `DONE` without an invalid action. |
 | `correct_length` | A syntactically valid answer contains the same number of values as the input. |
 | `sorted` | A syntactically valid answer is nondecreasing. It may still contain the wrong values. |
 | `multiset_preserved` | A syntactically valid answer contains exactly the input values with the same multiplicities. It need not be ordered. |
-| `trace_syntax_valid` | The output contains operation-framed trace content followed by an `<ANSWER>` marker. This is weaker than semantic trace correctness. |
-| `target_token_accuracy` | Positional token accuracy of the freely generated final answer. |
-| `full_target_token_accuracy` | Positional token accuracy over the freely generated trace and answer. Insertions or omissions shift later positions, making this deliberately strict. |
+| `trace_syntax_valid` | Generated trace tokens are structurally valid. For pointer traces, all emitted actions must have been accepted by the executor, although execution may be incomplete. |
+| `target_token_accuracy` | Positional token accuracy of the freely generated final answer, or positional action accuracy for `pointer_quicksort`. |
+| `full_target_token_accuracy` | Positional token accuracy over the freely generated trace and answer. It equals action accuracy for `pointer_quicksort`. |
+| `execution_completed` | Pointer executor reached `DONE` without an invalid action. Emitted only for `pointer_quicksort`. |
+| `timed_out` | Pointer executor did not finish within the canonical maximum action count. Emitted only for `pointer_quicksort`. |
 
 ## Teacher-Forced Evaluation
 
@@ -63,8 +65,10 @@ intermediate tokens.
 | `teacher_forced_token_accuracy` | Next-token accuracy under the same teacher-forced condition. |
 
 Teacher-forced metrics measure whether local next-token prediction has been
-learned. They do not show whether the model can execute a complete trace
-autonomously, because free generation can compound an early error.
+learned. For pointer traces, only model actions are scored; gold executor
+observations remain in context. These metrics do not show whether the model can
+execute a complete trace autonomously, because free generation can compound an
+early error.
 
 ## Recommended Dashboard
 

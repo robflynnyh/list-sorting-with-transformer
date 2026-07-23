@@ -42,6 +42,50 @@ QUICKSORT_MARKERS = (
 )
 INDEX_DIGIT_COUNT = 10
 
+POINTER_QUICKSORT_ACTIONS = (
+    "INIT_RANGE",
+    "CHECK_RANGE",
+    "LOAD_PIVOT_LO",
+    "SET_LT_LO",
+    "SET_SCAN_LO",
+    "SET_GT_HI",
+    "CHECK_SCAN_GT",
+    "GET_SCAN",
+    "GET_PIVOT",
+    "BRANCH_LESS",
+    "BRANCH_EQUAL",
+    "BRANCH_GREATER",
+    "SWAP_LT_SCAN",
+    "SWAP_SCAN_GT",
+    "MOVE_LT_RIGHT",
+    "MOVE_SCAN_RIGHT",
+    "MOVE_GT_LEFT",
+    "PARTITION_DONE",
+    "CHECK_RIGHT",
+    "PUSH_RIGHT",
+    "CHECK_LEFT",
+    "PUSH_LEFT",
+    "CHECK_STACK",
+    "POP_RANGE",
+    "DONE",
+)
+POINTER_QUICKSORT_OBSERVATIONS = (
+    "OK",
+    "ACTIVE",
+    "SKIP",
+    "IN_RANGE",
+    "PAST",
+    "NONEMPTY",
+    "EMPTY",
+    "INVALID",
+)
+_POINTER_ACTION_INDEX = {
+    name: index for index, name in enumerate(POINTER_QUICKSORT_ACTIONS)
+}
+_POINTER_OBSERVATION_INDEX = {
+    name: index for index, name in enumerate(POINTER_QUICKSORT_OBSERVATIONS)
+}
+
 
 @dataclass(frozen=True)
 class SymbolVocabulary:
@@ -220,6 +264,86 @@ class QuicksortTraceVocabulary(SymbolVocabulary):
         return " ".join(rendered)
 
 
+@dataclass(frozen=True)
+class PointerQuicksortVocabulary(SymbolVocabulary):
+    """Vocabulary for executor-assisted quicksort without numeric indices."""
+
+    @property
+    def action_token_offset(self) -> int:
+        return VALUE_OFFSET + self.symbol_count
+
+    @property
+    def observation_token_offset(self) -> int:
+        return self.action_token_offset + len(POINTER_QUICKSORT_ACTIONS)
+
+    @property
+    def size(self) -> int:
+        return self.observation_token_offset + len(
+            POINTER_QUICKSORT_OBSERVATIONS
+        )
+
+    @property
+    def action_tokens(self) -> tuple[int, ...]:
+        return tuple(
+            self.action_token_offset + index
+            for index in range(len(POINTER_QUICKSORT_ACTIONS))
+        )
+
+    def action_token(self, name: str) -> int:
+        try:
+            index = _POINTER_ACTION_INDEX[name]
+        except KeyError as error:
+            raise ValueError(f"unknown pointer quicksort action: {name}") from error
+        return self.action_token_offset + index
+
+    def action_name(self, token: int) -> str:
+        index = int(token) - self.action_token_offset
+        if not 0 <= index < len(POINTER_QUICKSORT_ACTIONS):
+            raise ValueError(f"token {token} is not a pointer quicksort action")
+        return POINTER_QUICKSORT_ACTIONS[index]
+
+    def observation_token(self, name: str) -> int:
+        try:
+            index = _POINTER_OBSERVATION_INDEX[name]
+        except KeyError as error:
+            raise ValueError(
+                f"unknown pointer quicksort observation: {name}"
+            ) from error
+        return self.observation_token_offset + index
+
+    def render_tokens(self, tokens: Sequence[int]) -> str:
+        rendered = []
+        for token_value in tokens:
+            token = int(token_value)
+            if token == PAD:
+                rendered.append("<pad>")
+            elif token == BOS:
+                rendered.append("<bos>")
+            elif token == SEP:
+                rendered.append("<pointer_trace>")
+            elif token == EOS:
+                rendered.append("<eos>")
+            elif token == COMMA:
+                rendered.append(",")
+            elif VALUE_OFFSET <= token < VALUE_OFFSET + self.symbol_count:
+                rendered.append(self.render_value(self.token_value(token)))
+            elif self.action_token_offset <= token < self.observation_token_offset:
+                rendered.append(
+                    f"<{POINTER_QUICKSORT_ACTIONS[token - self.action_token_offset]}>"
+                )
+            elif self.observation_token_offset <= token < self.size:
+                rendered.append(
+                    "<"
+                    + POINTER_QUICKSORT_OBSERVATIONS[
+                        token - self.observation_token_offset
+                    ]
+                    + ">"
+                )
+            else:
+                rendered.append(f"<?>[{token}]")
+        return " ".join(rendered)
+
+
 def make_vocabulary(
     task: str,
     *,
@@ -230,6 +354,8 @@ def make_vocabulary(
         return SymbolVocabulary(representation, symbol_count)
     if task == "quicksort_trace":
         return QuicksortTraceVocabulary(representation, symbol_count)
+    if task == "pointer_quicksort":
+        return PointerQuicksortVocabulary(representation, symbol_count)
     raise ValueError(f"unsupported sorting task: {task}")
 
 

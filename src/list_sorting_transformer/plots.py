@@ -47,11 +47,22 @@ def plot_length_generalization(
 ) -> None:
     lengths = sorted(per_length)
     figure, axis = plt.subplots(figsize=(7.5, 4.2))
-    series = (
-        ("exact_match", "Exact match", "#1f5f8b"),
-        ("multiset_preserved", "Same multiset", "#20854e"),
-        ("target_token_accuracy", "Generated-token accuracy", "#b24726"),
-    )
+    if "execution_completed" in per_length[lengths[0]]:
+        series = (
+            ("exact_match", "Exact executed sort", "#1f5f8b"),
+            (
+                "operation_prefix_fraction",
+                "Valid operation prefix",
+                "#20854e",
+            ),
+            ("target_token_accuracy", "Generated-action accuracy", "#b24726"),
+        )
+    else:
+        series = (
+            ("exact_match", "Exact match", "#1f5f8b"),
+            ("multiset_preserved", "Same multiset", "#20854e"),
+            ("target_token_accuracy", "Generated-token accuracy", "#b24726"),
+        )
     for key, label, color in series:
         axis.plot(
             lengths,

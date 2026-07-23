@@ -98,9 +98,17 @@ class LSTMSorter(nn.Module):
         hidden = self.final_norm(self.output_projection(recurrent_hidden))
         return F.linear(hidden, self.token_embedding.weight)
 
+    def forward_with_state(
+        self,
+        token_ids: Tensor,
+        state: tuple[Tensor, Tensor] | None = None,
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
+        recurrent_hidden, new_state = self.lstm(self.embed(token_ids), state)
+        return self.decode_hidden(recurrent_hidden), new_state
+
     def forward(self, token_ids: Tensor) -> Tensor:
-        recurrent_hidden, _ = self.lstm(self.embed(token_ids))
-        return self.decode_hidden(recurrent_hidden)
+        logits, _ = self.forward_with_state(token_ids)
+        return logits
 
     @torch.inference_mode()
     def generate(
@@ -114,8 +122,8 @@ class LSTMSorter(nn.Module):
         if max_new_tokens < 1:
             raise ValueError("max_new_tokens must be positive")
         self.eval()
-        recurrent_hidden, state = self.lstm(self.embed(prompt_ids))
-        next_logits = self.decode_hidden(recurrent_hidden[:, -1:])
+        prompt_logits, state = self.forward_with_state(prompt_ids)
+        next_logits = prompt_logits[:, -1:]
         generated = []
         finished = torch.zeros(
             prompt_ids.shape[0],
@@ -133,9 +141,8 @@ class LSTMSorter(nn.Module):
             finished = finished | next_token.eq(EOS)
             if bool(finished.all()):
                 break
-            recurrent_hidden, state = self.lstm(
-                self.embed(next_token[:, None]),
+            next_logits, state = self.forward_with_state(
+                next_token[:, None],
                 state,
             )
-            next_logits = self.decode_hidden(recurrent_hidden)
         return torch.stack(generated, dim=1)

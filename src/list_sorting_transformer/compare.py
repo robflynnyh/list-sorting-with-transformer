@@ -19,12 +19,15 @@ def load_run(
 ]:
     payload = json.loads(path.read_text())
     representation = payload["train_config"]["representation"]
+    task = payload["train_config"].get("task", "direct")
     architecture = payload.get("architecture", "transformer")
     if architecture == "transformer":
         position_pattern = payload["model_config"]["position_pattern"]
         label = f"{representation} Transformer ({position_pattern})"
     else:
         label = f"{representation} {architecture.upper()}"
+    if task != "direct":
+        label += f", {task.replace('_', ' ')}"
     per_length = {
         int(length): metrics
         for length, metrics in payload["final_per_length"].items()

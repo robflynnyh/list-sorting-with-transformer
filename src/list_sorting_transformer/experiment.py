@@ -13,7 +13,12 @@ from typing import Any
 
 import torch
 
-from .data import make_quicksort_trace_batch, make_sorting_batch, sample_length
+from .data import (
+    make_pointer_quicksort_batch,
+    make_quicksort_trace_batch,
+    make_sorting_batch,
+    sample_length,
+)
 from .evaluate import resolve_device
 from .evaluation import (
     aggregate_length_ranges,
@@ -27,6 +32,7 @@ from .plots import plot_length_generalization, plot_training_history
 from .quicksort import SNAPSHOT_MODES, SnapshotMode
 from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import (
+    PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
     SymbolVocabulary,
     make_vocabulary,
@@ -57,7 +63,7 @@ class TrainConfig:
     checkpoint_interval: int = 1_000
 
     def __post_init__(self) -> None:
-        if self.task not in {"direct", "quicksort_trace"}:
+        if self.task not in {"direct", "quicksort_trace", "pointer_quicksort"}:
             raise ValueError("invalid sorting task")
         if self.representation not in {"alphabet", "numbers"}:
             raise ValueError("invalid representation")
@@ -207,7 +213,7 @@ def train(
                     symbol_count=config.symbol_count,
                     device=device,
                 )
-            else:
+            elif config.task == "quicksort_trace":
                 if not isinstance(vocabulary, QuicksortTraceVocabulary):
                     raise TypeError(
                         "quicksort_trace requires QuicksortTraceVocabulary"
@@ -218,6 +224,18 @@ def train(
                     generator=generator,
                     vocabulary=vocabulary,
                     snapshot_mode=config.trace_snapshot_mode,
+                    device=device,
+                )
+            else:
+                if not isinstance(vocabulary, PointerQuicksortVocabulary):
+                    raise TypeError(
+                        "pointer_quicksort requires PointerQuicksortVocabulary"
+                    )
+                batch = make_pointer_quicksort_batch(
+                    config.batch_size,
+                    length,
+                    generator=generator,
+                    vocabulary=vocabulary,
                     device=device,
                 )
             with autocast_context(device):
@@ -384,7 +402,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--task",
-        choices=("direct", "quicksort_trace"),
+        choices=("direct", "quicksort_trace", "pointer_quicksort"),
         default="direct",
     )
     parser.add_argument(

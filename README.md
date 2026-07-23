@@ -3,10 +3,11 @@
 ![Architecture of the list-sorting Transformer](assets/architecture.svg)
 
 A small, standalone benchmark for training a decoder-only Transformer to sort
-comma-separated symbols, either by predicting the answer directly or by
-generating an instruction-level quicksort execution trace first. The default
-experiment trains on list lengths 2-20 and evaluates every length through 40,
-making the failure or success of length extrapolation explicit.
+comma-separated symbols. A model can predict the answer directly, generate a
+fully textual quicksort trace, or control an executor through relative pointer
+operations. The default experiment trains on list lengths 2-20 and evaluates
+every length through 40, making the failure or success of length extrapolation
+explicit.
 
 ## Task
 
@@ -75,6 +76,49 @@ Trace evaluation reports:
 - `operation_prefix_fraction`: the fraction of operations completed before
   the first invalid operation.
 
+## Executor-Assisted Pointer Traces
+
+The `pointer_quicksort` task removes numeric position arguments entirely.
+Instead, the model emits one dedicated action token at a time while a
+deterministic executor owns the array, pointers, range stack, and mutations.
+The executor appends one observation after every nonterminal action:
+
+```text
+<INIT_RANGE> -> <OK>
+<CHECK_RANGE> -> <ACTIVE>
+<LOAD_PIVOT_LO> -> 3
+<SET_LT_LO> -> <OK>
+<SET_SCAN_LO> -> <OK>
+<SET_GT_HI> -> <OK>
+<CHECK_SCAN_GT> -> <IN_RANGE>
+<GET_SCAN> -> 3
+<GET_PIVOT> -> 3
+<BRANCH_EQUAL> -> <OK>
+<MOVE_SCAN_RIGHT> -> <OK>
+...
+<CHECK_STACK> -> <EMPTY>
+<DONE>
+```
+
+Only action tokens contribute to cross-entropy. Executor observations,
+including fetched values, are supplied as context and masked from the loss.
+During free evaluation the model is restricted to the action vocabulary, each
+action is executed immediately, and the observation is fed back through the
+model's cache before predicting the next action. An action that is invalid for
+the current phase terminates that example.
+
+The final answer is the executor's mutated array rather than a second copy the
+model must regenerate. Exact success therefore requires a valid `DONE` and a
+correctly sorted final state. The canonical program uses three-way quicksort,
+chooses the value at `LO` as pivot, pushes the right child before the left
+child, and never serializes an absolute position.
+
+Render the exact training transcript for a list with:
+
+```bash
+sort-pointer-trace 3,1,2
+```
+
 See the [metrics reference](docs/metrics.md) for every training and evaluation
 metric, its units, and interpretation guidance.
 
@@ -92,9 +136,10 @@ layers alternate between:
 The implementation can also run all-RoPE or all-NoPE ablations through
 `--position-pattern`.
 
-Generation is unconstrained and greedy. Evaluation does not assume valid model
-output: it separately measures exact match, comma syntax, output length,
-monotonic order, multiset preservation, and target-token accuracy.
+Direct and textual-trace generation is unconstrained and greedy. Pointer-trace
+generation is greedy but restricted to action tokens; phase validity is still
+checked by the executor. Evaluation measures exact completion, structural
+validity, partial progress, and token or action accuracy as appropriate.
 
 For an architecture control, `--architecture lstm` replaces the Transformer
 with a 2-layer, hidden-size-256 unidirectional LSTM. Its 0.96M parameters are
@@ -137,12 +182,23 @@ sort-transformer-train \
   --wandb-project list-sorting-with-transformer \
   --wandb-run-name quicksort-trace-numbers-seed7 \
   --output-directory artifacts/quicksort_trace_numbers_seed7
+
+sort-transformer-train \
+  --task pointer_quicksort \
+  --representation numbers \
+  --batch-size 128 \
+  --gradient-accumulation-steps 2 \
+  --eval-batch-size 32 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-quicksort-numbers-seed7 \
+  --output-directory artifacts/pointer_quicksort_numbers_seed7
 ```
 
 Install `.[tracking]` to enable W&B. Long trace runs can use gradient
 accumulation to preserve the effective batch size while limiting the memory
-cost of an unusually long padded trace. Checkpoints include model, optimizer,
-and online-data generator state, and can be resumed with:
+cost of an unusually long padded trace. Pointer traces are generated as flat
+token and mask arrays without per-operation objects. Checkpoints include model,
+optimizer, and online-data generator state, and can be resumed with:
 
 ```bash
 sort-transformer-train \

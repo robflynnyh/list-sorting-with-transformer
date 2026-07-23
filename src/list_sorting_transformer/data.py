@@ -7,6 +7,10 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
+from .pointer_quicksort import (
+    PointerQuicksortTrace,
+    generate_pointer_quicksort_trace,
+)
 from .quicksort import QuicksortTrace, SnapshotMode, generate_quicksort_trace
 from .tokens import (
     BOS,
@@ -15,6 +19,7 @@ from .tokens import (
     PAD,
     SEP,
     VALUE_OFFSET,
+    PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
 )
 
@@ -46,6 +51,24 @@ class QuicksortTraceBatch:
     length: int
     prompt_length: int
     traces: tuple[QuicksortTrace, ...]
+
+    @property
+    def model_inputs(self) -> Tensor:
+        return self.token_ids[:, :-1]
+
+    @property
+    def prompt_ids(self) -> Tensor:
+        return self.token_ids[:, : self.prompt_length]
+
+
+@dataclass(frozen=True)
+class PointerQuicksortBatch:
+    token_ids: Tensor
+    labels: Tensor
+    values: Tensor
+    length: int
+    prompt_length: int
+    traces: tuple[PointerQuicksortTrace, ...]
 
     @property
     def model_inputs(self) -> Tensor:
@@ -158,6 +181,71 @@ def make_quicksort_trace_batch(
         labels = labels.to(device)
         values = values.to(device)
     return QuicksortTraceBatch(
+        token_ids=token_ids,
+        labels=labels,
+        values=values,
+        length=length,
+        prompt_length=prompt_length,
+        traces=traces,
+    )
+
+
+def make_pointer_quicksort_batch(
+    batch_size: int,
+    length: int,
+    *,
+    generator: torch.Generator,
+    vocabulary: PointerQuicksortVocabulary,
+    device: torch.device | str | None = None,
+) -> PointerQuicksortBatch:
+    """Generate pointer-machine transcripts and mask executor observations."""
+
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    if length < 1:
+        raise ValueError("length must be positive")
+    values = torch.randint(
+        0,
+        vocabulary.symbol_count,
+        (batch_size, length),
+        generator=generator,
+    )
+    value_rows = values.tolist()
+    traces = tuple(
+        generate_pointer_quicksort_trace(row, vocabulary)
+        for row in value_rows
+    )
+    prompts = tuple(vocabulary.encode_prompt(row) for row in value_rows)
+    prompt_length = len(prompts[0])
+    sequence_length = max(
+        prompt_length + len(trace.target_tokens)
+        for trace in traces
+    )
+    token_ids = torch.full(
+        (batch_size, sequence_length),
+        PAD,
+        dtype=torch.long,
+    )
+    prediction_mask = torch.zeros(
+        (batch_size, sequence_length),
+        dtype=torch.bool,
+    )
+    for row_index, (prompt, trace) in enumerate(zip(prompts, traces)):
+        example = [*prompt, *trace.target_tokens]
+        token_ids[row_index, : len(example)] = torch.tensor(example)
+        target_end = prompt_length + len(trace.target_tokens)
+        prediction_mask[row_index, prompt_length:target_end] = torch.tensor(
+            trace.target_prediction_mask,
+            dtype=torch.bool,
+        )
+
+    labels = token_ids[:, 1:].clone()
+    labels[~prediction_mask[:, 1:]] = IGNORE_INDEX
+    if device is not None:
+        token_ids = token_ids.to(device)
+        labels = labels.to(device)
+        values = values.to(device)
+    return PointerQuicksortBatch(
         token_ids=token_ids,
         labels=labels,
         values=values,
