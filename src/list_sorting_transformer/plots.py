@@ -47,7 +47,8 @@ def plot_length_generalization(
 ) -> None:
     lengths = sorted(per_length)
     figure, axis = plt.subplots(figsize=(7.5, 4.2))
-    if "execution_completed" in per_length[lengths[0]]:
+    first_metrics = per_length[lengths[0]]
+    if "execution_completed" in first_metrics:
         series = (
             ("exact_match", "Exact executed sort", "#1f5f8b"),
             (
@@ -56,6 +57,12 @@ def plot_length_generalization(
                 "#20854e",
             ),
             ("target_token_accuracy", "Generated-action accuracy", "#b24726"),
+        )
+    elif "next_value_accuracy" in first_metrics:
+        series = (
+            ("exact_match", "Exact next value", "#1f5f8b"),
+            ("next_value_accuracy", "Next-value token", "#20854e"),
+            ("target_token_accuracy", "Generated-token accuracy", "#b24726"),
         )
     else:
         series = (
