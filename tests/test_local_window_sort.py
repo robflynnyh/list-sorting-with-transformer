@@ -12,6 +12,8 @@ from list_sorting_transformer.evaluation import (
 from list_sorting_transformer.local_window_sort import (
     LocalWindowSortMachine,
     LocalWindowSortRollout,
+    LocalWindowSortTrace,
+    LocalWindowTransition,
     generate_local_window_sort_trace,
 )
 from list_sorting_transformer.metrics import (
@@ -79,6 +81,22 @@ def test_local_window_tracks_pointer_and_boundaries() -> None:
     assert event == "RESET"
     assert vocabulary.render_tokens(response) == (
         "<WINDOW> <NEW_PASS> <PASS_CLEAN> <LEFT_EDGE> "
+        "<PTR> 1 2 <ACTIVE_END> <WINDOW_END>"
+    )
+
+
+def test_wrong_comparison_decision_continues_execution() -> None:
+    vocabulary = LocalWindowSortVocabulary()
+    machine = LocalWindowSortMachine([3, 1, 2], vocabulary)
+
+    event, response = machine.step(vocabulary.action_token("KEEP"))
+
+    assert event == "KEEP"
+    assert machine.valid
+    assert not machine.halted
+    assert machine.array == [3, 1, 2]
+    assert vocabulary.render_tokens(response) == (
+        "<WINDOW> <ADVANCE> <PASS_CLEAN> 3 "
         "<PTR> 1 2 <ACTIVE_END> <WINDOW_END>"
     )
 
@@ -208,6 +226,122 @@ def test_local_window_scripted_policy_handles_assistance_modes() -> None:
         assert metrics["exact_match"] == 1.0
         assert metrics["window_exact_match"] == 1.0
         assert metrics["window_token_accuracy"] == 1.0
+
+
+def test_rollout_generates_a_window_after_a_wrong_decision() -> None:
+    vocabulary = LocalWindowSortVocabulary()
+    batch = make_local_window_sort_batch(
+        1,
+        5,
+        generator=torch.Generator().manual_seed(101),
+        vocabulary=vocabulary,
+        tool_events=(),
+    )
+    values = batch.values[0].tolist()
+    machine = LocalWindowSortMachine(values, vocabulary)
+    transitions = []
+    actions = []
+    first_action = machine.expected_action()
+    wrong_action = vocabulary.action_token(
+        "KEEP"
+        if vocabulary.action_name(first_action) == "SWAP"
+        else "SWAP"
+    )
+
+    for _ in range(100):
+        if machine.halted:
+            break
+        action = wrong_action if not actions else machine.expected_action()
+        event, response = machine.step(action)
+        transitions.append(
+            LocalWindowTransition(
+                action_token=action,
+                response_event=event,
+                response_tokens=response,
+            )
+        )
+        actions.append(action)
+    assert machine.halted
+    scripted_trace = LocalWindowSortTrace(
+        input_values=tuple(values),
+        initial_window_tokens=batch.traces[0].initial_window_tokens,
+        transitions=tuple(transitions),
+        action_tokens=tuple(actions),
+        final_values=tuple(machine.array),
+    )
+    model = ScriptedLocalWindowPolicy((scripted_trace,), vocabulary)
+
+    rollout = generate_local_window_sort_rollouts(
+        model,  # type: ignore[arg-type]
+        batch,
+        vocabulary,
+        tool_events=(),
+    )[0]
+
+    assert rollout.action_tokens[0] == wrong_action
+    assert rollout.valid_execution
+    assert rollout.completed
+    assert rollout.generated_window_tokens
+    assert (
+        rollout.generated_window_tokens[0]
+        == rollout.expected_window_tokens[0]
+    )
+    metrics = generated_local_window_sort_metrics(
+        batch.values,
+        [rollout],
+        batch.traces,
+    )
+    assert metrics["valid_syntax"] == 1.0
+    assert metrics["window_exact_match"] == 1.0
+    assert metrics["trace_exact_match"] == 0.0
+
+
+def test_looping_policy_stops_at_the_action_budget() -> None:
+    vocabulary = LocalWindowSortVocabulary()
+    batch = make_local_window_sort_batch(
+        1,
+        3,
+        generator=torch.Generator().manual_seed(103),
+        vocabulary=vocabulary,
+        tool_events=(),
+    )
+    values = batch.values[0].tolist()
+    machine = LocalWindowSortMachine(values, vocabulary)
+    transitions = []
+    actions = []
+    for _ in range(5):
+        action = vocabulary.action_token("SWAP")
+        event, response = machine.step(action)
+        transitions.append(
+            LocalWindowTransition(
+                action_token=action,
+                response_event=event,
+                response_tokens=response,
+            )
+        )
+        actions.append(action)
+    scripted_trace = LocalWindowSortTrace(
+        input_values=tuple(values),
+        initial_window_tokens=batch.traces[0].initial_window_tokens,
+        transitions=tuple(transitions),
+        action_tokens=tuple(actions),
+        final_values=tuple(machine.array),
+    )
+    model = ScriptedLocalWindowPolicy((scripted_trace,), vocabulary)
+
+    rollout = generate_local_window_sort_rollouts(
+        model,  # type: ignore[arg-type]
+        batch,
+        vocabulary,
+        tool_events=(),
+        max_actions=5,
+    )[0]
+
+    assert rollout.valid_execution
+    assert not rollout.completed
+    assert rollout.timed_out
+    assert len(rollout.action_tokens) == 5
+    assert len(rollout.generated_window_tokens) == 5
 
 
 def test_local_window_metrics_require_generated_windows_to_match() -> None:

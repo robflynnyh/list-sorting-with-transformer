@@ -154,24 +154,32 @@ class LocalWindowSortMachine:
 
         if self.halted:
             raise RuntimeError("cannot execute an action after halt")
-        expected = self.expected_action()
-        if int(action_token) != expected:
-            try:
-                received = self.vocabulary.action_name(int(action_token))
-            except ValueError:
-                received = f"token {int(action_token)}"
+
+        if self.ready_to_finish:
+            expected = self.vocabulary.action_token("DONE")
+            if int(action_token) != expected:
+                try:
+                    received = self.vocabulary.action_name(int(action_token))
+                except ValueError:
+                    received = f"token {int(action_token)}"
+                self.last_error = f"expected DONE, received {received}"
+                self.valid = False
+                return None, ()
+            self.completed = True
+            return None, ()
+
+        try:
+            action_name = self.vocabulary.action_name(int(action_token))
+        except ValueError:
+            action_name = ""
+        if action_name not in {"KEEP", "SWAP"}:
+            received = action_name or f"token {int(action_token)}"
             self.last_error = (
-                f"expected {self.vocabulary.action_name(expected)}, "
-                f"received {received}"
+                f"expected KEEP or SWAP, received {received}"
             )
             self.valid = False
             return None, ()
 
-        if self.ready_to_finish:
-            self.completed = True
-            return None, ()
-
-        action_name = self.vocabulary.action_name(action_token)
         if action_name == "SWAP":
             self.array[self.cursor], self.array[self.cursor + 1] = (
                 self.array[self.cursor + 1],

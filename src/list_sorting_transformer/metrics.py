@@ -384,8 +384,7 @@ def generated_local_window_sort_metrics(
             raise ValueError("required_window_count must be nonnegative")
 
         generated_windows_exact = (
-            rollout.required_window_count
-            == len(rollout.generated_window_tokens)
+            len(rollout.generated_window_tokens)
             == len(rollout.expected_window_tokens)
             and all(
                 generated == expected
@@ -393,6 +392,10 @@ def generated_local_window_sort_metrics(
                     rollout.generated_window_tokens,
                     rollout.expected_window_tokens,
                 )
+            )
+            and (
+                bool(rollout.generated_window_tokens)
+                or rollout.required_window_count == 0
             )
         )
         totals["window_exact_match"] += float(generated_windows_exact)
@@ -467,14 +470,15 @@ def generated_local_window_sort_metrics(
                 len(expected_window) - len(generated_window),
                 0,
             )
-        unmatched_window_count = (
-            max(
-                rollout.required_window_count,
-                len(rollout.generated_window_tokens),
-                len(rollout.expected_window_tokens),
-            )
-            - compared_window_count
+        encountered_window_count = max(
+            len(rollout.generated_window_tokens),
+            len(rollout.expected_window_tokens),
         )
+        unmatched_window_count = (
+            encountered_window_count - compared_window_count
+        )
+        if encountered_window_count == 0:
+            unmatched_window_count = rollout.required_window_count
         window_transition_total += unmatched_window_count
         window_token_total += unmatched_window_count * WINDOW_TOKEN_LENGTH
         generated_window_total += len(rollout.generated_window_tokens)

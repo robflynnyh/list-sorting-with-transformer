@@ -236,6 +236,13 @@ to the same KV cache. Consequently, assistance can be changed per event
 without changing the protocol, and trace length remains quadratic rather than
 becoming cubic from repeatedly emitting the complete list.
 
+While a pair is active, both `KEEP` and `SWAP` are executable commands. The
+executor applies the model's choice and returns the resulting window even when
+that choice differs from the canonical bubble-sort action. Such a rollout can
+continue, finish with an incorrectly sorted list, or recover later. A fixed
+quadratic action budget force-stops policies that repeatedly swap and never
+reach `DONE`; these runs report `timed_out = 1`.
+
 See the [metrics reference](docs/metrics.md) for every training and evaluation
 metric, its units, and interpretation guidance.
 

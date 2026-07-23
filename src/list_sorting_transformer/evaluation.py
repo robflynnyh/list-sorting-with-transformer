@@ -320,7 +320,8 @@ def generate_local_window_sort_rollouts(
         allowed = ", ".join(WINDOW_TOOL_EVENTS)
         raise ValueError(f"tool_events may only contain {allowed}")
     if max_actions is None:
-        max_actions = max(len(trace.action_tokens) for trace in batch.traces)
+        normal_budget = batch.length * (batch.length - 1) // 2 + 2
+        max_actions = normal_budget + 2 * batch.length
     if max_actions < 1:
         raise ValueError("max_actions must be positive")
 
