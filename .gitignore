@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.scratch/
+*.egg-info/
+artifacts/**/*.pt
+artifacts/**/run.log
+

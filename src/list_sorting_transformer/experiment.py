@@ -1,0 +1,370 @@
+"""Train a decoder-only Transformer to autoregressively sort symbol lists."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import random
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+import torch
+
+from .data import make_sorting_batch, sample_length
+from .evaluate import resolve_device
+from .evaluation import (
+    aggregate_length_ranges,
+    autocast_context,
+    evaluate_lengths,
+    output_cross_entropy,
+)
+from .metrics import masked_token_accuracy
+from .model import DecoderTransformer, ModelConfig
+from .plots import plot_length_generalization, plot_training_history
+from .tokens import SymbolVocabulary
+
+
+@dataclass(frozen=True)
+class TrainConfig:
+    representation: str = "numbers"
+    symbol_count: int = 10
+    train_min_length: int = 2
+    train_max_length: int = 20
+    eval_max_length: int = 40
+    steps: int = 10_000
+    batch_size: int = 256
+    learning_rate: float = 3e-4
+    weight_decay: float = 0.01
+    warmup_steps: int = 500
+    gradient_clip: float = 1.0
+    log_interval: int = 50
+    eval_interval: int = 1_000
+    eval_examples: int = 128
+    eval_batch_size: int = 128
+    seed: int = 7
+
+    def __post_init__(self) -> None:
+        if self.representation not in {"alphabet", "numbers"}:
+            raise ValueError("invalid representation")
+        if not 1 <= self.train_min_length <= self.train_max_length:
+            raise ValueError("invalid training length range")
+        if self.eval_max_length < self.train_max_length:
+            raise ValueError("eval_max_length must include the training range")
+        integer_fields = (
+            self.steps,
+            self.batch_size,
+            self.log_interval,
+            self.eval_interval,
+            self.eval_examples,
+            self.eval_batch_size,
+        )
+        if any(value < 1 for value in integer_fields):
+            raise ValueError("step, batch, logging, and evaluation sizes must be positive")
+        if not 0 <= self.warmup_steps <= self.steps:
+            raise ValueError("warmup_steps must be between zero and steps")
+        if self.learning_rate <= 0 or self.weight_decay < 0:
+            raise ValueError("optimizer settings are invalid")
+        if self.gradient_clip <= 0:
+            raise ValueError("gradient_clip must be positive")
+
+
+def learning_rate_at_step(config: TrainConfig, step: int) -> float:
+    if config.warmup_steps and step <= config.warmup_steps:
+        return config.learning_rate * step / config.warmup_steps
+    decay_steps = max(config.steps - config.warmup_steps, 1)
+    progress = min(max((step - config.warmup_steps) / decay_steps, 0.0), 1.0)
+    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return config.learning_rate * (0.1 + 0.9 * cosine)
+
+
+def selected_evaluation_lengths(config: TrainConfig) -> list[int]:
+    midpoint = (config.train_min_length + config.train_max_length) // 2
+    candidates = {
+        config.train_min_length,
+        midpoint,
+        config.train_max_length,
+        min(config.eval_max_length, config.train_max_length + 5),
+        config.eval_max_length,
+    }
+    return sorted(candidates)
+
+
+def save_checkpoint(
+    path: Path,
+    *,
+    model: DecoderTransformer,
+    optimizer: torch.optim.Optimizer,
+    train_config: TrainConfig,
+    step: int,
+) -> None:
+    torch.save(
+        {
+            "model_config": model.config.as_dict(),
+            "train_config": asdict(train_config),
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "step": step,
+        },
+        path,
+    )
+
+
+def train(
+    model: DecoderTransformer,
+    config: TrainConfig,
+    *,
+    vocabulary: SymbolVocabulary,
+    output_directory: Path,
+    device: torch.device,
+) -> dict[str, object]:
+    output_directory.mkdir(parents=True, exist_ok=True)
+    torch.manual_seed(config.seed)
+    random.seed(config.seed)
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(config.seed)
+        torch.set_float32_matmul_precision("high")
+
+    generator = torch.Generator().manual_seed(config.seed + 1)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
+        betas=(0.9, 0.95),
+    )
+    history = []
+    evaluations = []
+    started_at = time.monotonic()
+    model.train()
+    for step in range(1, config.steps + 1):
+        length = sample_length(
+            config.train_min_length,
+            config.train_max_length,
+            generator=generator,
+        )
+        batch = make_sorting_batch(
+            config.batch_size,
+            length,
+            generator=generator,
+            symbol_count=config.symbol_count,
+            device=device,
+        )
+        current_learning_rate = learning_rate_at_step(config, step)
+        for parameter_group in optimizer.param_groups:
+            parameter_group["lr"] = current_learning_rate
+        optimizer.zero_grad(set_to_none=True)
+        with autocast_context(device):
+            logits = model(batch.model_inputs)
+            loss = output_cross_entropy(logits, batch.labels)
+        loss.backward()
+        gradient_norm = torch.nn.utils.clip_grad_norm_(
+            model.parameters(),
+            config.gradient_clip,
+        )
+        optimizer.step()
+
+        if step == 1 or step % config.log_interval == 0:
+            row = {
+                "step": float(step),
+                "length": float(length),
+                "loss": float(loss.item()),
+                "token_accuracy": masked_token_accuracy(logits, batch.labels),
+                "learning_rate": current_learning_rate,
+                "gradient_norm": float(gradient_norm),
+                "elapsed_seconds": time.monotonic() - started_at,
+            }
+            history.append(row)
+            print(json.dumps(row), flush=True)
+
+        if step % config.eval_interval == 0 or step == config.steps:
+            per_length = evaluate_lengths(
+                model,
+                vocabulary,
+                selected_evaluation_lengths(config),
+                examples_per_length=config.eval_examples,
+                batch_size=config.eval_batch_size,
+                seed=config.seed + 20_000,
+                device=device,
+            )
+            evaluation_row = {
+                "step": step,
+                "per_length": {
+                    str(eval_length): metrics
+                    for eval_length, metrics in per_length.items()
+                },
+            }
+            evaluations.append(evaluation_row)
+            print(
+                json.dumps(
+                    {
+                        "step": step,
+                        "evaluation_exact_match": {
+                            str(eval_length): metrics["exact_match"]
+                            for eval_length, metrics in per_length.items()
+                        },
+                    }
+                ),
+                flush=True,
+            )
+            model.train()
+
+    checkpoint_path = output_directory / "checkpoint.pt"
+    save_checkpoint(
+        checkpoint_path,
+        model=model,
+        optimizer=optimizer,
+        train_config=config,
+        step=config.steps,
+    )
+    final_lengths = range(config.train_min_length, config.eval_max_length + 1)
+    final_per_length = evaluate_lengths(
+        model,
+        vocabulary,
+        final_lengths,
+        examples_per_length=config.eval_examples,
+        batch_size=config.eval_batch_size,
+        seed=config.seed + 30_000,
+        device=device,
+    )
+    results = {
+        "model_config": model.config.as_dict(),
+        "train_config": asdict(config),
+        "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
+        "wall_time_seconds": time.monotonic() - started_at,
+        "history": history,
+        "intermediate_evaluations": evaluations,
+        "final_per_length": {
+            str(length): metrics
+            for length, metrics in final_per_length.items()
+        },
+        "final_aggregate": aggregate_length_ranges(
+            final_per_length,
+            train_min_length=config.train_min_length,
+            train_max_length=config.train_max_length,
+        ),
+    }
+    (output_directory / "metrics.json").write_text(
+        json.dumps(results, indent=2, sort_keys=True) + "\n"
+    )
+    plot_training_history(history, output_directory / "training.png")
+    plot_length_generalization(
+        final_per_length,
+        output_directory / "length_generalization.png",
+        train_max_length=config.train_max_length,
+    )
+    return results
+
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--representation",
+        choices=("alphabet", "numbers"),
+        default="numbers",
+    )
+    parser.add_argument("--symbol-count", type=int, default=10)
+    parser.add_argument("--train-min-length", type=int, default=2)
+    parser.add_argument("--train-max-length", type=int, default=20)
+    parser.add_argument("--eval-max-length", type=int, default=40)
+    parser.add_argument("--steps", type=int, default=10_000)
+    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument("--weight-decay", type=float, default=0.01)
+    parser.add_argument("--warmup-steps", type=int, default=500)
+    parser.add_argument("--gradient-clip", type=float, default=1.0)
+    parser.add_argument("--log-interval", type=int, default=50)
+    parser.add_argument("--eval-interval", type=int, default=1_000)
+    parser.add_argument("--eval-examples", type=int, default=128)
+    parser.add_argument("--eval-batch-size", type=int, default=128)
+    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--d-model", type=int, default=128)
+    parser.add_argument("--n-layers", type=int, default=4)
+    parser.add_argument("--n-heads", type=int, default=4)
+    parser.add_argument("--ffn-multiplier", type=float, default=4.0)
+    parser.add_argument("--dropout", type=float, default=0.0)
+    parser.add_argument(
+        "--position-pattern",
+        choices=("alternating", "rotary", "none"),
+        default="alternating",
+    )
+    parser.add_argument("--rotary-base", type=float, default=10_000.0)
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--output-directory", type=Path)
+    return parser
+
+
+def main() -> None:
+    args = build_argument_parser().parse_args()
+    train_config = TrainConfig(
+        representation=args.representation,
+        symbol_count=args.symbol_count,
+        train_min_length=args.train_min_length,
+        train_max_length=args.train_max_length,
+        eval_max_length=args.eval_max_length,
+        steps=args.steps,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        warmup_steps=args.warmup_steps,
+        gradient_clip=args.gradient_clip,
+        log_interval=args.log_interval,
+        eval_interval=args.eval_interval,
+        eval_examples=args.eval_examples,
+        eval_batch_size=args.eval_batch_size,
+        seed=args.seed,
+    )
+    vocabulary = SymbolVocabulary(
+        representation=train_config.representation,
+        symbol_count=train_config.symbol_count,
+    )
+    model_config = ModelConfig(
+        vocab_size=vocabulary.size,
+        symbol_count=train_config.symbol_count,
+        representation=train_config.representation,
+        d_model=args.d_model,
+        n_layers=args.n_layers,
+        n_heads=args.n_heads,
+        ffn_multiplier=args.ffn_multiplier,
+        dropout=args.dropout,
+        position_pattern=args.position_pattern,
+        rotary_base=args.rotary_base,
+    )
+    torch.manual_seed(train_config.seed)
+    model = DecoderTransformer(model_config)
+    device = resolve_device(args.device)
+    model.to(device)
+    output_directory = args.output_directory
+    if output_directory is None:
+        output_directory = Path(
+            f"artifacts/{train_config.representation}_"
+            f"{model_config.position_pattern}_seed{train_config.seed}"
+        )
+    metadata = {
+        "device": str(device),
+        "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
+        "layer_position_modes": model.layer_position_modes,
+        "output_directory": str(output_directory),
+    }
+    print(json.dumps(metadata), flush=True)
+    results = train(
+        model,
+        train_config,
+        vocabulary=vocabulary,
+        output_directory=output_directory,
+        device=device,
+    )
+    print(
+        json.dumps(
+            {
+                "completed": True,
+                "output_directory": str(output_directory),
+                "aggregate": results["final_aggregate"],
+            }
+        ),
+        flush=True,
+    )
+
+
+if __name__ == "__main__":
+    main()

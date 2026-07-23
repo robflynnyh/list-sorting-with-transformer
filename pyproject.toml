@@ -1,0 +1,31 @@
+[project]
+name = "list-sorting-with-transformer"
+version = "0.1.0"
+description = "A decoder-only Transformer benchmark for sorting digit lists."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "matplotlib>=3.7",
+    "torch>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+
+[project.scripts]
+sort-transformer-train = "list_sorting_transformer.experiment:main"
+sort-transformer-eval = "list_sorting_transformer.evaluate:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+

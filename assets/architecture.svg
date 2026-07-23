@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title description">
+  <title id="title">List sorting Transformer architecture</title>
+  <desc id="description">Number and alphabet inputs flow through token embeddings into a four-layer causal decoder alternating rotary and no positional encoding, then generate a sorted list.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#40464d"/>
+    </marker>
+    <style>
+      .title { font: 700 28px Inter, Arial, sans-serif; fill: #182027; }
+      .heading { font: 700 17px Inter, Arial, sans-serif; fill: #182027; }
+      .body { font: 500 15px Inter, Arial, sans-serif; fill: #303941; }
+      .small { font: 500 13px Inter, Arial, sans-serif; fill: #4c5660; }
+      .mono { font: 600 17px "SFMono-Regular", Consolas, monospace; fill: #182027; }
+      .arrow { stroke: #40464d; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1200" height="560" fill="#ffffff"/>
+  <text x="48" y="48" class="title">Autoregressive list sorting with alternating position rules</text>
+  <text x="48" y="76" class="body">One causal decoder, two ways to represent the same ordered vocabulary</text>
+
+  <rect x="48" y="112" width="300" height="150" rx="8" fill="#edf6f2" stroke="#2f7255" stroke-width="2"/>
+  <text x="70" y="143" class="heading">Numbers</text>
+  <text x="70" y="177" class="mono">8,2,5,2 =</text>
+  <rect x="70" y="198" width="252" height="40" rx="6" fill="#ffffff" stroke="#8bb8a2"/>
+  <text x="86" y="224" class="small">token embedding + scalar value [-1, 1]</text>
+
+  <rect x="48" y="294" width="300" height="150" rx="8" fill="#f7f1e8" stroke="#a76525" stroke-width="2"/>
+  <text x="70" y="325" class="heading">Alphabet</text>
+  <text x="70" y="359" class="mono">i,c,f,c =</text>
+  <rect x="70" y="380" width="252" height="40" rx="6" fill="#ffffff" stroke="#d2ad86"/>
+  <text x="86" y="406" class="small">token embedding only; order is learned</text>
+
+  <path d="M 348 187 C 390 187, 390 252, 432 252" class="arrow"/>
+  <path d="M 348 369 C 390 369, 390 292, 432 292" class="arrow"/>
+
+  <rect x="434" y="112" width="356" height="332" rx="8" fill="#f5f6f7" stroke="#68737d" stroke-width="2"/>
+  <text x="456" y="143" class="heading">Shared causal decoder</text>
+  <text x="456" y="168" class="small">masked self-attention + SwiGLU in every layer</text>
+
+  <rect x="468" y="192" width="288" height="46" rx="6" fill="#e8eef8" stroke="#456a9d"/>
+  <text x="493" y="221" class="body">Layer 1</text>
+  <text x="660" y="221" class="heading">RoPE</text>
+
+  <path d="M 612 238 L 612 253" class="arrow"/>
+  <rect x="468" y="257" width="288" height="46" rx="6" fill="#f1eaf5" stroke="#755181"/>
+  <text x="493" y="286" class="body">Layer 2</text>
+  <text x="660" y="286" class="heading">NoPE</text>
+
+  <path d="M 612 303 L 612 318" class="arrow"/>
+  <rect x="468" y="322" width="288" height="46" rx="6" fill="#e8eef8" stroke="#456a9d"/>
+  <text x="493" y="351" class="body">Layer 3</text>
+  <text x="660" y="351" class="heading">RoPE</text>
+
+  <path d="M 612 368 L 612 383" class="arrow"/>
+  <rect x="468" y="387" width="288" height="46" rx="6" fill="#f1eaf5" stroke="#755181"/>
+  <text x="493" y="416" class="body">Layer 4</text>
+  <text x="660" y="416" class="heading">NoPE</text>
+
+  <path d="M 790 278 L 854 278" class="arrow"/>
+
+  <rect x="856" y="112" width="296" height="332" rx="8" fill="#fff8e4" stroke="#a27a14" stroke-width="2"/>
+  <text x="878" y="143" class="heading">Autoregressive output</text>
+  <text x="878" y="181" class="mono">2,2,5,8 &lt;eos&gt;</text>
+  <line x1="878" y1="201" x2="1130" y2="201" stroke="#d8c486"/>
+  <text x="878" y="233" class="small">Cross-entropy begins after "="</text>
+  <text x="878" y="270" class="heading">Strict evaluation</text>
+  <circle cx="886" cy="301" r="4" fill="#a27a14"/>
+  <text x="900" y="306" class="body">exact sequence match</text>
+  <circle cx="886" cy="335" r="4" fill="#a27a14"/>
+  <text x="900" y="340" class="body">sorted output</text>
+  <circle cx="886" cy="369" r="4" fill="#a27a14"/>
+  <text x="900" y="374" class="body">multiset preserved</text>
+  <circle cx="886" cy="403" r="4" fill="#a27a14"/>
+  <text x="900" y="408" class="body">valid comma grammar</text>
+
+  <rect x="48" y="478" width="1104" height="48" rx="6" fill="#f7f8f9" stroke="#c5cbd0"/>
+  <text x="70" y="508" class="body">Train on lengths 2-20</text>
+  <path d="M 258 502 L 383 502" class="arrow"/>
+  <text x="408" y="508" class="body">evaluate every length independently</text>
+  <path d="M 711 502 L 836 502" class="arrow"/>
+  <text x="860" y="508" class="body">measure extrapolation through length 40</text>
+</svg>
