@@ -68,6 +68,13 @@ def main() -> None:
     trace_snapshot_mode = str(
         train_config.get("trace_snapshot_mode", "partition")
     )
+    window_tool_events = tuple(
+        str(event)
+        for event in train_config.get(
+            "window_tool_events",
+            ("KEEP", "SWAP", "RESET", "FINISH"),
+        )
+    )
     vocabulary = make_vocabulary(
         task,
         representation=config.representation,
@@ -84,6 +91,7 @@ def main() -> None:
         device=device,
         task=task,
         trace_snapshot_mode=trace_snapshot_mode,
+        window_tool_events=window_tool_events,
     )
     train_min_length = int(train_config.get("train_min_length", min(lengths)))
     train_max_length = int(train_config.get("train_max_length", max(lengths)))
@@ -92,6 +100,7 @@ def main() -> None:
         "step": checkpoint.get("step"),
         "task": task,
         "trace_snapshot_mode": trace_snapshot_mode,
+        "window_tool_events": list(window_tool_events),
         "model_config": config.as_dict(),
         "train_length_range": [train_min_length, train_max_length],
         "per_length": {str(length): metrics for length, metrics in per_length.items()},

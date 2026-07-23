@@ -199,6 +199,43 @@ Render this protocol with:
 sort-adjacent-trace --auto-advance 3,1,2
 ```
 
+### Local-Window Tool Ablation
+
+`adjacent_sort_local_window` keeps the original list at the beginning of one
+growing autoregressive context, then appends a fixed nine-token window after
+each comparison. `PTR` marks the active pair; the other value slots expose its
+left neighbor and one-item right lookahead. `ACTIVE_END` hides the completed
+suffix, while the transition and pass-status tokens make cursor movement
+explicit:
+
+```text
+<bos> 3 , 1 , 2 <local_window_trace>
+<WINDOW> <INITIAL> <PASS_CLEAN> <LEFT_EDGE> <PTR> 3 1 2 <WINDOW_END>
+<SWAP>
+<WINDOW> <ADVANCE> <PASS_CHANGED> 1 <PTR> 3 2 <ACTIVE_END> <WINDOW_END>
+<SWAP>
+<WINDOW> <NEW_PASS> <PASS_CLEAN> <LEFT_EDGE> <PTR> 1 2 <ACTIVE_END> <WINDOW_END>
+<KEEP>
+<WINDOW> <FINISHED> <PASS_CLEAN> <LEFT_EDGE> <NO_PTR> 1 2 3 <WINDOW_END>
+<DONE>
+```
+
+The initial window is always part of the prompt. For later windows, each
+transition category can independently use the executor or model:
+
+| `--window-tool-events` | Executor-generated windows |
+| --- | --- |
+| `KEEP,SWAP,RESET,FINISH` | Every post-action window |
+| `KEEP,RESET,FINISH` | All except in-pass windows after `SWAP` |
+| `RESET,FINISH` | Pass-boundary and terminal windows only |
+| `none` | No post-action windows |
+
+The executor always keeps a shadow list for verification. Model-generated and
+executor-supplied windows have exactly the same token format and are appended
+to the same KV cache. Consequently, assistance can be changed per event
+without changing the protocol, and trace length remains quadratic rather than
+becoming cubic from repeatedly emitting the complete list.
+
 See the [metrics reference](docs/metrics.md) for every training and evaluation
 metric, its units, and interpretation guidance.
 
@@ -323,6 +360,28 @@ sort-transformer-train \
   --wandb-project list-sorting-with-transformer \
   --wandb-run-name adjacent-sort-auto-advance-no-tool-numbers-seed7 \
   --output-directory artifacts/adjacent_sort_auto_advance_no_tool_numbers_seed7
+
+sort-transformer-train \
+  --task adjacent_sort_local_window \
+  --window-tool-events KEEP,SWAP,RESET,FINISH \
+  --representation numbers \
+  --batch-size 32 \
+  --gradient-accumulation-steps 4 \
+  --eval-batch-size 16 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name adjacent-sort-local-window-all-tool-seed7 \
+  --output-directory artifacts/adjacent_sort_local_window_all_tool_seed7
+
+sort-transformer-train \
+  --task adjacent_sort_local_window \
+  --window-tool-events none \
+  --representation numbers \
+  --batch-size 32 \
+  --gradient-accumulation-steps 4 \
+  --eval-batch-size 16 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name adjacent-sort-local-window-no-tool-seed7 \
+  --output-directory artifacts/adjacent_sort_local_window_no_tool_seed7
 ```
 
 Install `.[tracking]` to enable W&B. Long trace runs can use gradient

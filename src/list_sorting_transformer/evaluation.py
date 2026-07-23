@@ -18,18 +18,27 @@ from .adjacent_sort import (
 from .data import (
     AdjacentSortBatch,
     IGNORE_INDEX,
+    LocalWindowSortBatch,
     PointerQuicksortBatch,
     make_adjacent_sort_batch,
     make_auto_advance_sort_batch,
+    make_local_window_sort_batch,
     make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
     make_sorting_batch,
+)
+from .local_window_sort import (
+    WINDOW_TOKEN_LENGTH,
+    WINDOW_TOOL_EVENTS,
+    LocalWindowSortMachine,
+    LocalWindowSortRollout,
 )
 from .metrics import (
     generated_adjacent_no_tool_metrics,
     generated_adjacent_sort_metrics,
     generated_auto_advance_no_tool_metrics,
     generated_auto_advance_sort_metrics,
+    generated_local_window_sort_metrics,
     generated_pointer_no_tool_metrics,
     generated_pointer_quicksort_metrics,
     generated_quicksort_metrics,
@@ -47,6 +56,7 @@ from .tokens import (
     PAD,
     AdjacentSortVocabulary,
     AutoAdvanceSortVocabulary,
+    LocalWindowSortVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
     SymbolVocabulary,
@@ -293,6 +303,180 @@ def _generate_adjacent_machine_rollouts(
 
 
 @torch.inference_mode()
+def generate_local_window_sort_rollouts(
+    model: DecoderTransformer | LSTMSorter,
+    batch: LocalWindowSortBatch,
+    vocabulary: LocalWindowSortVocabulary,
+    *,
+    tool_events: Iterable[str] = WINDOW_TOOL_EVENTS,
+    max_actions: int | None = None,
+) -> tuple[LocalWindowSortRollout, ...]:
+    """Decode actions and fixed-width windows in one growing cached context."""
+
+    tool_event_names = frozenset(
+        str(event).upper() for event in tool_events
+    )
+    if not tool_event_names <= set(WINDOW_TOOL_EVENTS):
+        allowed = ", ".join(WINDOW_TOOL_EVENTS)
+        raise ValueError(f"tool_events may only contain {allowed}")
+    if max_actions is None:
+        max_actions = max(len(trace.action_tokens) for trace in batch.traces)
+    if max_actions < 1:
+        raise ValueError("max_actions must be positive")
+
+    machines = [
+        LocalWindowSortMachine(row, vocabulary)
+        for row in batch.values.tolist()
+    ]
+    generated_actions: list[list[int]] = [[] for _ in machines]
+    generated_windows: list[list[tuple[int, ...]]] = [
+        [] for _ in machines
+    ]
+    expected_windows: list[list[tuple[int, ...]]] = [
+        [] for _ in machines
+    ]
+    required_window_counts = [
+        sum(
+            bool(transition.response_tokens)
+            and transition.response_event not in tool_event_names
+            for transition in trace.transitions
+        )
+        for trace in batch.traces
+    ]
+    tool_window_counts = [0 for _ in machines]
+    action_candidates = torch.tensor(
+        vocabulary.action_tokens,
+        dtype=torch.long,
+        device=batch.values.device,
+    )
+
+    if isinstance(model, DecoderTransformer):
+        next_logits, decode_state = model.forward_with_cache(batch.prompt_ids)
+        recurrent = False
+    else:
+        next_logits, decode_state = model.forward_with_state(batch.prompt_ids)
+        recurrent = True
+
+    for _ in range(max_actions):
+        candidate_logits = next_logits[:, -1].index_select(
+            dim=-1,
+            index=action_candidates,
+        )
+        selected = action_candidates[candidate_logits.argmax(dim=-1)]
+        selected_actions = selected.tolist()
+        action_values = [PAD] * len(machines)
+        true_windows: list[tuple[int, ...] | None] = [
+            None for _ in machines
+        ]
+        generate_window = [False for _ in machines]
+
+        for row_index, machine in enumerate(machines):
+            if machine.halted:
+                continue
+            action = int(selected_actions[row_index])
+            action_values[row_index] = action
+            generated_actions[row_index].append(action)
+            response_event, response_tokens = machine.step(action)
+            if not response_tokens:
+                continue
+            true_windows[row_index] = response_tokens
+            generate_window[row_index] = (
+                machine.valid and response_event not in tool_event_names
+            )
+
+        if all(machine.halted for machine in machines):
+            break
+
+        action_column = torch.tensor(
+            action_values,
+            dtype=torch.long,
+            device=batch.values.device,
+        )
+        if recurrent:
+            next_logits, decode_state = model.forward_with_state(
+                action_column[:, None],
+                decode_state,
+            )
+        else:
+            next_logits, decode_state = model.forward_with_cache(
+                action_column[:, None],
+                caches=decode_state,
+            )
+
+        generated_rows: list[list[int]] = [[] for _ in machines]
+        for row_index, true_window in enumerate(true_windows):
+            if true_window is None:
+                continue
+            if generate_window[row_index]:
+                expected_windows[row_index].append(true_window)
+            else:
+                tool_window_counts[row_index] += 1
+
+        for window_index in range(WINDOW_TOKEN_LENGTH):
+            predicted_window_tokens = next_logits[:, -1].argmax(dim=-1)
+            window_values = [PAD] * len(machines)
+            for row_index, true_window in enumerate(true_windows):
+                if true_window is None:
+                    continue
+                if generate_window[row_index]:
+                    token = int(predicted_window_tokens[row_index])
+                    generated_rows[row_index].append(token)
+                    window_values[row_index] = token
+                else:
+                    window_values[row_index] = true_window[window_index]
+            window_column = torch.tensor(
+                window_values,
+                dtype=torch.long,
+                device=batch.values.device,
+            )
+            if recurrent:
+                next_logits, decode_state = model.forward_with_state(
+                    window_column[:, None],
+                    decode_state,
+                )
+            else:
+                next_logits, decode_state = model.forward_with_cache(
+                    window_column[:, None],
+                    caches=decode_state,
+                )
+
+        for row_index, should_generate in enumerate(generate_window):
+            if should_generate:
+                generated_windows[row_index].append(
+                    tuple(generated_rows[row_index])
+                )
+
+    return tuple(
+        LocalWindowSortRollout(
+            action_tokens=tuple(actions),
+            final_values=tuple(machine.array),
+            completed=machine.completed,
+            valid_execution=machine.valid,
+            timed_out=not machine.halted,
+            generated_window_tokens=tuple(generated),
+            expected_window_tokens=tuple(expected),
+            required_window_count=required_count,
+            tool_window_count=tool_count,
+        )
+        for (
+            actions,
+            machine,
+            generated,
+            expected,
+            required_count,
+            tool_count,
+        ) in zip(
+            generated_actions,
+            machines,
+            generated_windows,
+            expected_windows,
+            required_window_counts,
+            tool_window_counts,
+        )
+    )
+
+
+@torch.inference_mode()
 def evaluate_lengths(
     model: DecoderTransformer | LSTMSorter,
     vocabulary: SymbolVocabulary,
@@ -305,6 +489,7 @@ def evaluate_lengths(
     use_autocast: bool = True,
     task: str = "direct",
     trace_snapshot_mode: SnapshotMode = "partition",
+    window_tool_events: tuple[str, ...] = WINDOW_TOOL_EVENTS,
 ) -> dict[int, dict[str, float]]:
     if examples_per_length < 1 or batch_size < 1:
         raise ValueError("evaluation sizes must be positive")
@@ -400,12 +585,26 @@ def evaluate_lengths(
                     ),
                     device=device,
                 )
-                if task == "adjacent_sort_auto_advance":
+                if task != "adjacent_sort_auto_advance_no_tool":
                     max_new_tokens = 0
                 else:
                     max_new_tokens = max(
                         len(trace.target_tokens) for trace in batch.traces
                     ) + 8
+            elif task == "adjacent_sort_local_window":
+                if not isinstance(vocabulary, LocalWindowSortVocabulary):
+                    raise TypeError(
+                        f"{task} requires LocalWindowSortVocabulary"
+                    )
+                batch = make_local_window_sort_batch(
+                    current_batch_size,
+                    int(length),
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    tool_events=window_tool_events,
+                    device=device,
+                )
+                max_new_tokens = 0
             else:
                 raise ValueError(f"unsupported sorting task: {task}")
             with autocast_context(device, enabled=use_autocast):
@@ -455,6 +654,15 @@ def evaluate_lengths(
                         batch.prompt_ids,
                         max_new_tokens=max_new_tokens,
                         stop_token=vocabulary.action_token("DONE"),
+                    )
+                elif task == "adjacent_sort_local_window":
+                    assert isinstance(batch, LocalWindowSortBatch)
+                    assert isinstance(vocabulary, LocalWindowSortVocabulary)
+                    rollouts = generate_local_window_sort_rollouts(
+                        model,
+                        batch,
+                        vocabulary,
+                        tool_events=window_tool_events,
                     )
                 else:
                     generated = model.generate(
@@ -518,6 +726,13 @@ def evaluate_lengths(
                     batch.values.cpu(),
                     rollouts,
                     vocabulary,
+                    batch.traces,
+                )
+            elif task == "adjacent_sort_local_window":
+                assert isinstance(batch, LocalWindowSortBatch)
+                metrics = generated_local_window_sort_metrics(
+                    batch.values.cpu(),
+                    rollouts,
                     batch.traces,
                 )
             else:

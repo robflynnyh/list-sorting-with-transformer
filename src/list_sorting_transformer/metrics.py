@@ -14,6 +14,11 @@ from .adjacent_sort import (
     replay_adjacent_sort_transcript,
     replay_auto_advance_sort_transcript,
 )
+from .local_window_sort import (
+    WINDOW_TOKEN_LENGTH,
+    LocalWindowSortRollout,
+    LocalWindowSortTrace,
+)
 from .data import IGNORE_INDEX
 from .pointer_quicksort import (
     PointerQuicksortRollout,
@@ -333,6 +338,168 @@ def generated_auto_advance_sort_metrics(
         vocabulary.action_tokens,
         traces,
     )
+
+
+def generated_local_window_sort_metrics(
+    values: Tensor,
+    rollouts: Sequence[LocalWindowSortRollout],
+    traces: Sequence[LocalWindowSortTrace],
+) -> dict[str, float]:
+    """Score action execution and every model-generated local window."""
+
+    if values.ndim != 2:
+        raise ValueError("values must be rank two")
+    if len(rollouts) != values.shape[0] or len(traces) != values.shape[0]:
+        raise ValueError("one rollout and reference trace are required per row")
+
+    totals = {
+        "valid_syntax": 0.0,
+        "correct_length": 0.0,
+        "sorted": 0.0,
+        "multiset_preserved": 0.0,
+        "exact_match": 0.0,
+        "trace_syntax_valid": 0.0,
+        "trace_exact_match": 0.0,
+        "full_exact_match": 0.0,
+        "operation_prefix_fraction": 0.0,
+        "execution_completed": 0.0,
+        "window_exact_match": 0.0,
+        "timed_out": 0.0,
+    }
+    action_correct = 0
+    action_total = 0
+    window_token_correct = 0
+    window_token_total = 0
+    window_transition_correct = 0
+    window_transition_total = 0
+    generated_window_total = 0
+    tool_window_total = 0
+
+    for input_row, rollout, trace in zip(values.tolist(), rollouts, traces):
+        expected_values = sorted(int(value) for value in input_row)
+        final_values = list(rollout.final_values)
+        expected_actions = trace.action_tokens
+        completed = rollout.completed and rollout.valid_execution
+        if rollout.required_window_count < 0:
+            raise ValueError("required_window_count must be nonnegative")
+
+        generated_windows_exact = (
+            rollout.required_window_count
+            == len(rollout.generated_window_tokens)
+            == len(rollout.expected_window_tokens)
+            and all(
+                generated == expected
+                for generated, expected in zip(
+                    rollout.generated_window_tokens,
+                    rollout.expected_window_tokens,
+                )
+            )
+        )
+        totals["window_exact_match"] += float(generated_windows_exact)
+        totals["execution_completed"] += float(completed)
+        totals["valid_syntax"] += float(completed)
+        totals["trace_syntax_valid"] += float(rollout.valid_execution)
+        totals["timed_out"] += float(rollout.timed_out)
+        totals["correct_length"] += float(
+            len(final_values) == len(input_row)
+        )
+        totals["sorted"] += float(
+            all(
+                left <= right
+                for left, right in zip(final_values, final_values[1:])
+            )
+        )
+        totals["multiset_preserved"] += float(
+            sorted(final_values) == expected_values
+        )
+        exact = (
+            completed
+            and generated_windows_exact
+            and final_values == expected_values
+        )
+        totals["exact_match"] += float(exact)
+
+        valid_prefix = 0
+        for generated_action, expected_action in zip(
+            rollout.action_tokens,
+            expected_actions,
+        ):
+            if generated_action != expected_action:
+                break
+            valid_prefix += 1
+        totals["operation_prefix_fraction"] += valid_prefix / max(
+            len(expected_actions),
+            1,
+        )
+        trace_exact = (
+            completed
+            and generated_windows_exact
+            and rollout.action_tokens == expected_actions
+        )
+        totals["trace_exact_match"] += float(trace_exact)
+        totals["full_exact_match"] += float(trace_exact and exact)
+
+        for index, expected_action in enumerate(expected_actions):
+            if (
+                index < len(rollout.action_tokens)
+                and rollout.action_tokens[index] == expected_action
+            ):
+                action_correct += 1
+            action_total += 1
+        compared_window_count = 0
+        for generated_window, expected_window in zip(
+            rollout.generated_window_tokens,
+            rollout.expected_window_tokens,
+        ):
+            compared_window_count += 1
+            transition_exact = generated_window == expected_window
+            window_transition_correct += int(transition_exact)
+            window_transition_total += 1
+            for generated_token, expected_token in zip(
+                generated_window,
+                expected_window,
+            ):
+                window_token_correct += int(
+                    generated_token == expected_token
+                )
+                window_token_total += 1
+            window_token_total += max(
+                len(expected_window) - len(generated_window),
+                0,
+            )
+        unmatched_window_count = (
+            max(
+                rollout.required_window_count,
+                len(rollout.generated_window_tokens),
+                len(rollout.expected_window_tokens),
+            )
+            - compared_window_count
+        )
+        window_transition_total += unmatched_window_count
+        window_token_total += unmatched_window_count * WINDOW_TOKEN_LENGTH
+        generated_window_total += len(rollout.generated_window_tokens)
+        tool_window_total += rollout.tool_window_count
+
+    batch_size = values.shape[0]
+    metrics = {name: value / batch_size for name, value in totals.items()}
+    metrics["target_token_accuracy"] = action_correct / max(action_total, 1)
+    metrics["window_token_accuracy"] = (
+        window_token_correct / window_token_total
+        if window_token_total
+        else 1.0
+    )
+    metrics["window_transition_exact_fraction"] = (
+        window_transition_correct / window_transition_total
+        if window_transition_total
+        else 1.0
+    )
+    metrics["generated_window_count"] = generated_window_total / batch_size
+    metrics["tool_window_count"] = tool_window_total / batch_size
+    metrics["full_target_token_accuracy"] = (
+        (action_correct + window_token_correct)
+        / max(action_total + window_token_total, 1)
+    )
+    return metrics
 
 
 def _generated_no_tool_machine_metrics(

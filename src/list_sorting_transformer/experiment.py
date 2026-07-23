@@ -16,6 +16,7 @@ import torch
 from .data import (
     make_adjacent_sort_batch,
     make_auto_advance_sort_batch,
+    make_local_window_sort_batch,
     make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
     make_sorting_batch,
@@ -30,12 +31,14 @@ from .evaluation import (
 )
 from .metrics import masked_token_accuracy
 from .model import DecoderTransformer, ModelConfig
+from .local_window_sort import WINDOW_TOOL_EVENTS
 from .plots import plot_length_generalization, plot_training_history
 from .quicksort import SNAPSHOT_MODES, SnapshotMode
 from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import (
     AdjacentSortVocabulary,
     AutoAdvanceSortVocabulary,
+    LocalWindowSortVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
     SymbolVocabulary,
@@ -65,6 +68,7 @@ class TrainConfig:
     trace_snapshot_mode: SnapshotMode = "partition"
     gradient_accumulation_steps: int = 1
     checkpoint_interval: int = 1_000
+    window_tool_events: tuple[str, ...] = WINDOW_TOOL_EVENTS
 
     def __post_init__(self) -> None:
         if self.task not in {
@@ -76,6 +80,7 @@ class TrainConfig:
             "adjacent_sort_no_tool",
             "adjacent_sort_auto_advance",
             "adjacent_sort_auto_advance_no_tool",
+            "adjacent_sort_local_window",
         }:
             raise ValueError("invalid sorting task")
         if self.representation not in {"alphabet", "numbers"}:
@@ -104,6 +109,11 @@ class TrainConfig:
             raise ValueError("optimizer settings are invalid")
         if self.gradient_clip <= 0:
             raise ValueError("gradient_clip must be positive")
+        if not set(self.window_tool_events) <= set(WINDOW_TOOL_EVENTS):
+            allowed = ", ".join(WINDOW_TOOL_EVENTS)
+            raise ValueError(
+                f"window_tool_events may only contain {allowed}"
+            )
 
 
 def learning_rate_at_step(config: TrainConfig, step: int) -> float:
@@ -125,6 +135,24 @@ def selected_evaluation_lengths(config: TrainConfig) -> list[int]:
         config.eval_max_length,
     }
     return sorted(candidates)
+
+
+def parse_window_tool_events(specification: str) -> tuple[str, ...]:
+    """Parse the transition events whose windows use the executor."""
+
+    if specification.strip().lower() in {"", "none"}:
+        return ()
+    events = tuple(
+        component.strip().upper()
+        for component in specification.split(",")
+        if component.strip()
+    )
+    if not set(events) <= set(WINDOW_TOOL_EVENTS):
+        allowed = ", ".join(WINDOW_TOOL_EVENTS)
+        raise argparse.ArgumentTypeError(
+            f"window tool events must use {allowed}, or none"
+        )
+    return events
 
 
 def save_checkpoint(
@@ -272,7 +300,10 @@ def train(
                     ),
                     device=device,
                 )
-            else:
+            elif config.task in {
+                "adjacent_sort_auto_advance",
+                "adjacent_sort_auto_advance_no_tool",
+            }:
                 if not isinstance(vocabulary, AutoAdvanceSortVocabulary):
                     raise TypeError(
                         f"{config.task} requires AutoAdvanceSortVocabulary"
@@ -287,6 +318,21 @@ def train(
                     ),
                     device=device,
                 )
+            elif config.task == "adjacent_sort_local_window":
+                if not isinstance(vocabulary, LocalWindowSortVocabulary):
+                    raise TypeError(
+                        f"{config.task} requires LocalWindowSortVocabulary"
+                    )
+                batch = make_local_window_sort_batch(
+                    config.batch_size,
+                    length,
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    tool_events=config.window_tool_events,
+                    device=device,
+                )
+            else:
+                raise ValueError(f"unsupported sorting task: {config.task}")
             with autocast_context(device):
                 logits = model(batch.model_inputs)
                 loss = output_cross_entropy(logits, batch.labels)
@@ -357,6 +403,7 @@ def train(
                 device=device,
                 task=config.task,
                 trace_snapshot_mode=config.trace_snapshot_mode,
+                window_tool_events=config.window_tool_events,
             )
             evaluation_row = {
                 "step": step,
@@ -411,6 +458,7 @@ def train(
         device=device,
         task=config.task,
         trace_snapshot_mode=config.trace_snapshot_mode,
+        window_tool_events=config.window_tool_events,
     )
     results = {
         "architecture": model.architecture,
@@ -460,6 +508,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "adjacent_sort_no_tool",
             "adjacent_sort_auto_advance",
             "adjacent_sort_auto_advance_no_tool",
+            "adjacent_sort_local_window",
         ),
         default="direct",
     )
@@ -484,6 +533,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval-batch-size", type=int, default=128)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
     parser.add_argument("--checkpoint-interval", type=int, default=1_000)
+    parser.add_argument(
+        "--window-tool-events",
+        type=parse_window_tool_events,
+        default=WINDOW_TOOL_EVENTS,
+        metavar="EVENTS",
+        help=(
+            "comma-separated KEEP, SWAP, RESET, and FINISH transition "
+            "windows supplied by the executor; use 'none' for no tools"
+        ),
+    )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--n-layers", type=int, default=4)
@@ -536,6 +595,7 @@ def main() -> None:
         trace_snapshot_mode=args.trace_snapshot_mode,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         checkpoint_interval=args.checkpoint_interval,
+        window_tool_events=args.window_tool_events,
     )
     vocabulary = make_vocabulary(
         train_config.task,

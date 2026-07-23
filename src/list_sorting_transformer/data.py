@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import torch
@@ -12,6 +12,11 @@ from .adjacent_sort import (
     AdjacentSortTrace,
     generate_adjacent_sort_trace,
     generate_auto_advance_sort_trace,
+)
+from .local_window_sort import (
+    WINDOW_TOOL_EVENTS,
+    LocalWindowSortTrace,
+    generate_local_window_sort_trace,
 )
 from .pointer_quicksort import (
     PointerQuicksortTrace,
@@ -27,6 +32,7 @@ from .tokens import (
     VALUE_OFFSET,
     AdjacentSortVocabulary,
     AutoAdvanceSortVocabulary,
+    LocalWindowSortVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
 )
@@ -95,6 +101,24 @@ class AdjacentSortBatch:
     length: int
     prompt_length: int
     traces: tuple[AdjacentSortTrace, ...]
+
+    @property
+    def model_inputs(self) -> Tensor:
+        return self.token_ids[:, :-1]
+
+    @property
+    def prompt_ids(self) -> Tensor:
+        return self.token_ids[:, : self.prompt_length]
+
+
+@dataclass(frozen=True)
+class LocalWindowSortBatch:
+    token_ids: Tensor
+    labels: Tensor
+    values: Tensor
+    length: int
+    prompt_length: int
+    traces: tuple[LocalWindowSortTrace, ...]
 
     @property
     def model_inputs(self) -> Tensor:
@@ -388,6 +412,107 @@ def _make_adjacent_sort_batch(
         labels = labels.to(device)
         values = values.to(device)
     return AdjacentSortBatch(
+        token_ids=token_ids,
+        labels=labels,
+        values=values,
+        length=length,
+        prompt_length=prompt_length,
+        traces=traces,
+    )
+
+
+def make_local_window_sort_batch(
+    batch_size: int,
+    length: int,
+    *,
+    generator: torch.Generator,
+    vocabulary: LocalWindowSortVocabulary,
+    tool_events: Sequence[str] = WINDOW_TOOL_EVENTS,
+    device: torch.device | str | None = None,
+) -> LocalWindowSortBatch:
+    """Generate continuous action/fixed-window autoregressive transcripts."""
+
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    if length < 1:
+        raise ValueError("length must be positive")
+    tool_event_names = frozenset(str(name).upper() for name in tool_events)
+    if not tool_event_names <= set(WINDOW_TOOL_EVENTS):
+        allowed = ", ".join(WINDOW_TOOL_EVENTS)
+        raise ValueError(f"tool_events may only contain {allowed}")
+
+    values = torch.randint(
+        0,
+        vocabulary.symbol_count,
+        (batch_size, length),
+        generator=generator,
+    )
+    traces = tuple(
+        generate_local_window_sort_trace(row, vocabulary)
+        for row in values.tolist()
+    )
+    prompts = tuple(
+        (
+            *vocabulary.encode_prompt(row),
+            *trace.initial_window_tokens,
+        )
+        for row, trace in zip(values.tolist(), traces)
+    )
+    prompt_length = len(prompts[0])
+    targets: list[tuple[int, ...]] = []
+    target_masks: list[tuple[bool, ...]] = []
+    for trace in traces:
+        target_tokens: list[int] = []
+        prediction_mask: list[bool] = []
+        for transition in trace.transitions:
+            target_tokens.append(transition.action_token)
+            prediction_mask.append(True)
+            if transition.response_tokens:
+                target_tokens.extend(transition.response_tokens)
+                supervise_window = (
+                    transition.response_event not in tool_event_names
+                )
+                prediction_mask.extend(
+                    supervise_window
+                    for _ in transition.response_tokens
+                )
+        targets.append(tuple(target_tokens))
+        target_masks.append(tuple(prediction_mask))
+
+    sequence_length = max(
+        prompt_length + len(target)
+        for target in targets
+    )
+    token_ids = torch.full(
+        (batch_size, sequence_length),
+        PAD,
+        dtype=torch.long,
+    )
+    prediction_mask = torch.zeros(
+        (batch_size, sequence_length),
+        dtype=torch.bool,
+    )
+
+    for row_index, (prompt, target, target_mask) in enumerate(
+        zip(prompts, targets, target_masks)
+    ):
+        if len(prompt) != prompt_length:
+            raise RuntimeError("local-window prompt has an unexpected length")
+        example = [*prompt, *target]
+        token_ids[row_index, : len(example)] = torch.tensor(example)
+        target_end = prompt_length + len(target)
+        prediction_mask[row_index, prompt_length:target_end] = torch.tensor(
+            target_mask,
+            dtype=torch.bool,
+        )
+
+    labels = token_ids[:, 1:].clone()
+    labels[~prediction_mask[:, 1:]] = IGNORE_INDEX
+    if device is not None:
+        token_ids = token_ids.to(device)
+        labels = labels.to(device)
+        values = values.to(device)
+    return LocalWindowSortBatch(
         token_ids=token_ids,
         labels=labels,
         values=values,
