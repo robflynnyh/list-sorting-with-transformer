@@ -75,6 +75,9 @@ Trace evaluation reports:
 - `operation_prefix_fraction`: the fraction of operations completed before
   the first invalid operation.
 
+See the [metrics reference](docs/metrics.md) for every training and evaluation
+metric, its units, and interpretation guidance.
+
 ## Model
 
 The default model is a 4-layer, 128-dimensional causal Transformer with SwiGLU
