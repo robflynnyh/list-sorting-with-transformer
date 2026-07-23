@@ -89,6 +89,21 @@ class PointerQuicksortRollout:
     timed_out: bool
 
 
+@dataclass(frozen=True)
+class PointerQuicksortTranscriptRollout:
+    """Offline replay of a transcript generated without executor feedback."""
+
+    generated_tokens: tuple[int, ...]
+    action_tokens: tuple[int, ...]
+    final_values: tuple[int, ...]
+    completed: bool
+    valid_execution: bool
+    syntax_valid: bool
+    observations_valid: bool
+    observation_correct: int
+    timed_out: bool
+
+
 class PointerQuicksortMachine:
     """Strict state machine for one canonical three-way quicksort program."""
 
@@ -343,4 +358,74 @@ def execute_pointer_quicksort_actions(
         completed=machine.completed,
         valid_execution=machine.valid,
         timed_out=timed_out and not machine.finished,
+    )
+
+
+def replay_pointer_quicksort_transcript(
+    values: Sequence[int],
+    generated_tokens: Sequence[int],
+    vocabulary: PointerQuicksortVocabulary,
+) -> PointerQuicksortTranscriptRollout:
+    """Replay a fully generated transcript without feeding results to its model."""
+
+    done_token = vocabulary.action_token("DONE")
+    action_tokens = frozenset(vocabulary.action_tokens)
+    machine = PointerQuicksortMachine(values, vocabulary)
+    raw_tokens: list[int] = []
+    for raw_token in generated_tokens:
+        token = int(raw_token)
+        raw_tokens.append(token)
+        if token == done_token:
+            break
+
+    actions: list[int] = []
+    observation_correct = 0
+    observations_valid = True
+    syntax_valid = True
+    cursor = 0
+    while cursor < len(raw_tokens) and not machine.finished:
+        action = raw_tokens[cursor]
+        if action not in action_tokens:
+            syntax_valid = False
+            break
+        actions.append(action)
+        cursor += 1
+        expected_observation = machine.step(action)
+        if not machine.valid:
+            break
+        if expected_observation is None:
+            break
+        if cursor >= len(raw_tokens):
+            syntax_valid = False
+            observations_valid = False
+            break
+
+        generated_observation = raw_tokens[cursor]
+        cursor += 1
+        is_value = (
+            vocabulary.value_token(0)
+            <= generated_observation
+            < vocabulary.value_token(vocabulary.symbol_count - 1) + 1
+        )
+        is_status = (
+            vocabulary.observation_token_offset
+            <= generated_observation
+            < vocabulary.size
+        )
+        syntax_valid = syntax_valid and (is_value or is_status)
+        observation_matches = generated_observation == expected_observation
+        observations_valid = observations_valid and observation_matches
+        observation_correct += int(observation_matches)
+
+    completed = machine.completed and machine.valid
+    return PointerQuicksortTranscriptRollout(
+        generated_tokens=tuple(raw_tokens),
+        action_tokens=tuple(actions),
+        final_values=tuple(machine.array),
+        completed=completed,
+        valid_execution=machine.valid,
+        syntax_valid=syntax_valid and completed,
+        observations_valid=observations_valid and completed,
+        observation_correct=observation_correct,
+        timed_out=done_token not in raw_tokens,
     )

@@ -116,6 +116,7 @@ class LSTMSorter(nn.Module):
         prompt_ids: Tensor,
         *,
         max_new_tokens: int,
+        stop_token: int = EOS,
     ) -> Tensor:
         if prompt_ids.ndim != 2:
             raise ValueError("prompt_ids must have shape [batch, time]")
@@ -138,7 +139,7 @@ class LSTMSorter(nn.Module):
                 next_token,
             )
             generated.append(next_token)
-            finished = finished | next_token.eq(EOS)
+            finished = finished | next_token.eq(stop_token)
             if bool(finished.all()):
                 break
             next_logits, state = self.forward_with_state(

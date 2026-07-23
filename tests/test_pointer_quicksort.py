@@ -10,12 +10,14 @@ from list_sorting_transformer.evaluation import (
     generate_pointer_quicksort_rollouts,
 )
 from list_sorting_transformer.metrics import (
+    generated_pointer_no_tool_metrics,
     generated_pointer_quicksort_metrics,
 )
 from list_sorting_transformer.pointer_quicksort import (
     PointerQuicksortMachine,
     execute_pointer_quicksort_actions,
     generate_pointer_quicksort_trace,
+    replay_pointer_quicksort_transcript,
 )
 from list_sorting_transformer.tokens import (
     VALUE_OFFSET,
@@ -126,6 +128,26 @@ def test_pointer_batch_masks_prompts_observations_and_padding() -> None:
     )
 
 
+def test_no_tool_batch_supervises_actions_and_observations() -> None:
+    vocabulary = PointerQuicksortVocabulary()
+    batch = make_pointer_quicksort_batch(
+        4,
+        6,
+        generator=torch.Generator().manual_seed(5),
+        vocabulary=vocabulary,
+        supervise_observations=True,
+    )
+
+    for row_index, trace in enumerate(batch.traces):
+        target_start = batch.prompt_length - 1
+        expected = torch.tensor(trace.target_tokens)
+        labels = batch.labels[
+            row_index,
+            target_start : target_start + len(trace.target_tokens),
+        ]
+        torch.testing.assert_close(labels, expected)
+
+
 def test_scripted_policy_completes_interactive_cached_execution() -> None:
     vocabulary = PointerQuicksortVocabulary()
     batch = make_pointer_quicksort_batch(
@@ -187,3 +209,51 @@ def test_pointer_metrics_require_valid_completion() -> None:
     assert metrics["exact_match"] == 0.0
     assert metrics["execution_completed"] == 0.0
     assert metrics["operation_prefix_fraction"] == 0.0
+
+
+def test_no_tool_replay_separates_execution_from_observation_accuracy() -> None:
+    vocabulary = PointerQuicksortVocabulary()
+    values = torch.tensor([[3, 1, 2]])
+    trace = generate_pointer_quicksort_trace(values[0].tolist(), vocabulary)
+
+    perfect = replay_pointer_quicksort_transcript(
+        values[0].tolist(),
+        trace.target_tokens,
+        vocabulary,
+    )
+    assert perfect.completed
+    assert perfect.observations_valid
+    assert perfect.final_values == (1, 2, 3)
+    perfect_metrics = generated_pointer_no_tool_metrics(
+        values,
+        torch.tensor([trace.target_tokens]),
+        vocabulary,
+        [trace],
+    )
+    assert perfect_metrics["exact_match"] == 1.0
+    assert perfect_metrics["observation_token_accuracy"] == 1.0
+    assert perfect_metrics["full_target_token_accuracy"] == 1.0
+
+    corrupted_tokens = list(trace.target_tokens)
+    corrupted_tokens[1] = vocabulary.observation_token("ACTIVE")
+    corrupted = replay_pointer_quicksort_transcript(
+        values[0].tolist(),
+        corrupted_tokens,
+        vocabulary,
+    )
+    assert corrupted.completed
+    assert corrupted.valid_execution
+    assert not corrupted.observations_valid
+    assert corrupted.final_values == (1, 2, 3)
+
+    metrics = generated_pointer_no_tool_metrics(
+        values,
+        torch.tensor([corrupted_tokens]),
+        vocabulary,
+        [trace],
+    )
+    assert metrics["execution_completed"] == 1.0
+    assert metrics["observation_exact_match"] == 0.0
+    assert metrics["exact_match"] == 0.0
+    assert metrics["trace_exact_match"] == 0.0
+    assert metrics["observation_token_accuracy"] < 1.0

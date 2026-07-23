@@ -18,6 +18,7 @@ from .data import (
     make_sorting_batch,
 )
 from .metrics import (
+    generated_pointer_no_tool_metrics,
     generated_pointer_quicksort_metrics,
     generated_quicksort_metrics,
     generated_sorting_metrics,
@@ -198,19 +199,27 @@ def evaluate_lengths(
                 max_new_tokens = max(
                     len(trace.target_tokens) for trace in batch.traces
                 ) + 8
-            elif task == "pointer_quicksort":
+            elif task in {"pointer_quicksort", "pointer_quicksort_no_tool"}:
                 if not isinstance(vocabulary, PointerQuicksortVocabulary):
                     raise TypeError(
-                        "pointer_quicksort requires PointerQuicksortVocabulary"
+                        f"{task} requires PointerQuicksortVocabulary"
                     )
                 batch = make_pointer_quicksort_batch(
                     current_batch_size,
                     int(length),
                     generator=generator,
                     vocabulary=vocabulary,
+                    supervise_observations=(
+                        task == "pointer_quicksort_no_tool"
+                    ),
                     device=device,
                 )
-                max_new_tokens = 0
+                if task == "pointer_quicksort":
+                    max_new_tokens = 0
+                else:
+                    max_new_tokens = max(
+                        len(trace.target_tokens) for trace in batch.traces
+                    ) + 8
             else:
                 raise ValueError(f"unsupported sorting task: {task}")
             with autocast_context(device, enabled=use_autocast):
@@ -223,6 +232,13 @@ def evaluate_lengths(
                         model,
                         batch,
                         vocabulary,
+                    )
+                elif task == "pointer_quicksort_no_tool":
+                    assert isinstance(vocabulary, PointerQuicksortVocabulary)
+                    generated = model.generate(
+                        batch.prompt_ids,
+                        max_new_tokens=max_new_tokens,
+                        stop_token=vocabulary.action_token("DONE"),
                     )
                 else:
                     generated = model.generate(
@@ -243,12 +259,21 @@ def evaluate_lengths(
                     vocabulary,
                     batch.traces,
                 )
-            else:
+            elif task == "pointer_quicksort":
                 assert isinstance(batch, PointerQuicksortBatch)
                 assert isinstance(vocabulary, PointerQuicksortVocabulary)
                 metrics = generated_pointer_quicksort_metrics(
                     batch.values.cpu(),
                     rollouts,
+                    vocabulary,
+                    batch.traces,
+                )
+            else:
+                assert isinstance(batch, PointerQuicksortBatch)
+                assert isinstance(vocabulary, PointerQuicksortVocabulary)
+                metrics = generated_pointer_no_tool_metrics(
+                    batch.values.cpu(),
+                    generated.cpu(),
                     vocabulary,
                     batch.traces,
                 )

@@ -63,7 +63,12 @@ class TrainConfig:
     checkpoint_interval: int = 1_000
 
     def __post_init__(self) -> None:
-        if self.task not in {"direct", "quicksort_trace", "pointer_quicksort"}:
+        if self.task not in {
+            "direct",
+            "quicksort_trace",
+            "pointer_quicksort",
+            "pointer_quicksort_no_tool",
+        }:
             raise ValueError("invalid sorting task")
         if self.representation not in {"alphabet", "numbers"}:
             raise ValueError("invalid representation")
@@ -229,13 +234,16 @@ def train(
             else:
                 if not isinstance(vocabulary, PointerQuicksortVocabulary):
                     raise TypeError(
-                        "pointer_quicksort requires PointerQuicksortVocabulary"
+                        f"{config.task} requires PointerQuicksortVocabulary"
                     )
                 batch = make_pointer_quicksort_batch(
                     config.batch_size,
                     length,
                     generator=generator,
                     vocabulary=vocabulary,
+                    supervise_observations=(
+                        config.task == "pointer_quicksort_no_tool"
+                    ),
                     device=device,
                 )
             with autocast_context(device):
@@ -402,7 +410,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--task",
-        choices=("direct", "quicksort_trace", "pointer_quicksort"),
+        choices=(
+            "direct",
+            "quicksort_trace",
+            "pointer_quicksort",
+            "pointer_quicksort_no_tool",
+        ),
         default="direct",
     )
     parser.add_argument(

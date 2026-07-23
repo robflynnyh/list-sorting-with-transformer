@@ -356,6 +356,8 @@ def make_vocabulary(
         return QuicksortTraceVocabulary(representation, symbol_count)
     if task == "pointer_quicksort":
         return PointerQuicksortVocabulary(representation, symbol_count)
+    if task == "pointer_quicksort_no_tool":
+        return PointerQuicksortVocabulary(representation, symbol_count)
     raise ValueError(f"unsupported sorting task: {task}")
 
 

@@ -196,6 +196,7 @@ def make_pointer_quicksort_batch(
     *,
     generator: torch.Generator,
     vocabulary: PointerQuicksortVocabulary,
+    supervise_observations: bool = False,
     device: torch.device | str | None = None,
 ) -> PointerQuicksortBatch:
     """Generate pointer-machine transcripts and mask executor observations."""
@@ -234,10 +235,13 @@ def make_pointer_quicksort_batch(
         example = [*prompt, *trace.target_tokens]
         token_ids[row_index, : len(example)] = torch.tensor(example)
         target_end = prompt_length + len(trace.target_tokens)
-        prediction_mask[row_index, prompt_length:target_end] = torch.tensor(
-            trace.target_prediction_mask,
-            dtype=torch.bool,
-        )
+        if supervise_observations:
+            prediction_mask[row_index, prompt_length:target_end] = True
+        else:
+            prediction_mask[row_index, prompt_length:target_end] = torch.tensor(
+                trace.target_prediction_mask,
+                dtype=torch.bool,
+            )
 
     labels = token_ids[:, 1:].clone()
     labels[~prediction_mask[:, 1:]] = IGNORE_INDEX

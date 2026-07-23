@@ -8,7 +8,11 @@ import torch
 from torch import Tensor
 
 from .data import IGNORE_INDEX
-from .pointer_quicksort import PointerQuicksortRollout, PointerQuicksortTrace
+from .pointer_quicksort import (
+    PointerQuicksortRollout,
+    PointerQuicksortTrace,
+    replay_pointer_quicksort_transcript,
+)
 from .quicksort import QuicksortTrace, split_generated_events
 from .tokens import (
     EOS,
@@ -271,6 +275,128 @@ def generated_pointer_quicksort_metrics(
     metrics = {name: value / batch_size for name, value in totals.items()}
     metrics["target_token_accuracy"] = action_correct / max(action_total, 1)
     metrics["full_target_token_accuracy"] = metrics["target_token_accuracy"]
+    return metrics
+
+
+def generated_pointer_no_tool_metrics(
+    values: Tensor,
+    generated_tokens: Tensor,
+    vocabulary: PointerQuicksortVocabulary,
+    traces: Sequence[PointerQuicksortTrace],
+) -> dict[str, float]:
+    """Score transcripts generated without live executor observations."""
+
+    if values.ndim != 2 or generated_tokens.ndim != 2:
+        raise ValueError("values and generated_tokens must both be rank two")
+    if values.shape[0] != generated_tokens.shape[0]:
+        raise ValueError("values and generated_tokens must have the same batch size")
+    if len(traces) != values.shape[0]:
+        raise ValueError("one reference trace is required per generated row")
+
+    totals = {
+        "valid_syntax": 0.0,
+        "correct_length": 0.0,
+        "sorted": 0.0,
+        "multiset_preserved": 0.0,
+        "exact_match": 0.0,
+        "trace_syntax_valid": 0.0,
+        "trace_exact_match": 0.0,
+        "full_exact_match": 0.0,
+        "operation_prefix_fraction": 0.0,
+        "execution_completed": 0.0,
+        "observation_exact_match": 0.0,
+        "timed_out": 0.0,
+    }
+    action_correct = 0
+    action_total = 0
+    observation_correct = 0
+    observation_total = 0
+    full_token_correct = 0
+    full_token_total = 0
+
+    for input_row, generated_row, trace in zip(
+        values.tolist(),
+        generated_tokens.tolist(),
+        traces,
+    ):
+        expected_values = sorted(int(value) for value in input_row)
+        rollout = replay_pointer_quicksort_transcript(
+            input_row,
+            generated_row,
+            vocabulary,
+        )
+        generated_actions = rollout.action_tokens
+        expected_actions = trace.action_tokens
+        final_values = list(rollout.final_values)
+        execution_completed = rollout.completed and rollout.valid_execution
+        observation_exact = execution_completed and rollout.observations_valid
+
+        totals["valid_syntax"] += float(rollout.syntax_valid)
+        totals["trace_syntax_valid"] += float(rollout.syntax_valid)
+        totals["execution_completed"] += float(execution_completed)
+        totals["observation_exact_match"] += float(observation_exact)
+        totals["timed_out"] += float(rollout.timed_out)
+        totals["correct_length"] += float(len(final_values) == len(input_row))
+        totals["sorted"] += float(
+            all(
+                left <= right
+                for left, right in zip(final_values, final_values[1:])
+            )
+        )
+        totals["multiset_preserved"] += float(
+            sorted(final_values) == expected_values
+        )
+        exact = (
+            observation_exact
+            and rollout.syntax_valid
+            and final_values == expected_values
+        )
+        totals["exact_match"] += float(exact)
+
+        valid_prefix = 0
+        for generated_action, expected_action in zip(
+            generated_actions,
+            expected_actions,
+        ):
+            if generated_action != expected_action:
+                break
+            valid_prefix += 1
+        totals["operation_prefix_fraction"] += valid_prefix / max(
+            len(expected_actions),
+            1,
+        )
+        trace_exact = rollout.generated_tokens == trace.target_tokens
+        totals["trace_exact_match"] += float(trace_exact)
+        totals["full_exact_match"] += float(trace_exact and exact)
+
+        for index, expected_action in enumerate(expected_actions):
+            if (
+                index < len(generated_actions)
+                and generated_actions[index] == expected_action
+            ):
+                action_correct += 1
+            action_total += 1
+        observation_correct += rollout.observation_correct
+        observation_total += len(trace.target_tokens) - len(expected_actions)
+        for index, expected_token in enumerate(trace.target_tokens):
+            if (
+                index < len(rollout.generated_tokens)
+                and rollout.generated_tokens[index] == expected_token
+            ):
+                full_token_correct += 1
+            full_token_total += 1
+
+    batch_size = values.shape[0]
+    metrics = {name: value / batch_size for name, value in totals.items()}
+    metrics["target_token_accuracy"] = action_correct / max(action_total, 1)
+    metrics["observation_token_accuracy"] = observation_correct / max(
+        observation_total,
+        1,
+    )
+    metrics["full_target_token_accuracy"] = full_token_correct / max(
+        full_token_total,
+        1,
+    )
     return metrics
 
 

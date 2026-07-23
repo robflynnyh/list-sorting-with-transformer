@@ -113,6 +113,20 @@ correctly sorted final state. The canonical program uses three-way quicksort,
 chooses the value at `LO` as pivot, pushes the right child before the left
 child, and never serializes an absolute position.
 
+## No-Tool Pointer Ablation
+
+The `pointer_quicksort_no_tool` task uses the identical serialized transcript
+and vocabulary, but supervises both actions and observations. At evaluation,
+the model greedily generates the complete transcript over the full vocabulary
+until `<DONE>`. No executor is called and no observation is inserted during
+that rollout.
+
+After generation finishes, an offline executor replays the generated actions
+to score the final array and checks every generated observation against the
+result the action should have produced. This separates successful action
+execution from observation hallucination without leaking executor state back
+into inference.
+
 Render the exact training transcript for a list with:
 
 ```bash
@@ -136,10 +150,11 @@ layers alternate between:
 The implementation can also run all-RoPE or all-NoPE ablations through
 `--position-pattern`.
 
-Direct and textual-trace generation is unconstrained and greedy. Pointer-trace
-generation is greedy but restricted to action tokens; phase validity is still
-checked by the executor. Evaluation measures exact completion, structural
-validity, partial progress, and token or action accuracy as appropriate.
+Direct, textual-trace, and no-tool pointer generation is unconstrained and
+greedy. Executor-assisted pointer generation is greedy but restricted to the
+action vocabulary; phase validity is still checked by the executor. Evaluation
+measures exact completion, structural validity, partial progress, and token or
+action accuracy as appropriate.
 
 For an architecture control, `--architecture lstm` replaces the Transformer
 with a 2-layer, hidden-size-256 unidirectional LSTM. Its 0.96M parameters are
@@ -192,6 +207,16 @@ sort-transformer-train \
   --wandb-project list-sorting-with-transformer \
   --wandb-run-name pointer-quicksort-numbers-seed7 \
   --output-directory artifacts/pointer_quicksort_numbers_seed7
+
+sort-transformer-train \
+  --task pointer_quicksort_no_tool \
+  --representation numbers \
+  --batch-size 128 \
+  --gradient-accumulation-steps 2 \
+  --eval-batch-size 32 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-quicksort-no-tool-numbers-seed7 \
+  --output-directory artifacts/pointer_quicksort_no_tool_numbers_seed7
 ```
 
 Install `.[tracking]` to enable W&B. Long trace runs can use gradient
@@ -271,6 +296,26 @@ sort-transformer-compare \
   --output artifacts/representation_comparison.png \
   --dynamics-output artifacts/learning_dynamics.png
 ```
+
+## Pointer-Trace Results
+
+The matched pointer experiments use seed 7, 10,000 updates, batch size 128
+with two-step gradient accumulation, and the same 1.06M-parameter Transformer.
+
+![Executor-assisted pointer quicksort by length](artifacts/pointer_quicksort_numbers_seed7_accum2/length_generalization.png)
+
+| Method | Exact, lengths 2-20 | Exact, lengths 21-40 | Trace exact, lengths 21-40 | Wall time |
+| --- | ---: | ---: | ---: | ---: |
+| Direct prediction | **100.00%** | 22.54% | n/a | **2.5 min** |
+| Numeric-index trace | 99.10% | 0.94% | 0.00% | 118.0 min |
+| Executor-assisted pointer trace | **100.00%** | **98.63%** | **98.63%** | **67.4 min** |
+
+The executor-assisted model is exact through length 25, then reaches 99.22%,
+98.44%, and 89.06% exact execution at lengths 30, 35, and 40 respectively.
+These figures use the final independent per-length sweep rather than the
+smaller evaluation samples logged during training.
+Direct prediction is much faster because it emits only the answer, so wall
+time should not be interpreted as a compute-matched efficiency comparison.
 
 ## Literature Context
 

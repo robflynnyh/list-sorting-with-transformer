@@ -2,7 +2,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 .scratch/
+wandb/
 *.egg-info/
 artifacts/**/*.pt
 artifacts/**/run.log
-

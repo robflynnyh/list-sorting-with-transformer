@@ -116,6 +116,22 @@ def test_transformer_cached_generation_matches_full_prefix_generation() -> None:
     torch.testing.assert_close(generated, reference)
 
 
+def test_transformer_generation_accepts_a_task_specific_stop_token() -> None:
+    torch.manual_seed(19)
+    model = DecoderTransformer(small_config()).eval()
+    prompt = torch.randint(0, model.config.vocab_size, (1, 7))
+    first_token = int(model(prompt)[:, -1].argmax(dim=-1).item())
+
+    generated = model.generate(
+        prompt,
+        max_new_tokens=8,
+        stop_token=first_token,
+    )
+
+    assert generated.shape == (1, 1)
+    assert int(generated[0, 0]) == first_token
+
+
 def test_lstm_baseline_backpropagates_and_generates_with_cached_state() -> None:
     vocabulary = SymbolVocabulary("alphabet", 10)
     model = LSTMSorter(
