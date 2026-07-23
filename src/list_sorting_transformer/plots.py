@@ -123,3 +123,44 @@ def plot_representation_comparison(
     figure.tight_layout()
     figure.savefig(output_path, dpi=180)
     plt.close(figure)
+
+
+def plot_learning_dynamics(
+    runs: Sequence[
+        tuple[str, Sequence[tuple[int, dict[int, dict[str, float]]]]]
+    ],
+    output_path: Path,
+    *,
+    lengths: tuple[int, ...] = (20, 25),
+) -> None:
+    colors = ("#237a57", "#b05a2a", "#456a9d", "#755181")
+    figure, axes = plt.subplots(1, len(lengths), figsize=(10.5, 4.0), sharey=True)
+    if len(lengths) == 1:
+        axes = [axes]
+    for axis, length in zip(axes, lengths):
+        for (label, history), color in zip(runs, colors):
+            selected = [
+                (step, per_length[length]["exact_match"])
+                for step, per_length in history
+                if length in per_length
+            ]
+            axis.plot(
+                [step for step, _ in selected],
+                [value for _, value in selected],
+                marker="o",
+                markersize=3,
+                linewidth=1.6,
+                label=label,
+                color=color,
+            )
+        axis.set(
+            title=f"Exact accuracy at length {length}",
+            xlabel="Training step",
+            ylabel="Fraction",
+            ylim=(-0.02, 1.02),
+        )
+        axis.grid(alpha=0.2)
+    axes[0].legend(frameon=False, loc="lower right", fontsize=8)
+    figure.tight_layout()
+    figure.savefig(output_path, dpi=180)
+    plt.close(figure)

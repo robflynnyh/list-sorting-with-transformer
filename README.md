@@ -97,27 +97,39 @@ sort-transformer-eval \
 ## Baseline Results
 
 The initial baseline uses seed 7, 10,000 online-training steps, batch size 256,
-and 128 held-out generated examples at every length. Both representations use
-the same 1.05M-parameter alternating RoPE/NoPE model.
+and 128 held-out generated examples at every length. The Transformer has 1.05M
+parameters and the LSTM has 0.96M.
 
-![Comparison of number and alphabet sorting by length](artifacts/representation_comparison.png)
+![Comparison of Transformer and LSTM sorting by length](artifacts/representation_comparison.png)
 
-| Representation | Exact, lengths 2-20 | Exact, lengths 21-40 | Exact at 23 | Exact at 25 | First zero-exact length |
+| Architecture and representation | Exact, lengths 2-20 | Exact, lengths 21-40 | Exact at 23 | Exact at 25 | First zero-exact length |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Numbers + scalar | 100.00% | 22.54% | 98.44% | 56.25% | 27 |
-| Alphabet | 100.00% | 22.73% | 95.31% | 57.03% | 28 |
+| Transformer, numbers + scalar | 100.00% | 22.54% | 98.44% | 56.25% | 27 |
+| Transformer, alphabet | 100.00% | 22.73% | 95.31% | 57.03% | 28 |
+| LSTM, numbers + scalar | 99.88% | 14.02% | 62.50% | 0.78% | 26 |
+| LSTM, alphabet | 99.96% | 12.07% | 46.88% | 0.00% | 25 |
 
-Both models learn the complete in-domain task and remain perfect through length
-22, two positions beyond the training maximum. Neither sustains the algorithm:
-accuracy falls rapidly over lengths 23-28 and is zero thereafter. In this seed,
-exposing numeric order does not improve average exact extrapolation.
+Both Transformers learn the complete in-domain task and remain perfect through
+length 22, two positions beyond the training maximum. Neither sustains the
+algorithm: accuracy falls rapidly over lengths 23-28 and is zero thereafter.
+The LSTMs nearly fit the training domain but extrapolate less far, particularly
+in alphabet mode. In this seed, exposing numeric order helps the LSTM but does
+not improve the Transformer's average exact extrapolation.
 
-The failure details differ. At length 40, the alphabet model still emits
-syntactically valid comma-separated outputs on 94.53% of examples, but uses the
-wrong number or multiset of symbols. The numeric model emits valid syntax on
-only 0.78%. These are single-seed results, so the close aggregate comparison
-should be treated as a baseline observation rather than evidence that the
-representations are equivalent.
+![Learning dynamics at lengths 20 and 25](artifacts/learning_dynamics.png)
+
+The learning curves separate optimization from extrapolation. LSTM performance
+at length 20 improves late in training as the learning rate decays, while its
+length-25 accuracy remains near zero. Transformer length-25 accuracy is
+non-monotonic even after length 20 is solved, so it should not be inferred from
+in-domain loss alone.
+
+The Transformer failure details differ. At length 40, the alphabet Transformer
+still emits syntactically valid comma-separated outputs on 94.53% of examples,
+but uses the wrong number or multiset of symbols. The numeric Transformer emits
+valid syntax on only 0.78%. These are single-seed results, so close aggregate
+comparisons should be treated as baseline observations rather than evidence
+that representations or architectures are equivalent.
 
 Rebuild the comparison figure with:
 
@@ -125,7 +137,10 @@ Rebuild the comparison figure with:
 sort-transformer-compare \
   artifacts/numbers_alternating_seed7/metrics.json \
   artifacts/alphabet_alternating_seed7/metrics.json \
-  --output artifacts/representation_comparison.png
+  artifacts/lstm_numbers_seed7/metrics.json \
+  artifacts/lstm_alphabet_seed7/metrics.json \
+  --output artifacts/representation_comparison.png \
+  --dynamics-output artifacts/learning_dynamics.png
 ```
 
 ## Literature Context
@@ -155,6 +170,11 @@ test for learned sequence models.
   Models](https://proceedings.neurips.cc/paper_files/paper/2022/hash/fb7451e43f9c1c35b774bcfad7a5714b-Abstract-Conference.html)
   similarly shows that standard sequence models often need intermediate
   computation structure to extrapolate beyond training lengths.
+- [Learning to Execute](https://arxiv.org/abs/1410.4615) shows that LSTMs can
+  learn character-level program execution, but reports that curriculum design
+  was critical. It also distinguishes teacher-forced accuracy from free
+  generation; this repository uses uniform training lengths and scores fully
+  generated outputs, making the recurrent baseline deliberately strict.
 
 The first goal of this repository is a clean baseline, not a claimed solution.
 The number/alphabet comparison and exact per-length curves establish whether

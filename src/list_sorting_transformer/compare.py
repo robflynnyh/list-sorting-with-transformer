@@ -6,10 +6,17 @@ import argparse
 import json
 from pathlib import Path
 
-from .plots import plot_representation_comparison
+from .plots import plot_learning_dynamics, plot_representation_comparison
 
 
-def load_run(path: Path) -> tuple[str, dict[int, dict[str, float]], int]:
+def load_run(
+    path: Path,
+) -> tuple[
+    str,
+    dict[int, dict[str, float]],
+    int,
+    list[tuple[int, dict[int, dict[str, float]]]],
+]:
     payload = json.loads(path.read_text())
     representation = payload["train_config"]["representation"]
     architecture = payload.get("architecture", "transformer")
@@ -22,14 +29,25 @@ def load_run(path: Path) -> tuple[str, dict[int, dict[str, float]], int]:
         int(length): metrics
         for length, metrics in payload["final_per_length"].items()
     }
+    history = [
+        (
+            int(row["step"]),
+            {
+                int(length): metrics
+                for length, metrics in row["per_length"].items()
+            },
+        )
+        for row in payload["intermediate_evaluations"]
+    ]
     train_max_length = int(payload["train_config"]["train_max_length"])
-    return label, per_length, train_max_length
+    return label, per_length, train_max_length, history
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("metrics", nargs="+", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--dynamics-output", type=Path)
     return parser
 
 
@@ -41,10 +59,16 @@ def main() -> None:
         raise ValueError("all compared runs must have the same training boundary")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     plot_representation_comparison(
-        [(label, per_length) for label, per_length, _ in loaded],
+        [(label, per_length) for label, per_length, _, _ in loaded],
         args.output,
         train_max_length=train_boundaries.pop(),
     )
+    if args.dynamics_output is not None:
+        args.dynamics_output.parent.mkdir(parents=True, exist_ok=True)
+        plot_learning_dynamics(
+            [(label, history) for label, _, _, history in loaded],
+            args.dynamics_output,
+        )
 
 
 if __name__ == "__main__":
