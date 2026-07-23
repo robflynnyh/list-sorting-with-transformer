@@ -30,6 +30,23 @@ Two representation settings use the same token IDs and architecture:
 This isolates the effect of exposing ordinal structure while keeping the
 sequence task unchanged.
 
+## Pointer-Next Probe
+
+The `pointer_next` task isolates relative retrieval from the sorting
+experiments. The input is a random list with a pointer marker before one value,
+and the model must output the value immediately after that pointer:
+
+```text
+<bos>7,<PTR>4,2=2<eos>
+```
+
+Training samples list lengths 2-20 by default and chooses the pointer uniformly
+from positions that have a following value. Evaluation reports overall exact
+match plus a split between pointer positions seen during training and pointer
+positions beyond the training maximum. With the default range, pointer index
+18 is the largest seen index, so length-40 examples include genuinely unseen
+pointer positions.
+
 ## Quicksort Execution Traces
 
 The `quicksort_trace` task makes the model execute deterministic three-way
@@ -308,6 +325,15 @@ sort-transformer-train \
   --architecture lstm \
   --representation numbers \
   --output-directory artifacts/lstm_numbers_seed7
+
+sort-transformer-train \
+  --task pointer_next \
+  --representation numbers \
+  --eval-examples 512 \
+  --eval-batch-size 256 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-next-numbers-seed7 \
+  --output-directory artifacts/pointer_next_numbers_seed7
 
 sort-transformer-train \
   --task quicksort_trace \

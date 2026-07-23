@@ -129,6 +129,9 @@ LOCAL_WINDOW_PAIR_ENCODINGS = (
     "separate",
     "atomic",
 )
+POINTER_NEXT_MARKERS = (
+    "PTR",
+)
 _POINTER_ACTION_INDEX = {
     name: index for index, name in enumerate(POINTER_QUICKSORT_ACTIONS)
 }
@@ -152,6 +155,9 @@ _LOCAL_WINDOW_ACTION_INDEX = {
 }
 _LOCAL_WINDOW_MARKER_INDEX = {
     name: index for index, name in enumerate(LOCAL_WINDOW_SORT_MARKERS)
+}
+_POINTER_NEXT_MARKER_INDEX = {
+    name: index for index, name in enumerate(POINTER_NEXT_MARKERS)
 }
 
 
@@ -740,6 +746,81 @@ class LocalWindowSortVocabulary(SymbolVocabulary):
         return " ".join(rendered)
 
 
+@dataclass(frozen=True)
+class PointerNextVocabulary(SymbolVocabulary):
+    """Vocabulary for retrieving the value immediately after a pointer."""
+
+    @property
+    def marker_token_offset(self) -> int:
+        return VALUE_OFFSET + self.symbol_count
+
+    @property
+    def size(self) -> int:
+        return self.marker_token_offset + len(POINTER_NEXT_MARKERS)
+
+    def marker_token(self, name: str) -> int:
+        try:
+            index = _POINTER_NEXT_MARKER_INDEX[name]
+        except KeyError as error:
+            raise ValueError(f"unknown pointer-next marker: {name}") from error
+        return self.marker_token_offset + index
+
+    def encode_prompt_with_pointer(
+        self,
+        values: Sequence[int],
+        pointer_index: int,
+    ) -> list[int]:
+        if len(values) < 2:
+            raise ValueError("pointer-next examples require at least two values")
+        if not 0 <= pointer_index < len(values) - 1:
+            raise ValueError("pointer_index must have a following value")
+
+        encoded = [BOS]
+        for index, value in enumerate(values):
+            if index:
+                encoded.append(COMMA)
+            if index == pointer_index:
+                encoded.append(self.marker_token("PTR"))
+            encoded.append(self.value_token(int(value)))
+        encoded.append(SEP)
+        return encoded
+
+    def encode_example_with_pointer(
+        self,
+        values: Sequence[int],
+        pointer_index: int,
+    ) -> list[int]:
+        return [
+            *self.encode_prompt_with_pointer(values, pointer_index),
+            self.value_token(int(values[pointer_index + 1])),
+            EOS,
+        ]
+
+    def render_tokens(self, tokens: Sequence[int]) -> str:
+        rendered = []
+        for token_value in tokens:
+            token = int(token_value)
+            if token == PAD:
+                rendered.append("<pad>")
+            elif token == BOS:
+                rendered.append("<bos>")
+            elif token == SEP:
+                rendered.append("=")
+            elif token == EOS:
+                rendered.append("<eos>")
+            elif token == COMMA:
+                rendered.append(",")
+            elif VALUE_OFFSET <= token < VALUE_OFFSET + self.symbol_count:
+                rendered.append(self.render_value(self.token_value(token)))
+            elif self.marker_token_offset <= token < self.size:
+                rendered.append(
+                    f"<{POINTER_NEXT_MARKERS[token - self.marker_token_offset]}>"
+                )
+            else:
+                rendered.append(f"<?>[{token}]")
+        return "".join(rendered)
+
+
 def make_vocabulary(
     task: str,
     *,
@@ -769,6 +850,8 @@ def make_vocabulary(
             symbol_count,
             pair_encoding=window_pair_encoding,
         )
+    if task == "pointer_next":
+        return PointerNextVocabulary(representation, symbol_count)
     raise ValueError(f"unsupported sorting task: {task}")
 
 

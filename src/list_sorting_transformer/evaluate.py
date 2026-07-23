@@ -96,6 +96,7 @@ def main() -> None:
         task=task,
         trace_snapshot_mode=trace_snapshot_mode,
         window_tool_events=window_tool_events,
+        train_max_length=int(train_config.get("train_max_length", max(lengths))),
     )
     train_min_length = int(train_config.get("train_min_length", min(lengths)))
     train_max_length = int(train_config.get("train_max_length", max(lengths)))

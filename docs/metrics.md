@@ -53,6 +53,11 @@ executor assistance.
 | `multiset_preserved` | A syntactically valid answer contains exactly the input values with the same multiplicities. It need not be ordered. |
 | `trace_syntax_valid` | Generated trace tokens are structurally valid. For local-window sorting, either `KEEP` or `SWAP` is accepted while a pair is active, irrespective of which one the reference trace uses. |
 | `target_token_accuracy` | Positional token accuracy of the freely generated final answer, or positional action accuracy for a machine task. |
+| `next_value_accuracy` | For `pointer_next`, whether the first generated token is the value immediately after the pointer marker. |
+| `eos_accuracy` | For `pointer_next`, whether the model ends the two-token answer with `<eos>`. |
+| `seen_pointer_exact_match` | For `pointer_next`, exact match on examples whose pointer index was reachable under the training length range. With default lengths 2-20, this means pointer index 0-18. |
+| `unseen_pointer_exact_match` | For `pointer_next`, exact match on examples whose pointer index is beyond the training maximum. This is meaningful only when `unseen_pointer_fraction` is nonzero. |
+| `unseen_pointer_fraction` | Fraction of `pointer_next` evaluation examples whose pointer index is beyond the training maximum. |
 | `full_target_token_accuracy` | Positional accuracy over the complete generated target. It equals action accuracy for fully executor-assisted runs and includes every model-generated observation or window for partial- and no-tool runs. |
 | `execution_completed` | Offline or interactive executor reached `DONE` without an invalid action. |
 | `observation_token_accuracy` | Positional accuracy of observations assigned to the model. Missing observations after an early failure count as incorrect. |

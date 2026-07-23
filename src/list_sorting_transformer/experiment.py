@@ -17,6 +17,7 @@ from .data import (
     make_adjacent_sort_batch,
     make_auto_advance_sort_batch,
     make_local_window_sort_batch,
+    make_pointer_next_batch,
     make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
     make_sorting_batch,
@@ -40,6 +41,7 @@ from .tokens import (
     AdjacentSortVocabulary,
     AutoAdvanceSortVocabulary,
     LocalWindowSortVocabulary,
+    PointerNextVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
     SymbolVocabulary,
@@ -75,6 +77,7 @@ class TrainConfig:
     def __post_init__(self) -> None:
         if self.task not in {
             "direct",
+            "pointer_next",
             "quicksort_trace",
             "pointer_quicksort",
             "pointer_quicksort_no_tool",
@@ -93,6 +96,8 @@ class TrainConfig:
             raise ValueError("invalid training length range")
         if self.eval_max_length < self.train_max_length:
             raise ValueError("eval_max_length must include the training range")
+        if self.task == "pointer_next" and self.train_min_length < 2:
+            raise ValueError("pointer_next requires train_min_length >= 2")
         integer_fields = (
             self.steps,
             self.batch_size,
@@ -261,6 +266,16 @@ def train(
                     symbol_count=config.symbol_count,
                     device=device,
                 )
+            elif config.task == "pointer_next":
+                if not isinstance(vocabulary, PointerNextVocabulary):
+                    raise TypeError("pointer_next requires PointerNextVocabulary")
+                batch = make_pointer_next_batch(
+                    config.batch_size,
+                    length,
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    device=device,
+                )
             elif config.task == "quicksort_trace":
                 if not isinstance(vocabulary, QuicksortTraceVocabulary):
                     raise TypeError(
@@ -411,6 +426,7 @@ def train(
                 task=config.task,
                 trace_snapshot_mode=config.trace_snapshot_mode,
                 window_tool_events=config.window_tool_events,
+                train_max_length=config.train_max_length,
             )
             evaluation_row = {
                 "step": step,
@@ -466,6 +482,7 @@ def train(
         task=config.task,
         trace_snapshot_mode=config.trace_snapshot_mode,
         window_tool_events=config.window_tool_events,
+        train_max_length=config.train_max_length,
     )
     results = {
         "architecture": model.architecture,
@@ -508,6 +525,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--task",
         choices=(
             "direct",
+            "pointer_next",
             "quicksort_trace",
             "pointer_quicksort",
             "pointer_quicksort_no_tool",

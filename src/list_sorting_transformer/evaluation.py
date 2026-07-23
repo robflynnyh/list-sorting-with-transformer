@@ -19,10 +19,12 @@ from .data import (
     AdjacentSortBatch,
     IGNORE_INDEX,
     LocalWindowSortBatch,
+    PointerNextBatch,
     PointerQuicksortBatch,
     make_adjacent_sort_batch,
     make_auto_advance_sort_batch,
     make_local_window_sort_batch,
+    make_pointer_next_batch,
     make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
     make_sorting_batch,
@@ -39,6 +41,7 @@ from .metrics import (
     generated_auto_advance_no_tool_metrics,
     generated_auto_advance_sort_metrics,
     generated_local_window_sort_metrics,
+    generated_pointer_next_metrics,
     generated_pointer_no_tool_metrics,
     generated_pointer_quicksort_metrics,
     generated_quicksort_metrics,
@@ -57,6 +60,7 @@ from .tokens import (
     AdjacentSortVocabulary,
     AutoAdvanceSortVocabulary,
     LocalWindowSortVocabulary,
+    PointerNextVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
     SymbolVocabulary,
@@ -491,6 +495,7 @@ def evaluate_lengths(
     task: str = "direct",
     trace_snapshot_mode: SnapshotMode = "partition",
     window_tool_events: tuple[str, ...] = WINDOW_TOOL_EVENTS,
+    train_max_length: int | None = None,
 ) -> dict[int, dict[str, float]]:
     if examples_per_length < 1 or batch_size < 1:
         raise ValueError("evaluation sizes must be positive")
@@ -512,6 +517,17 @@ def evaluate_lengths(
                     device=device,
                 )
                 max_new_tokens = 2 * int(length) + 2
+            elif task == "pointer_next":
+                if not isinstance(vocabulary, PointerNextVocabulary):
+                    raise TypeError("pointer_next requires PointerNextVocabulary")
+                batch = make_pointer_next_batch(
+                    current_batch_size,
+                    int(length),
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    device=device,
+                )
+                max_new_tokens = 2
             elif task == "quicksort_trace":
                 if not isinstance(vocabulary, QuicksortTraceVocabulary):
                     raise TypeError(
@@ -675,6 +691,19 @@ def evaluate_lengths(
                     batch.values.cpu(),
                     generated.cpu(),
                     vocabulary,
+                )
+            elif task == "pointer_next":
+                assert isinstance(batch, PointerNextBatch)
+                assert isinstance(vocabulary, PointerNextVocabulary)
+                train_max_pointer_index = (
+                    None if train_max_length is None else train_max_length - 2
+                )
+                metrics = generated_pointer_next_metrics(
+                    batch.values.cpu(),
+                    batch.pointers.cpu(),
+                    generated.cpu(),
+                    vocabulary,
+                    train_max_pointer_index=train_max_pointer_index,
                 )
             elif task == "quicksort_trace":
                 assert isinstance(vocabulary, QuicksortTraceVocabulary)
