@@ -10,14 +10,19 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
+from .adjacent_sort import AdjacentSortMachine, AdjacentSortRollout
 from .data import (
+    AdjacentSortBatch,
     IGNORE_INDEX,
     PointerQuicksortBatch,
+    make_adjacent_sort_batch,
     make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
     make_sorting_batch,
 )
 from .metrics import (
+    generated_adjacent_no_tool_metrics,
+    generated_adjacent_sort_metrics,
     generated_pointer_no_tool_metrics,
     generated_pointer_quicksort_metrics,
     generated_quicksort_metrics,
@@ -33,6 +38,7 @@ from .quicksort import SnapshotMode
 from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import (
     PAD,
+    AdjacentSortVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
     SymbolVocabulary,
@@ -150,6 +156,102 @@ def generate_pointer_quicksort_rollouts(
 
 
 @torch.inference_mode()
+def generate_adjacent_sort_rollouts(
+    model: DecoderTransformer | LSTMSorter,
+    batch: AdjacentSortBatch,
+    vocabulary: AdjacentSortVocabulary,
+    *,
+    max_actions: int | None = None,
+) -> tuple[AdjacentSortRollout, ...]:
+    """Alternate model actions with one- or two-token machine observations."""
+
+    if max_actions is None:
+        max_actions = max(len(trace.action_tokens) for trace in batch.traces)
+    if max_actions < 1:
+        raise ValueError("max_actions must be positive")
+
+    machines = [
+        AdjacentSortMachine(row, vocabulary)
+        for row in batch.values.tolist()
+    ]
+    generated_actions: list[list[int]] = [[] for _ in machines]
+    action_candidates = torch.tensor(
+        vocabulary.action_tokens,
+        dtype=torch.long,
+        device=batch.prompt_ids.device,
+    )
+
+    if isinstance(model, DecoderTransformer):
+        next_logits, decode_state = model.forward_with_cache(batch.prompt_ids)
+        recurrent = False
+    else:
+        next_logits, decode_state = model.forward_with_state(batch.prompt_ids)
+        recurrent = True
+
+    for _ in range(max_actions):
+        candidate_logits = next_logits[:, -1].index_select(
+            dim=-1,
+            index=action_candidates,
+        )
+        selected = action_candidates[candidate_logits.argmax(dim=-1)]
+        selected_actions = selected.tolist()
+        action_values = [PAD] * len(machines)
+        observation_rows: list[tuple[int, ...]] = [() for _ in machines]
+
+        for row_index, machine in enumerate(machines):
+            if machine.finished:
+                continue
+            action = int(selected_actions[row_index])
+            generated_actions[row_index].append(action)
+            action_values[row_index] = action
+            observation_rows[row_index] = machine.step(action)
+
+        if all(machine.finished for machine in machines):
+            break
+
+        columns = [action_values]
+        max_observations = max(len(row) for row in observation_rows)
+        columns.extend(
+            [
+                [
+                    row[observation_index]
+                    if observation_index < len(row)
+                    else PAD
+                    for row in observation_rows
+                ]
+                for observation_index in range(max_observations)
+            ]
+        )
+        for column in columns:
+            token_column = torch.tensor(
+                column,
+                dtype=torch.long,
+                device=selected.device,
+            )
+            if recurrent:
+                next_logits, decode_state = model.forward_with_state(
+                    token_column[:, None],
+                    decode_state,
+                )
+            else:
+                next_logits, decode_state = model.forward_with_cache(
+                    token_column[:, None],
+                    caches=decode_state,
+                )
+
+    return tuple(
+        AdjacentSortRollout(
+            action_tokens=tuple(actions),
+            final_values=tuple(machine.array),
+            completed=machine.completed,
+            valid_execution=machine.valid,
+            timed_out=not machine.finished,
+        )
+        for actions, machine in zip(generated_actions, machines)
+    )
+
+
+@torch.inference_mode()
 def evaluate_lengths(
     model: DecoderTransformer | LSTMSorter,
     vocabulary: SymbolVocabulary,
@@ -220,6 +322,25 @@ def evaluate_lengths(
                     max_new_tokens = max(
                         len(trace.target_tokens) for trace in batch.traces
                     ) + 8
+            elif task in {"adjacent_sort", "adjacent_sort_no_tool"}:
+                if not isinstance(vocabulary, AdjacentSortVocabulary):
+                    raise TypeError(f"{task} requires AdjacentSortVocabulary")
+                batch = make_adjacent_sort_batch(
+                    current_batch_size,
+                    int(length),
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    supervise_observations=(
+                        task == "adjacent_sort_no_tool"
+                    ),
+                    device=device,
+                )
+                if task == "adjacent_sort":
+                    max_new_tokens = 0
+                else:
+                    max_new_tokens = max(
+                        len(trace.target_tokens) for trace in batch.traces
+                    ) + 8
             else:
                 raise ValueError(f"unsupported sorting task: {task}")
             with autocast_context(device, enabled=use_autocast):
@@ -235,6 +356,21 @@ def evaluate_lengths(
                     )
                 elif task == "pointer_quicksort_no_tool":
                     assert isinstance(vocabulary, PointerQuicksortVocabulary)
+                    generated = model.generate(
+                        batch.prompt_ids,
+                        max_new_tokens=max_new_tokens,
+                        stop_token=vocabulary.action_token("DONE"),
+                    )
+                elif task == "adjacent_sort":
+                    assert isinstance(batch, AdjacentSortBatch)
+                    assert isinstance(vocabulary, AdjacentSortVocabulary)
+                    rollouts = generate_adjacent_sort_rollouts(
+                        model,
+                        batch,
+                        vocabulary,
+                    )
+                elif task == "adjacent_sort_no_tool":
+                    assert isinstance(vocabulary, AdjacentSortVocabulary)
                     generated = model.generate(
                         batch.prompt_ids,
                         max_new_tokens=max_new_tokens,
@@ -268,10 +404,28 @@ def evaluate_lengths(
                     vocabulary,
                     batch.traces,
                 )
-            else:
+            elif task == "pointer_quicksort_no_tool":
                 assert isinstance(batch, PointerQuicksortBatch)
                 assert isinstance(vocabulary, PointerQuicksortVocabulary)
                 metrics = generated_pointer_no_tool_metrics(
+                    batch.values.cpu(),
+                    generated.cpu(),
+                    vocabulary,
+                    batch.traces,
+                )
+            elif task == "adjacent_sort":
+                assert isinstance(batch, AdjacentSortBatch)
+                assert isinstance(vocabulary, AdjacentSortVocabulary)
+                metrics = generated_adjacent_sort_metrics(
+                    batch.values.cpu(),
+                    rollouts,
+                    vocabulary,
+                    batch.traces,
+                )
+            else:
+                assert isinstance(batch, AdjacentSortBatch)
+                assert isinstance(vocabulary, AdjacentSortVocabulary)
+                metrics = generated_adjacent_no_tool_metrics(
                     batch.values.cpu(),
                     generated.cpu(),
                     vocabulary,

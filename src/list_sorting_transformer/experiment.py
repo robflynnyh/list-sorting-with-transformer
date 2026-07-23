@@ -14,6 +14,7 @@ from typing import Any
 import torch
 
 from .data import (
+    make_adjacent_sort_batch,
     make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
     make_sorting_batch,
@@ -32,6 +33,7 @@ from .plots import plot_length_generalization, plot_training_history
 from .quicksort import SNAPSHOT_MODES, SnapshotMode
 from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import (
+    AdjacentSortVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
     SymbolVocabulary,
@@ -68,6 +70,8 @@ class TrainConfig:
             "quicksort_trace",
             "pointer_quicksort",
             "pointer_quicksort_no_tool",
+            "adjacent_sort",
+            "adjacent_sort_no_tool",
         }:
             raise ValueError("invalid sorting task")
         if self.representation not in {"alphabet", "numbers"}:
@@ -231,7 +235,10 @@ def train(
                     snapshot_mode=config.trace_snapshot_mode,
                     device=device,
                 )
-            else:
+            elif config.task in {
+                "pointer_quicksort",
+                "pointer_quicksort_no_tool",
+            }:
                 if not isinstance(vocabulary, PointerQuicksortVocabulary):
                     raise TypeError(
                         f"{config.task} requires PointerQuicksortVocabulary"
@@ -243,6 +250,21 @@ def train(
                     vocabulary=vocabulary,
                     supervise_observations=(
                         config.task == "pointer_quicksort_no_tool"
+                    ),
+                    device=device,
+                )
+            else:
+                if not isinstance(vocabulary, AdjacentSortVocabulary):
+                    raise TypeError(
+                        f"{config.task} requires AdjacentSortVocabulary"
+                    )
+                batch = make_adjacent_sort_batch(
+                    config.batch_size,
+                    length,
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    supervise_observations=(
+                        config.task == "adjacent_sort_no_tool"
                     ),
                     device=device,
                 )
@@ -415,6 +437,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "quicksort_trace",
             "pointer_quicksort",
             "pointer_quicksort_no_tool",
+            "adjacent_sort",
+            "adjacent_sort_no_tool",
         ),
         default="direct",
     )

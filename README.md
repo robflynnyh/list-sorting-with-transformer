@@ -5,9 +5,9 @@
 A small, standalone benchmark for training a decoder-only Transformer to sort
 comma-separated symbols. A model can predict the answer directly, generate a
 fully textual quicksort trace, or control an executor through relative pointer
-operations. The default experiment trains on list lengths 2-20 and evaluates
-every length through 40, making the failure or success of length extrapolation
-explicit.
+or adjacent-pair operations. The default experiment trains on list lengths
+2-20 and evaluates every length through 40, making the failure or success of
+length extrapolation explicit.
 
 ## Task
 
@@ -133,6 +133,40 @@ Render the exact training transcript for a list with:
 sort-pointer-trace 3,1,2
 ```
 
+## Adjacent-Pair Traces
+
+The `adjacent_sort` task replaces quicksort's pivot, three pointers, and range
+stack with a bubble-sort machine that only exposes the pair under one cursor:
+
+```text
+<READ_PAIR> -> 3 1
+<SWAP> -> 1 3
+<RIGHT> -> 3 2
+<SWAP> -> 2 3
+<END_PASS> -> <CHANGED>
+<RESET> -> 1 2
+<KEEP> -> 1 2
+<END_PASS> -> <UNCHANGED>
+<DONE>
+```
+
+`SWAP` and `KEEP` return the resulting local pair. `RIGHT` returns the pair at
+the next cursor position. After a changed pass, `RESET` moves the cursor to the
+start and excludes the rightmost item, which the completed pass has fixed.
+The machine stops after a pass containing no swaps.
+
+As with pointer quicksort, `adjacent_sort` trains only the model's actions and
+supplies observations using a live executor. `adjacent_sort_no_tool` instead
+trains and generates the identical action-and-observation transcript without
+calling the executor during inference. An offline replay then checks every
+generated pair, action, and final mutation.
+
+Render a complete adjacent trace with:
+
+```bash
+sort-adjacent-trace 3,1,2
+```
+
 See the [metrics reference](docs/metrics.md) for every training and evaluation
 metric, its units, and interpretation guidance.
 
@@ -150,11 +184,11 @@ layers alternate between:
 The implementation can also run all-RoPE or all-NoPE ablations through
 `--position-pattern`.
 
-Direct, textual-trace, and no-tool pointer generation is unconstrained and
-greedy. Executor-assisted pointer generation is greedy but restricted to the
-action vocabulary; phase validity is still checked by the executor. Evaluation
-measures exact completion, structural validity, partial progress, and token or
-action accuracy as appropriate.
+Direct, textual-trace, and no-tool machine generation is unconstrained and
+greedy. Executor-assisted generation is greedy but restricted to the relevant
+action vocabulary; phase validity is still checked by the executor.
+Evaluation measures exact completion, structural validity, partial progress,
+and token or action accuracy as appropriate.
 
 For an architecture control, `--architecture lstm` replaces the Transformer
 with a 2-layer, hidden-size-256 unidirectional LSTM. Its 0.96M parameters are
@@ -217,6 +251,26 @@ sort-transformer-train \
   --wandb-project list-sorting-with-transformer \
   --wandb-run-name pointer-quicksort-no-tool-numbers-seed7 \
   --output-directory artifacts/pointer_quicksort_no_tool_numbers_seed7
+
+sort-transformer-train \
+  --task adjacent_sort \
+  --representation numbers \
+  --batch-size 32 \
+  --gradient-accumulation-steps 4 \
+  --eval-batch-size 16 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name adjacent-sort-numbers-seed7 \
+  --output-directory artifacts/adjacent_sort_numbers_seed7
+
+sort-transformer-train \
+  --task adjacent_sort_no_tool \
+  --representation numbers \
+  --batch-size 32 \
+  --gradient-accumulation-steps 4 \
+  --eval-batch-size 16 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name adjacent-sort-no-tool-numbers-seed7 \
+  --output-directory artifacts/adjacent_sort_no_tool_numbers_seed7
 ```
 
 Install `.[tracking]` to enable W&B. Long trace runs can use gradient

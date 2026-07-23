@@ -1,12 +1,24 @@
 """Decoder-only Transformer experiments for list sorting."""
 
+from .adjacent_sort import (
+    AdjacentSortMachine,
+    AdjacentSortRollout,
+    AdjacentSortTrace,
+    AdjacentSortTranscriptRollout,
+    generate_adjacent_sort_trace,
+    replay_adjacent_sort_transcript,
+)
 from .data import (
+    AdjacentSortBatch,
     PointerQuicksortBatch,
     SortingBatch,
+    make_adjacent_sort_batch,
     make_pointer_quicksort_batch,
     make_sorting_batch,
 )
 from .metrics import (
+    generated_adjacent_no_tool_metrics,
+    generated_adjacent_sort_metrics,
     generated_pointer_no_tool_metrics,
     generated_pointer_quicksort_metrics,
     generated_sorting_metrics,
@@ -24,6 +36,7 @@ from .pointer_quicksort import (
 from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import (
     VOCAB_SIZE,
+    AdjacentSortVocabulary,
     PointerQuicksortVocabulary,
     SymbolVocabulary,
     decode_digit_list,
@@ -32,6 +45,12 @@ from .tokens import (
 )
 
 __all__ = [
+    "AdjacentSortBatch",
+    "AdjacentSortMachine",
+    "AdjacentSortRollout",
+    "AdjacentSortTrace",
+    "AdjacentSortTranscriptRollout",
+    "AdjacentSortVocabulary",
     "DecoderTransformer",
     "ModelConfig",
     "LSTMConfig",
@@ -48,12 +67,17 @@ __all__ = [
     "decode_digit_list",
     "encode_example",
     "encode_prompt",
+    "generate_adjacent_sort_trace",
     "generate_pointer_quicksort_trace",
+    "generated_adjacent_no_tool_metrics",
+    "generated_adjacent_sort_metrics",
     "generated_pointer_no_tool_metrics",
     "generated_pointer_quicksort_metrics",
     "generated_sorting_metrics",
+    "make_adjacent_sort_batch",
     "make_pointer_quicksort_batch",
     "make_sorting_batch",
     "masked_token_accuracy",
+    "replay_adjacent_sort_transcript",
     "replay_pointer_quicksort_transcript",
 ]

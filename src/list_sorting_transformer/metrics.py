@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 import torch
 from torch import Tensor
 
+from .adjacent_sort import (
+    AdjacentSortRollout,
+    AdjacentSortTrace,
+    replay_adjacent_sort_transcript,
+)
 from .data import IGNORE_INDEX
 from .pointer_quicksort import (
     PointerQuicksortRollout,
@@ -17,6 +23,7 @@ from .quicksort import QuicksortTrace, split_generated_events
 from .tokens import (
     EOS,
     PAD,
+    AdjacentSortVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
     SymbolVocabulary,
@@ -188,13 +195,13 @@ def generated_quicksort_metrics(
     return metrics
 
 
-def generated_pointer_quicksort_metrics(
+def _generated_executor_machine_metrics(
     values: Tensor,
-    rollouts: Sequence[PointerQuicksortRollout],
-    vocabulary: PointerQuicksortVocabulary,
-    traces: Sequence[PointerQuicksortTrace],
+    rollouts: Sequence[Any],
+    action_token_vocabulary: Sequence[int],
+    traces: Sequence[Any],
 ) -> dict[str, float]:
-    """Score executed machine state and canonical action-sequence fidelity."""
+    """Score executed state and canonical action-sequence fidelity."""
 
     if values.ndim != 2:
         raise ValueError("values must be rank two")
@@ -216,21 +223,21 @@ def generated_pointer_quicksort_metrics(
     }
     action_correct = 0
     action_total = 0
-    action_tokens = frozenset(vocabulary.action_tokens)
+    valid_action_tokens = frozenset(action_token_vocabulary)
 
     for input_row, rollout, trace in zip(values.tolist(), rollouts, traces):
         expected_values = sorted(int(value) for value in input_row)
         generated_actions = rollout.action_tokens
         expected_actions = trace.action_tokens
-        valid_action_tokens = all(
-            action in action_tokens for action in generated_actions
+        valid_action_stream = all(
+            action in valid_action_tokens for action in generated_actions
         )
         completed = rollout.completed and rollout.valid_execution
         final_values = list(rollout.final_values)
 
         totals["valid_syntax"] += float(completed)
         totals["trace_syntax_valid"] += float(
-            valid_action_tokens and rollout.valid_execution
+            valid_action_stream and rollout.valid_execution
         )
         totals["execution_completed"] += float(completed)
         totals["timed_out"] += float(rollout.timed_out)
@@ -278,13 +285,46 @@ def generated_pointer_quicksort_metrics(
     return metrics
 
 
-def generated_pointer_no_tool_metrics(
+def generated_pointer_quicksort_metrics(
     values: Tensor,
-    generated_tokens: Tensor,
+    rollouts: Sequence[PointerQuicksortRollout],
     vocabulary: PointerQuicksortVocabulary,
     traces: Sequence[PointerQuicksortTrace],
 ) -> dict[str, float]:
-    """Score transcripts generated without live executor observations."""
+    """Score interactively executed pointer quicksort actions."""
+
+    return _generated_executor_machine_metrics(
+        values,
+        rollouts,
+        vocabulary.action_tokens,
+        traces,
+    )
+
+
+def generated_adjacent_sort_metrics(
+    values: Tensor,
+    rollouts: Sequence[AdjacentSortRollout],
+    vocabulary: AdjacentSortVocabulary,
+    traces: Sequence[AdjacentSortTrace],
+) -> dict[str, float]:
+    """Score interactively executed adjacent-sort actions."""
+
+    return _generated_executor_machine_metrics(
+        values,
+        rollouts,
+        vocabulary.action_tokens,
+        traces,
+    )
+
+
+def _generated_no_tool_machine_metrics(
+    values: Tensor,
+    generated_tokens: Tensor,
+    vocabulary: Any,
+    traces: Sequence[Any],
+    replay_transcript: Callable[[Sequence[int], Sequence[int], Any], Any],
+) -> dict[str, float]:
+    """Score complete machine transcripts generated without a live tool."""
 
     if values.ndim != 2 or generated_tokens.ndim != 2:
         raise ValueError("values and generated_tokens must both be rank two")
@@ -320,7 +360,7 @@ def generated_pointer_no_tool_metrics(
         traces,
     ):
         expected_values = sorted(int(value) for value in input_row)
-        rollout = replay_pointer_quicksort_transcript(
+        rollout = replay_transcript(
             input_row,
             generated_row,
             vocabulary,
@@ -398,6 +438,40 @@ def generated_pointer_no_tool_metrics(
         1,
     )
     return metrics
+
+
+def generated_pointer_no_tool_metrics(
+    values: Tensor,
+    generated_tokens: Tensor,
+    vocabulary: PointerQuicksortVocabulary,
+    traces: Sequence[PointerQuicksortTrace],
+) -> dict[str, float]:
+    """Score pointer transcripts generated without live executor observations."""
+
+    return _generated_no_tool_machine_metrics(
+        values,
+        generated_tokens,
+        vocabulary,
+        traces,
+        replay_pointer_quicksort_transcript,
+    )
+
+
+def generated_adjacent_no_tool_metrics(
+    values: Tensor,
+    generated_tokens: Tensor,
+    vocabulary: AdjacentSortVocabulary,
+    traces: Sequence[AdjacentSortTrace],
+) -> dict[str, float]:
+    """Score adjacent transcripts generated without live tool observations."""
+
+    return _generated_no_tool_machine_metrics(
+        values,
+        generated_tokens,
+        vocabulary,
+        traces,
+        replay_adjacent_sort_transcript,
+    )
 
 
 def mean_metrics(rows: Sequence[dict[str, float]]) -> dict[str, float]:
