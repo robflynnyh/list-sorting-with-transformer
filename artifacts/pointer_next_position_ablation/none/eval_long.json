@@ -1,0 +1,237 @@
+{
+  "aggregate": {
+    "in_domain": {
+      "eos_accuracy": 1.0,
+      "exact_match": 1.0,
+      "next_value_accuracy": 1.0,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 1.0,
+      "teacher_forced_loss": 2.9423972591757774e-08,
+      "teacher_forced_token_accuracy": 1.0,
+      "unseen_pointer_exact_match": 0.0,
+      "unseen_pointer_fraction": 0.0,
+      "valid_syntax": 1.0
+    },
+    "out_of_domain": {
+      "eos_accuracy": 0.9996861049107143,
+      "exact_match": 0.5988071986607143,
+      "next_value_accuracy": 0.5988071986607143,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.7992466517857143,
+      "teacher_forced_loss": 1.1022814975523423,
+      "teacher_forced_token_accuracy": 0.7994035993303571,
+      "unseen_pointer_exact_match": 0.5437570815656529,
+      "unseen_pointer_fraction": 0.8251255580357143,
+      "valid_syntax": 0.5988071986607143
+    }
+  },
+  "checkpoint": "artifacts/pointer_next_position_ablation/none/checkpoint.pt",
+  "model_config": {
+    "d_model": 128,
+    "dropout": 0.0,
+    "ffn_multiplier": 4.0,
+    "n_heads": 4,
+    "n_layers": 4,
+    "position_pattern": "none",
+    "representation": "numbers",
+    "rotary_base": 10000.0,
+    "symbol_count": 10,
+    "vocab_size": 16
+  },
+  "per_length": {
+    "100": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.7294921875,
+      "next_value_accuracy": 0.7294921875,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.86474609375,
+      "teacher_forced_loss": 0.802869588136673,
+      "teacher_forced_token_accuracy": 0.86474609375,
+      "unseen_pointer_exact_match": 0.6608966161819907,
+      "unseen_pointer_fraction": 0.79736328125,
+      "valid_syntax": 0.7294921875
+    },
+    "110": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.67138671875,
+      "next_value_accuracy": 0.67138671875,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.835693359375,
+      "teacher_forced_loss": 0.9095644652843475,
+      "teacher_forced_token_accuracy": 0.835693359375,
+      "unseen_pointer_exact_match": 0.5976005943708602,
+      "unseen_pointer_fraction": 0.81591796875,
+      "valid_syntax": 0.67138671875
+    },
+    "120": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.6083984375,
+      "next_value_accuracy": 0.6083984375,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.80419921875,
+      "teacher_forced_loss": 1.043932743370533,
+      "teacher_forced_token_accuracy": 0.80419921875,
+      "unseen_pointer_exact_match": 0.5317046692395162,
+      "unseen_pointer_fraction": 0.83642578125,
+      "valid_syntax": 0.6083984375
+    },
+    "130": {
+      "eos_accuracy": 0.99951171875,
+      "exact_match": 0.56884765625,
+      "next_value_accuracy": 0.56884765625,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.7841796875,
+      "teacher_forced_loss": 1.1881896406412125,
+      "teacher_forced_token_accuracy": 0.784423828125,
+      "unseen_pointer_exact_match": 0.5006074531535445,
+      "unseen_pointer_fraction": 0.86328125,
+      "valid_syntax": 0.56884765625
+    },
+    "140": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.54443359375,
+      "next_value_accuracy": 0.54443359375,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.772216796875,
+      "teacher_forced_loss": 1.2358890175819397,
+      "teacher_forced_token_accuracy": 0.772216796875,
+      "unseen_pointer_exact_match": 0.4683973561673631,
+      "unseen_pointer_fraction": 0.857421875,
+      "valid_syntax": 0.54443359375
+    },
+    "150": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.51953125,
+      "next_value_accuracy": 0.51953125,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.759765625,
+      "teacher_forced_loss": 1.2885893881320953,
+      "teacher_forced_token_accuracy": 0.759765625,
+      "unseen_pointer_exact_match": 0.4448722035717223,
+      "unseen_pointer_fraction": 0.86572265625,
+      "valid_syntax": 0.51953125
+    },
+    "160": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.48486328125,
+      "next_value_accuracy": 0.48486328125,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.742431640625,
+      "teacher_forced_loss": 1.3794212937355042,
+      "teacher_forced_token_accuracy": 0.742431640625,
+      "unseen_pointer_exact_match": 0.42085561194255594,
+      "unseen_pointer_fraction": 0.8896484375,
+      "valid_syntax": 0.48486328125
+    },
+    "180": {
+      "eos_accuracy": 0.9990234375,
+      "exact_match": 0.44189453125,
+      "next_value_accuracy": 0.44189453125,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.720458984375,
+      "teacher_forced_loss": 1.4605489075183868,
+      "teacher_forced_token_accuracy": 0.720947265625,
+      "unseen_pointer_exact_match": 0.37815098804200337,
+      "unseen_pointer_fraction": 0.8974609375,
+      "valid_syntax": 0.44189453125
+    },
+    "20": {
+      "eos_accuracy": 1.0,
+      "exact_match": 1.0,
+      "next_value_accuracy": 1.0,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 1.0,
+      "teacher_forced_loss": 2.9423972591757774e-08,
+      "teacher_forced_token_accuracy": 1.0,
+      "unseen_pointer_exact_match": 0.0,
+      "unseen_pointer_fraction": 0.0,
+      "valid_syntax": 1.0
+    },
+    "200": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.41650390625,
+      "next_value_accuracy": 0.41650390625,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.708251953125,
+      "teacher_forced_loss": 1.5781347900629044,
+      "teacher_forced_token_accuracy": 0.708251953125,
+      "unseen_pointer_exact_match": 0.34672335599817355,
+      "unseen_pointer_fraction": 0.89306640625,
+      "valid_syntax": 0.41650390625
+    },
+    "300": {
+      "eos_accuracy": 0.99951171875,
+      "exact_match": 0.302734375,
+      "next_value_accuracy": 0.302734375,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.651123046875,
+      "teacher_forced_loss": 1.9819166362285614,
+      "teacher_forced_token_accuracy": 0.6513671875,
+      "unseen_pointer_exact_match": 0.2504178869462008,
+      "unseen_pointer_fraction": 0.93017578125,
+      "valid_syntax": 0.302734375
+    },
+    "40": {
+      "eos_accuracy": 1.0,
+      "exact_match": 1.0,
+      "next_value_accuracy": 1.0,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 1.0,
+      "teacher_forced_loss": 1.0177609510719776e-07,
+      "teacher_forced_token_accuracy": 1.0,
+      "unseen_pointer_exact_match": 1.0,
+      "unseen_pointer_fraction": 0.50830078125,
+      "valid_syntax": 1.0
+    },
+    "400": {
+      "eos_accuracy": 0.99755859375,
+      "exact_match": 0.24609375,
+      "next_value_accuracy": 0.24609375,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.621826171875,
+      "teacher_forced_loss": 2.1828963458538055,
+      "teacher_forced_token_accuracy": 0.623046875,
+      "unseen_pointer_exact_match": 0.21276900017503947,
+      "unseen_pointer_fraction": 0.95751953125,
+      "valid_syntax": 0.24609375
+    },
+    "60": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.98291015625,
+      "next_value_accuracy": 0.98291015625,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.991455078125,
+      "teacher_forced_loss": 0.03085295029450208,
+      "teacher_forced_token_accuracy": 0.991455078125,
+      "unseen_pointer_exact_match": 0.9749706037192819,
+      "unseen_pointer_fraction": 0.67626953125,
+      "valid_syntax": 0.98291015625
+    },
+    "80": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.8662109375,
+      "next_value_accuracy": 0.8662109375,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.93310546875,
+      "teacher_forced_loss": 0.3491350971162319,
+      "teacher_forced_token_accuracy": 0.93310546875,
+      "unseen_pointer_exact_match": 0.8246328024108903,
+      "unseen_pointer_fraction": 0.76318359375,
+      "valid_syntax": 0.8662109375
+    }
+  },
+  "step": 10000,
+  "task": "pointer_next",
+  "trace_snapshot_mode": "partition",
+  "train_length_range": [
+    2,
+    20
+  ],
+  "window_pair_encoding": "separate",
+  "window_tool_events": [
+    "KEEP",
+    "SWAP",
+    "RESET",
+    "FINISH"
+  ]
+}

@@ -1,0 +1,327 @@
+{
+  "eval_examples_per_length": 2048,
+  "per_length": {
+    "100": {
+      "all_nope": {
+        "exact_match": 0.7294921875,
+        "teacher_forced_token_accuracy": 0.86474609375,
+        "unseen_pointer_exact_match": 0.6608966161819907,
+        "unseen_pointer_fraction": 0.79736328125
+      },
+      "all_rope": {
+        "exact_match": 0.9599609375,
+        "teacher_forced_token_accuracy": 0.97998046875,
+        "unseen_pointer_exact_match": 0.951247517627462,
+        "unseen_pointer_fraction": 0.79736328125
+      },
+      "alternating": {
+        "exact_match": 1.0,
+        "teacher_forced_token_accuracy": 1.0,
+        "unseen_pointer_exact_match": 1.0,
+        "unseen_pointer_fraction": 0.79736328125
+      }
+    },
+    "110": {
+      "all_nope": {
+        "exact_match": 0.67138671875,
+        "teacher_forced_token_accuracy": 0.835693359375,
+        "unseen_pointer_exact_match": 0.5976005943708602,
+        "unseen_pointer_fraction": 0.81591796875
+      },
+      "all_rope": {
+        "exact_match": 0.880859375,
+        "teacher_forced_token_accuracy": 0.9404296875,
+        "unseen_pointer_exact_match": 0.8542973567351712,
+        "unseen_pointer_fraction": 0.81591796875
+      },
+      "alternating": {
+        "exact_match": 0.99853515625,
+        "teacher_forced_token_accuracy": 0.999267578125,
+        "unseen_pointer_exact_match": 0.9982020381792673,
+        "unseen_pointer_fraction": 0.81591796875
+      }
+    },
+    "120": {
+      "all_nope": {
+        "exact_match": 0.6083984375,
+        "teacher_forced_token_accuracy": 0.80419921875,
+        "unseen_pointer_exact_match": 0.5317046692395162,
+        "unseen_pointer_fraction": 0.83642578125
+      },
+      "all_rope": {
+        "exact_match": 0.78515625,
+        "teacher_forced_token_accuracy": 0.892578125,
+        "unseen_pointer_exact_match": 0.7428730428078519,
+        "unseen_pointer_fraction": 0.83642578125
+      },
+      "alternating": {
+        "exact_match": 0.9970703125,
+        "teacher_forced_token_accuracy": 0.99853515625,
+        "unseen_pointer_exact_match": 0.9964933869415001,
+        "unseen_pointer_fraction": 0.83642578125
+      }
+    },
+    "130": {
+      "all_nope": {
+        "exact_match": 0.56884765625,
+        "teacher_forced_token_accuracy": 0.784423828125,
+        "unseen_pointer_exact_match": 0.5006074531535445,
+        "unseen_pointer_fraction": 0.86328125
+      },
+      "all_rope": {
+        "exact_match": 0.708984375,
+        "teacher_forced_token_accuracy": 0.8544921875,
+        "unseen_pointer_exact_match": 0.6632550363061069,
+        "unseen_pointer_fraction": 0.86328125
+      },
+      "alternating": {
+        "exact_match": 0.9892578125,
+        "teacher_forced_token_accuracy": 0.99462890625,
+        "unseen_pointer_exact_match": 0.9874525930260956,
+        "unseen_pointer_fraction": 0.86328125
+      }
+    },
+    "140": {
+      "all_nope": {
+        "exact_match": 0.54443359375,
+        "teacher_forced_token_accuracy": 0.772216796875,
+        "unseen_pointer_exact_match": 0.4683973561673631,
+        "unseen_pointer_fraction": 0.857421875
+      },
+      "all_rope": {
+        "exact_match": 0.6240234375,
+        "teacher_forced_token_accuracy": 0.81201171875,
+        "unseen_pointer_exact_match": 0.5809420040583186,
+        "unseen_pointer_fraction": 0.857421875
+      },
+      "alternating": {
+        "exact_match": 0.98583984375,
+        "teacher_forced_token_accuracy": 0.992919921875,
+        "unseen_pointer_exact_match": 0.9835002999677719,
+        "unseen_pointer_fraction": 0.857421875
+      }
+    },
+    "150": {
+      "all_nope": {
+        "exact_match": 0.51953125,
+        "teacher_forced_token_accuracy": 0.759765625,
+        "unseen_pointer_exact_match": 0.4448722035717223,
+        "unseen_pointer_fraction": 0.86572265625
+      },
+      "all_rope": {
+        "exact_match": 0.49951171875,
+        "teacher_forced_token_accuracy": 0.749755859375,
+        "unseen_pointer_exact_match": 0.4952225652761675,
+        "unseen_pointer_fraction": 0.86572265625
+      },
+      "alternating": {
+        "exact_match": 0.96630859375,
+        "teacher_forced_token_accuracy": 0.983154296875,
+        "unseen_pointer_exact_match": 0.9610960956710494,
+        "unseen_pointer_fraction": 0.86572265625
+      }
+    },
+    "160": {
+      "all_nope": {
+        "exact_match": 0.48486328125,
+        "teacher_forced_token_accuracy": 0.742431640625,
+        "unseen_pointer_exact_match": 0.42085561194255594,
+        "unseen_pointer_fraction": 0.8896484375
+      },
+      "all_rope": {
+        "exact_match": 0.4228515625,
+        "teacher_forced_token_accuracy": 0.71142578125,
+        "unseen_pointer_exact_match": 0.42076021179059886,
+        "unseen_pointer_fraction": 0.8896484375
+      },
+      "alternating": {
+        "exact_match": 0.95361328125,
+        "teacher_forced_token_accuracy": 0.976806640625,
+        "unseen_pointer_exact_match": 0.9479804168560824,
+        "unseen_pointer_fraction": 0.8896484375
+      }
+    },
+    "180": {
+      "all_nope": {
+        "exact_match": 0.44189453125,
+        "teacher_forced_token_accuracy": 0.720947265625,
+        "unseen_pointer_exact_match": 0.37815098804200337,
+        "unseen_pointer_fraction": 0.8974609375
+      },
+      "all_rope": {
+        "exact_match": 0.34619140625,
+        "teacher_forced_token_accuracy": 0.673095703125,
+        "unseen_pointer_exact_match": 0.31272472319524774,
+        "unseen_pointer_fraction": 0.8974609375
+      },
+      "alternating": {
+        "exact_match": 0.908203125,
+        "teacher_forced_token_accuracy": 0.9541015625,
+        "unseen_pointer_exact_match": 0.897578820986864,
+        "unseen_pointer_fraction": 0.8974609375
+      }
+    },
+    "20": {
+      "all_nope": {
+        "exact_match": 1.0,
+        "teacher_forced_token_accuracy": 1.0,
+        "unseen_pointer_exact_match": 0.0,
+        "unseen_pointer_fraction": 0.0
+      },
+      "all_rope": {
+        "exact_match": 1.0,
+        "teacher_forced_token_accuracy": 1.0,
+        "unseen_pointer_exact_match": 0.0,
+        "unseen_pointer_fraction": 0.0
+      },
+      "alternating": {
+        "exact_match": 1.0,
+        "teacher_forced_token_accuracy": 1.0,
+        "unseen_pointer_exact_match": 0.0,
+        "unseen_pointer_fraction": 0.0
+      }
+    },
+    "200": {
+      "all_nope": {
+        "exact_match": 0.41650390625,
+        "teacher_forced_token_accuracy": 0.708251953125,
+        "unseen_pointer_exact_match": 0.34672335599817355,
+        "unseen_pointer_fraction": 0.89306640625
+      },
+      "all_rope": {
+        "exact_match": 0.31591796875,
+        "teacher_forced_token_accuracy": 0.657958984375,
+        "unseen_pointer_exact_match": 0.268985534387938,
+        "unseen_pointer_fraction": 0.89306640625
+      },
+      "alternating": {
+        "exact_match": 0.83251953125,
+        "teacher_forced_token_accuracy": 0.916259765625,
+        "unseen_pointer_exact_match": 0.8124062338460741,
+        "unseen_pointer_fraction": 0.89306640625
+      }
+    },
+    "300": {
+      "all_nope": {
+        "exact_match": 0.302734375,
+        "teacher_forced_token_accuracy": 0.6513671875,
+        "unseen_pointer_exact_match": 0.2504178869462008,
+        "unseen_pointer_fraction": 0.93017578125
+      },
+      "all_rope": {
+        "exact_match": 0.14501953125,
+        "teacher_forced_token_accuracy": 0.572509765625,
+        "unseen_pointer_exact_match": 0.13446367571379433,
+        "unseen_pointer_fraction": 0.93017578125
+      },
+      "alternating": {
+        "exact_match": 0.4912109375,
+        "teacher_forced_token_accuracy": 0.74560546875,
+        "unseen_pointer_exact_match": 0.4529844262142204,
+        "unseen_pointer_fraction": 0.93017578125
+      }
+    },
+    "40": {
+      "all_nope": {
+        "exact_match": 1.0,
+        "teacher_forced_token_accuracy": 1.0,
+        "unseen_pointer_exact_match": 1.0,
+        "unseen_pointer_fraction": 0.50830078125
+      },
+      "all_rope": {
+        "exact_match": 1.0,
+        "teacher_forced_token_accuracy": 1.0,
+        "unseen_pointer_exact_match": 1.0,
+        "unseen_pointer_fraction": 0.50830078125
+      },
+      "alternating": {
+        "exact_match": 1.0,
+        "teacher_forced_token_accuracy": 1.0,
+        "unseen_pointer_exact_match": 1.0,
+        "unseen_pointer_fraction": 0.50830078125
+      }
+    },
+    "400": {
+      "all_nope": {
+        "exact_match": 0.24609375,
+        "teacher_forced_token_accuracy": 0.623046875,
+        "unseen_pointer_exact_match": 0.21276900017503947,
+        "unseen_pointer_fraction": 0.95751953125
+      },
+      "all_rope": {
+        "exact_match": 0.12158203125,
+        "teacher_forced_token_accuracy": 0.560791015625,
+        "unseen_pointer_exact_match": 0.11944140174417399,
+        "unseen_pointer_fraction": 0.95751953125
+      },
+      "alternating": {
+        "exact_match": 0.34814453125,
+        "teacher_forced_token_accuracy": 0.674072265625,
+        "unseen_pointer_exact_match": 0.3194095588272245,
+        "unseen_pointer_fraction": 0.95751953125
+      }
+    },
+    "60": {
+      "all_nope": {
+        "exact_match": 0.98291015625,
+        "teacher_forced_token_accuracy": 0.991455078125,
+        "unseen_pointer_exact_match": 0.9749706037192819,
+        "unseen_pointer_fraction": 0.67626953125
+      },
+      "all_rope": {
+        "exact_match": 1.0,
+        "teacher_forced_token_accuracy": 1.0,
+        "unseen_pointer_exact_match": 1.0,
+        "unseen_pointer_fraction": 0.67626953125
+      },
+      "alternating": {
+        "exact_match": 1.0,
+        "teacher_forced_token_accuracy": 1.0,
+        "unseen_pointer_exact_match": 1.0,
+        "unseen_pointer_fraction": 0.67626953125
+      }
+    },
+    "80": {
+      "all_nope": {
+        "exact_match": 0.8662109375,
+        "teacher_forced_token_accuracy": 0.93310546875,
+        "unseen_pointer_exact_match": 0.8246328024108903,
+        "unseen_pointer_fraction": 0.76318359375
+      },
+      "all_rope": {
+        "exact_match": 0.99853515625,
+        "teacher_forced_token_accuracy": 0.999267578125,
+        "unseen_pointer_exact_match": 0.998083331330754,
+        "unseen_pointer_fraction": 0.76318359375
+      },
+      "alternating": {
+        "exact_match": 1.0,
+        "teacher_forced_token_accuracy": 1.0,
+        "unseen_pointer_exact_match": 1.0,
+        "unseen_pointer_fraction": 0.76318359375
+      }
+    }
+  },
+  "runs": {
+    "all_nope": {
+      "position_pattern": "none",
+      "source": "artifacts/pointer_next_position_ablation/none/checkpoint.pt",
+      "wandb": "https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/grm6f3ui"
+    },
+    "all_rope": {
+      "position_pattern": "rotary",
+      "source": "artifacts/pointer_next_position_ablation/rotary/checkpoint.pt",
+      "wandb": "https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/tftyz8tw"
+    },
+    "alternating": {
+      "position_pattern": "alternating",
+      "source": "artifacts/pointer_next_numbers_seed7/checkpoint.pt",
+      "wandb": "https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/u8vvr26w"
+    }
+  },
+  "task": "pointer_next",
+  "train_lengths": [
+    2,
+    20
+  ]
+}

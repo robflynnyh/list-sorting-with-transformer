@@ -1,0 +1,237 @@
+{
+  "aggregate": {
+    "in_domain": {
+      "eos_accuracy": 1.0,
+      "exact_match": 1.0,
+      "next_value_accuracy": 1.0,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 1.0,
+      "teacher_forced_loss": 1.9907020032405853e-08,
+      "teacher_forced_token_accuracy": 1.0,
+      "unseen_pointer_exact_match": 0.0,
+      "unseen_pointer_fraction": 0.0,
+      "valid_syntax": 1.0
+    },
+    "out_of_domain": {
+      "eos_accuracy": 0.9613909040178571,
+      "exact_match": 0.8907645089285714,
+      "next_value_accuracy": 0.8907645089285714,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.9260777064732143,
+      "teacher_forced_loss": 0.1534667725500185,
+      "teacher_forced_token_accuracy": 0.9453822544642857,
+      "unseen_pointer_exact_match": 0.8826502764654393,
+      "unseen_pointer_fraction": 0.8251255580357143,
+      "valid_syntax": 0.8907645089285714
+    }
+  },
+  "checkpoint": "artifacts/pointer_next_numbers_seed7/checkpoint.pt",
+  "model_config": {
+    "d_model": 128,
+    "dropout": 0.0,
+    "ffn_multiplier": 4.0,
+    "n_heads": 4,
+    "n_layers": 4,
+    "position_pattern": "alternating",
+    "representation": "numbers",
+    "rotary_base": 10000.0,
+    "symbol_count": 10,
+    "vocab_size": 16
+  },
+  "per_length": {
+    "100": {
+      "eos_accuracy": 1.0,
+      "exact_match": 1.0,
+      "next_value_accuracy": 1.0,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 1.0,
+      "teacher_forced_loss": 0.00018330069724470377,
+      "teacher_forced_token_accuracy": 1.0,
+      "unseen_pointer_exact_match": 1.0,
+      "unseen_pointer_fraction": 0.79736328125,
+      "valid_syntax": 1.0
+    },
+    "110": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.99853515625,
+      "next_value_accuracy": 0.99853515625,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.999267578125,
+      "teacher_forced_loss": 0.001678306725807488,
+      "teacher_forced_token_accuracy": 0.999267578125,
+      "unseen_pointer_exact_match": 0.9982020381792673,
+      "unseen_pointer_fraction": 0.81591796875,
+      "valid_syntax": 0.99853515625
+    },
+    "120": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.9970703125,
+      "next_value_accuracy": 0.9970703125,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.99853515625,
+      "teacher_forced_loss": 0.0058673753519542515,
+      "teacher_forced_token_accuracy": 0.99853515625,
+      "unseen_pointer_exact_match": 0.9964933869415001,
+      "unseen_pointer_fraction": 0.83642578125,
+      "valid_syntax": 0.9970703125
+    },
+    "130": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.9892578125,
+      "next_value_accuracy": 0.9892578125,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.99462890625,
+      "teacher_forced_loss": 0.0137453549541533,
+      "teacher_forced_token_accuracy": 0.99462890625,
+      "unseen_pointer_exact_match": 0.9874525930260956,
+      "unseen_pointer_fraction": 0.86328125,
+      "valid_syntax": 0.9892578125
+    },
+    "140": {
+      "eos_accuracy": 0.9990234375,
+      "exact_match": 0.98583984375,
+      "next_value_accuracy": 0.98583984375,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.992431640625,
+      "teacher_forced_loss": 0.02337117213755846,
+      "teacher_forced_token_accuracy": 0.992919921875,
+      "unseen_pointer_exact_match": 0.9835002999677719,
+      "unseen_pointer_fraction": 0.857421875,
+      "valid_syntax": 0.98583984375
+    },
+    "150": {
+      "eos_accuracy": 0.99853515625,
+      "exact_match": 0.96630859375,
+      "next_value_accuracy": 0.96630859375,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.982421875,
+      "teacher_forced_loss": 0.04559283424168825,
+      "teacher_forced_token_accuracy": 0.983154296875,
+      "unseen_pointer_exact_match": 0.9610960956710494,
+      "unseen_pointer_fraction": 0.86572265625,
+      "valid_syntax": 0.96630859375
+    },
+    "160": {
+      "eos_accuracy": 0.9951171875,
+      "exact_match": 0.95361328125,
+      "next_value_accuracy": 0.95361328125,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.974365234375,
+      "teacher_forced_loss": 0.06674036988988519,
+      "teacher_forced_token_accuracy": 0.976806640625,
+      "unseen_pointer_exact_match": 0.9479804168560824,
+      "unseen_pointer_fraction": 0.8896484375,
+      "valid_syntax": 0.95361328125
+    },
+    "180": {
+      "eos_accuracy": 0.9638671875,
+      "exact_match": 0.908203125,
+      "next_value_accuracy": 0.908203125,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.93603515625,
+      "teacher_forced_loss": 0.1249375594779849,
+      "teacher_forced_token_accuracy": 0.9541015625,
+      "unseen_pointer_exact_match": 0.897578820986864,
+      "unseen_pointer_fraction": 0.8974609375,
+      "valid_syntax": 0.908203125
+    },
+    "20": {
+      "eos_accuracy": 1.0,
+      "exact_match": 1.0,
+      "next_value_accuracy": 1.0,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 1.0,
+      "teacher_forced_loss": 1.9907020032405853e-08,
+      "teacher_forced_token_accuracy": 1.0,
+      "unseen_pointer_exact_match": 0.0,
+      "unseen_pointer_fraction": 0.0,
+      "valid_syntax": 1.0
+    },
+    "200": {
+      "eos_accuracy": 0.9130859375,
+      "exact_match": 0.83251953125,
+      "next_value_accuracy": 0.83251953125,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.872802734375,
+      "teacher_forced_loss": 0.20319600962102413,
+      "teacher_forced_token_accuracy": 0.916259765625,
+      "unseen_pointer_exact_match": 0.8124062338460741,
+      "unseen_pointer_fraction": 0.89306640625,
+      "valid_syntax": 0.83251953125
+    },
+    "300": {
+      "eos_accuracy": 0.7861328125,
+      "exact_match": 0.4912109375,
+      "next_value_accuracy": 0.4912109375,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.638671875,
+      "teacher_forced_loss": 0.6783955842256546,
+      "teacher_forced_token_accuracy": 0.74560546875,
+      "unseen_pointer_exact_match": 0.4529844262142204,
+      "unseen_pointer_fraction": 0.93017578125,
+      "valid_syntax": 0.4912109375
+    },
+    "40": {
+      "eos_accuracy": 1.0,
+      "exact_match": 1.0,
+      "next_value_accuracy": 1.0,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 1.0,
+      "teacher_forced_loss": 8.079223334789276e-08,
+      "teacher_forced_token_accuracy": 1.0,
+      "unseen_pointer_exact_match": 1.0,
+      "unseen_pointer_fraction": 0.50830078125,
+      "valid_syntax": 1.0
+    },
+    "400": {
+      "eos_accuracy": 0.8037109375,
+      "exact_match": 0.34814453125,
+      "next_value_accuracy": 0.34814453125,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 0.575927734375,
+      "teacher_forced_loss": 0.9848253354430199,
+      "teacher_forced_token_accuracy": 0.674072265625,
+      "unseen_pointer_exact_match": 0.3194095588272245,
+      "unseen_pointer_fraction": 0.95751953125,
+      "valid_syntax": 0.34814453125
+    },
+    "60": {
+      "eos_accuracy": 1.0,
+      "exact_match": 1.0,
+      "next_value_accuracy": 1.0,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 1.0,
+      "teacher_forced_loss": 2.1609594114124775e-07,
+      "teacher_forced_token_accuracy": 1.0,
+      "unseen_pointer_exact_match": 1.0,
+      "unseen_pointer_fraction": 0.67626953125,
+      "valid_syntax": 1.0
+    },
+    "80": {
+      "eos_accuracy": 1.0,
+      "exact_match": 1.0,
+      "next_value_accuracy": 1.0,
+      "seen_pointer_exact_match": 1.0,
+      "target_token_accuracy": 1.0,
+      "teacher_forced_loss": 1.3160461094230413e-06,
+      "teacher_forced_token_accuracy": 1.0,
+      "unseen_pointer_exact_match": 1.0,
+      "unseen_pointer_fraction": 0.76318359375,
+      "valid_syntax": 1.0
+    }
+  },
+  "step": 10000,
+  "task": "pointer_next",
+  "trace_snapshot_mode": "partition",
+  "train_length_range": [
+    2,
+    20
+  ],
+  "window_pair_encoding": "separate",
+  "window_tool_events": [
+    "KEEP",
+    "SWAP",
+    "RESET",
+    "FINISH"
+  ]
+}
