@@ -9,6 +9,7 @@ import random
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -52,6 +53,8 @@ class TrainConfig:
     eval_batch_size: int = 128
     seed: int = 7
     trace_snapshot_mode: SnapshotMode = "partition"
+    gradient_accumulation_steps: int = 1
+    checkpoint_interval: int = 1_000
 
     def __post_init__(self) -> None:
         if self.task not in {"direct", "quicksort_trace"}:
@@ -71,6 +74,8 @@ class TrainConfig:
             self.eval_interval,
             self.eval_examples,
             self.eval_batch_size,
+            self.gradient_accumulation_steps,
+            self.checkpoint_interval,
         )
         if any(value < 1 for value in integer_fields):
             raise ValueError("step, batch, logging, and evaluation sizes must be positive")
@@ -110,6 +115,7 @@ def save_checkpoint(
     optimizer: torch.optim.Optimizer,
     train_config: TrainConfig,
     step: int,
+    generator: torch.Generator,
 ) -> None:
     torch.save(
         {
@@ -118,6 +124,7 @@ def save_checkpoint(
             "train_config": asdict(train_config),
             "model_state": model.state_dict(),
             "optimizer_state": optimizer.state_dict(),
+            "generator_state": generator.get_state(),
             "step": step,
         },
         path,
@@ -131,6 +138,8 @@ def train(
     vocabulary: SymbolVocabulary,
     output_directory: Path,
     device: torch.device,
+    tracker: Any | None = None,
+    resume_checkpoint: Path | None = None,
 ) -> dict[str, object]:
     output_directory.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(config.seed)
@@ -146,72 +155,127 @@ def train(
         weight_decay=config.weight_decay,
         betas=(0.9, 0.95),
     )
+    start_step = 0
+    if resume_checkpoint is not None:
+        checkpoint = torch.load(resume_checkpoint, map_location="cpu")
+        model.load_state_dict(checkpoint["model_state"])
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
+        for optimizer_state in optimizer.state.values():
+            for name, value in optimizer_state.items():
+                if isinstance(value, torch.Tensor):
+                    optimizer_state[name] = value.to(device)
+        start_step = int(checkpoint["step"])
+        if "generator_state" in checkpoint:
+            generator.set_state(checkpoint["generator_state"])
+        if start_step >= config.steps:
+            raise ValueError(
+                "resume checkpoint is already at or beyond the requested steps"
+            )
+        print(
+            json.dumps(
+                {
+                    "resumed_from": str(resume_checkpoint),
+                    "resume_step": start_step,
+                }
+            ),
+            flush=True,
+        )
     history = []
     evaluations = []
     started_at = time.monotonic()
     model.train()
-    for step in range(1, config.steps + 1):
+    for step in range(start_step + 1, config.steps + 1):
         length = sample_length(
             config.train_min_length,
             config.train_max_length,
             generator=generator,
         )
-        if config.task == "direct":
-            batch = make_sorting_batch(
-                config.batch_size,
-                length,
-                generator=generator,
-                symbol_count=config.symbol_count,
-                device=device,
-            )
-        else:
-            if not isinstance(vocabulary, QuicksortTraceVocabulary):
-                raise TypeError(
-                    "quicksort_trace requires QuicksortTraceVocabulary"
-                )
-            batch = make_quicksort_trace_batch(
-                config.batch_size,
-                length,
-                generator=generator,
-                vocabulary=vocabulary,
-                snapshot_mode=config.trace_snapshot_mode,
-                device=device,
-            )
         current_learning_rate = learning_rate_at_step(config, step)
         for parameter_group in optimizer.param_groups:
             parameter_group["lr"] = current_learning_rate
         optimizer.zero_grad(set_to_none=True)
-        with autocast_context(device):
-            logits = model(batch.model_inputs)
-            loss = output_cross_entropy(logits, batch.labels)
-        loss.backward()
+        accumulated_loss = 0.0
+        accumulated_accuracy = 0.0
+        for _ in range(config.gradient_accumulation_steps):
+            if config.task == "direct":
+                batch = make_sorting_batch(
+                    config.batch_size,
+                    length,
+                    generator=generator,
+                    symbol_count=config.symbol_count,
+                    device=device,
+                )
+            else:
+                if not isinstance(vocabulary, QuicksortTraceVocabulary):
+                    raise TypeError(
+                        "quicksort_trace requires QuicksortTraceVocabulary"
+                    )
+                batch = make_quicksort_trace_batch(
+                    config.batch_size,
+                    length,
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    snapshot_mode=config.trace_snapshot_mode,
+                    device=device,
+                )
+            with autocast_context(device):
+                logits = model(batch.model_inputs)
+                loss = output_cross_entropy(logits, batch.labels)
+            (loss / config.gradient_accumulation_steps).backward()
+            accumulated_loss += float(loss.item())
+            accumulated_accuracy += masked_token_accuracy(logits, batch.labels)
         gradient_norm = torch.nn.utils.clip_grad_norm_(
             model.parameters(),
             config.gradient_clip,
         )
         optimizer.step()
 
-        if step == 1 or step % config.log_interval == 0:
-            row = {
-                "step": float(step),
-                "length": float(length),
-                "loss": float(loss.item()),
-                "token_accuracy": masked_token_accuracy(logits, batch.labels),
-                "learning_rate": current_learning_rate,
-                "gradient_norm": float(gradient_norm),
-                "elapsed_seconds": time.monotonic() - started_at,
-            }
-            history.append(row)
-            print(json.dumps(row), flush=True)
-
-        if step % config.eval_interval == 0 or step == config.steps:
+        if step % config.checkpoint_interval == 0:
             save_checkpoint(
                 output_directory / "checkpoint.pt",
                 model=model,
                 optimizer=optimizer,
                 train_config=config,
                 step=step,
+                generator=generator,
             )
+
+        if step == 1 or step % config.log_interval == 0:
+            row = {
+                "step": float(step),
+                "length": float(length),
+                "loss": accumulated_loss / config.gradient_accumulation_steps,
+                "token_accuracy": (
+                    accumulated_accuracy / config.gradient_accumulation_steps
+                ),
+                "learning_rate": current_learning_rate,
+                "gradient_norm": float(gradient_norm),
+                "elapsed_seconds": time.monotonic() - started_at,
+            }
+            history.append(row)
+            print(json.dumps(row), flush=True)
+            if tracker is not None:
+                tracker.log(
+                    {
+                        "step": step,
+                        **{
+                            f"train/{name}": value
+                            for name, value in row.items()
+                            if name != "step"
+                        },
+                    }
+                )
+
+        if step % config.eval_interval == 0 or step == config.steps:
+            if step % config.checkpoint_interval:
+                save_checkpoint(
+                    output_directory / "checkpoint.pt",
+                    model=model,
+                    optimizer=optimizer,
+                    train_config=config,
+                    step=step,
+                    generator=generator,
+                )
             per_length = evaluate_lengths(
                 model,
                 vocabulary,
@@ -243,6 +307,17 @@ def train(
                 ),
                 flush=True,
             )
+            if tracker is not None:
+                tracker.log(
+                    {
+                        "step": step,
+                        **{
+                            f"eval/length_{eval_length}/{name}": value
+                            for eval_length, metrics in per_length.items()
+                            for name, value in metrics.items()
+                        },
+                    }
+                )
             model.train()
 
     checkpoint_path = output_directory / "checkpoint.pt"
@@ -252,6 +327,7 @@ def train(
         optimizer=optimizer,
         train_config=config,
         step=config.steps,
+        generator=generator,
     )
     final_lengths = range(config.train_min_length, config.eval_max_length + 1)
     final_per_length = evaluate_lengths(
@@ -326,6 +402,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval-interval", type=int, default=1_000)
     parser.add_argument("--eval-examples", type=int, default=128)
     parser.add_argument("--eval-batch-size", type=int, default=128)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
+    parser.add_argument("--checkpoint-interval", type=int, default=1_000)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--n-layers", type=int, default=4)
@@ -348,6 +426,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--device", default="auto")
     parser.add_argument("--output-directory", type=Path)
+    parser.add_argument("--resume-checkpoint", type=Path)
+    parser.add_argument("--wandb-project")
+    parser.add_argument("--wandb-entity")
+    parser.add_argument("--wandb-run-name")
     return parser
 
 
@@ -372,6 +454,8 @@ def main() -> None:
         eval_batch_size=args.eval_batch_size,
         seed=args.seed,
         trace_snapshot_mode=args.trace_snapshot_mode,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        checkpoint_interval=args.checkpoint_interval,
     )
     vocabulary = make_vocabulary(
         train_config.task,
@@ -433,13 +517,39 @@ def main() -> None:
     else:
         metadata["recurrent_layers"] = model.config.n_layers
     print(json.dumps(metadata), flush=True)
-    results = train(
-        model,
-        train_config,
-        vocabulary=vocabulary,
-        output_directory=output_directory,
-        device=device,
-    )
+    tracker = None
+    if args.wandb_project is not None:
+        try:
+            import wandb
+        except ImportError as error:
+            raise RuntimeError(
+                "install the 'tracking' extra to use W&B logging"
+            ) from error
+        tracker = wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            name=args.wandb_run_name,
+            config={
+                "architecture": model.architecture,
+                "model": model.config.as_dict(),
+                "training": asdict(train_config),
+                "parameter_count": metadata["parameter_count"],
+            },
+        )
+        print(json.dumps({"wandb_url": tracker.url}), flush=True)
+    try:
+        results = train(
+            model,
+            train_config,
+            vocabulary=vocabulary,
+            output_directory=output_directory,
+            device=device,
+            tracker=tracker,
+            resume_checkpoint=args.resume_checkpoint,
+        )
+    finally:
+        if tracker is not None:
+            tracker.finish()
     print(
         json.dumps(
             {

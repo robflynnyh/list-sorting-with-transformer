@@ -127,8 +127,24 @@ sort-transformer-train \
   --task quicksort_trace \
   --representation numbers \
   --trace-snapshot-mode partition \
+  --batch-size 128 \
+  --gradient-accumulation-steps 2 \
+  --checkpoint-interval 250 \
   --eval-batch-size 32 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name quicksort-trace-numbers-seed7 \
   --output-directory artifacts/quicksort_trace_numbers_seed7
+```
+
+Install `.[tracking]` to enable W&B. Long trace runs can use gradient
+accumulation to preserve the effective batch size while limiting the memory
+cost of an unusually long padded trace. Checkpoints include model, optimizer,
+and online-data generator state, and can be resumed with:
+
+```bash
+sort-transformer-train \
+  ...same model and task arguments... \
+  --resume-checkpoint artifacts/quicksort_trace_numbers_seed7/checkpoint.pt
 ```
 
 Each run writes:

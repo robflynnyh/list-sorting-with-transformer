@@ -13,6 +13,9 @@ dependencies = [
 dev = [
     "pytest>=8",
 ]
+tracking = [
+    "wandb>=0.15",
+]
 
 [project.scripts]
 sort-transformer-train = "list_sorting_transformer.experiment:main"
