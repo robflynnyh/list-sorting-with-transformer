@@ -309,11 +309,16 @@ with two-step gradient accumulation, and the same 1.06M-parameter Transformer.
 | Direct prediction | **100.00%** | 22.54% | n/a | **2.5 min** |
 | Numeric-index trace | 99.10% | 0.94% | 0.00% | 118.0 min |
 | Executor-assisted pointer trace | **100.00%** | **98.63%** | **98.63%** | **67.4 min** |
+| No-tool pointer trace | 97.12% | 5.20% | 5.20% | 69.9 min |
 
 The executor-assisted model is exact through length 25, then reaches 99.22%,
 98.44%, and 89.06% exact execution at lengths 30, 35, and 40 respectively.
 These figures use the final independent per-length sweep rather than the
 smaller evaluation samples logged during training.
+Without executor observations, exact accuracy falls from 77.34% at length 20
+to 65.62% at length 21 and reaches zero at length 25. Generated actions and
+observations deteriorate together, consistent with failure to maintain the
+machine's mutable array, pointers, and stack rather than a single bad action.
 Direct prediction is much faster because it emits only the answer, so wall
 time should not be interpreted as a compute-matched efficiency comparison.
 
