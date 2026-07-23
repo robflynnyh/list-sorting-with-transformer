@@ -46,6 +46,11 @@ Generation is unconstrained and greedy. Evaluation does not assume valid model
 output: it separately measures exact match, comma syntax, output length,
 monotonic order, multiset preservation, and target-token accuracy.
 
+For an architecture control, `--architecture lstm` replaces the Transformer
+with a 2-layer, hidden-size-256 unidirectional LSTM. Its 0.96M parameters are
+close to the Transformer's 1.05M, and all data, losses, and evaluation code stay
+unchanged.
+
 ## Install
 
 ```bash
@@ -65,6 +70,11 @@ sort-transformer-train \
   --representation alphabet \
   --position-pattern alternating \
   --output-directory artifacts/alphabet_alternating_seed7
+
+sort-transformer-train \
+  --architecture lstm \
+  --representation numbers \
+  --output-directory artifacts/lstm_numbers_seed7
 ```
 
 Each run writes:
@@ -82,6 +92,40 @@ sort-transformer-eval \
   --lengths 2-60 \
   --output artifacts/numbers_alternating_seed7/eval_2_60.json \
   --plot artifacts/numbers_alternating_seed7/eval_2_60.png
+```
+
+## Baseline Results
+
+The initial baseline uses seed 7, 10,000 online-training steps, batch size 256,
+and 128 held-out generated examples at every length. Both representations use
+the same 1.05M-parameter alternating RoPE/NoPE model.
+
+![Comparison of number and alphabet sorting by length](artifacts/representation_comparison.png)
+
+| Representation | Exact, lengths 2-20 | Exact, lengths 21-40 | Exact at 23 | Exact at 25 | First zero-exact length |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Numbers + scalar | 100.00% | 22.54% | 98.44% | 56.25% | 27 |
+| Alphabet | 100.00% | 22.73% | 95.31% | 57.03% | 28 |
+
+Both models learn the complete in-domain task and remain perfect through length
+22, two positions beyond the training maximum. Neither sustains the algorithm:
+accuracy falls rapidly over lengths 23-28 and is zero thereafter. In this seed,
+exposing numeric order does not improve average exact extrapolation.
+
+The failure details differ. At length 40, the alphabet model still emits
+syntactically valid comma-separated outputs on 94.53% of examples, but uses the
+wrong number or multiset of symbols. The numeric model emits valid syntax on
+only 0.78%. These are single-seed results, so the close aggregate comparison
+should be treated as a baseline observation rather than evidence that the
+representations are equivalent.
+
+Rebuild the comparison figure with:
+
+```bash
+sort-transformer-compare \
+  artifacts/numbers_alternating_seed7/metrics.json \
+  artifacts/alphabet_alternating_seed7/metrics.json \
+  --output artifacts/representation_comparison.png
 ```
 
 ## Literature Context

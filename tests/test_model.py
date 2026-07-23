@@ -5,6 +5,7 @@ import torch
 from list_sorting_transformer.data import make_sorting_batch
 from list_sorting_transformer.evaluation import output_cross_entropy
 from list_sorting_transformer.model import DecoderTransformer, ModelConfig
+from list_sorting_transformer.recurrent import LSTMConfig, LSTMSorter
 from list_sorting_transformer.tokens import SymbolVocabulary
 
 
@@ -72,3 +73,29 @@ def test_model_backpropagates_output_loss_and_accepts_longer_sequences() -> None
     assert any(parameter.grad is not None for parameter in model.parameters())
     long_logits = model(torch.randint(0, model.config.vocab_size, (2, 96)))
     assert long_logits.shape == (2, 96, model.config.vocab_size)
+
+
+def test_lstm_baseline_backpropagates_and_generates_with_cached_state() -> None:
+    vocabulary = SymbolVocabulary("alphabet", 10)
+    model = LSTMSorter(
+        LSTMConfig(
+            vocab_size=vocabulary.size,
+            representation="alphabet",
+            d_model=24,
+            hidden_size=32,
+            n_layers=2,
+        )
+    )
+    batch = make_sorting_batch(
+        4,
+        5,
+        generator=torch.Generator().manual_seed(11),
+    )
+    logits = model(batch.model_inputs)
+    loss = output_cross_entropy(logits, batch.labels)
+    loss.backward()
+    generated = model.generate(batch.prompt_ids, max_new_tokens=12)
+
+    assert logits.shape == (4, 20, vocabulary.size)
+    assert 1 <= generated.shape[1] <= 12
+    assert any(parameter.grad is not None for parameter in model.parameters())

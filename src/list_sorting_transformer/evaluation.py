@@ -13,6 +13,7 @@ from torch import Tensor
 from .data import IGNORE_INDEX, make_sorting_batch
 from .metrics import generated_sorting_metrics, masked_token_accuracy
 from .model import DecoderTransformer, ModelConfig
+from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import SymbolVocabulary
 
 
@@ -32,7 +33,7 @@ def output_cross_entropy(logits: Tensor, labels: Tensor) -> Tensor:
 
 @torch.inference_mode()
 def evaluate_lengths(
-    model: DecoderTransformer,
+    model: DecoderTransformer | LSTMSorter,
     vocabulary: SymbolVocabulary,
     lengths: Iterable[int],
     *,
@@ -121,11 +122,17 @@ def load_model_checkpoint(
     checkpoint_path: str,
     *,
     device: torch.device,
-) -> tuple[DecoderTransformer, dict[str, Any]]:
+) -> tuple[DecoderTransformer | LSTMSorter, dict[str, Any]]:
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     if "model_config" not in checkpoint or "model_state" not in checkpoint:
         raise ValueError("checkpoint is missing model_config or model_state")
-    model = DecoderTransformer(ModelConfig(**checkpoint["model_config"]))
+    architecture = checkpoint.get("architecture", "transformer")
+    if architecture == "transformer":
+        model = DecoderTransformer(ModelConfig(**checkpoint["model_config"]))
+    elif architecture == "lstm":
+        model = LSTMSorter(LSTMConfig(**checkpoint["model_config"]))
+    else:
+        raise ValueError(f"unsupported checkpoint architecture: {architecture}")
     model.load_state_dict(checkpoint["model_state"])
     model.to(device)
     return model, checkpoint

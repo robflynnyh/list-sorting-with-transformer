@@ -80,3 +80,46 @@ def plot_length_generalization(
     figure.tight_layout()
     figure.savefig(output_path, dpi=180)
     plt.close(figure)
+
+
+def plot_representation_comparison(
+    runs: Sequence[tuple[str, dict[int, dict[str, float]]]],
+    output_path: Path,
+    *,
+    train_max_length: int,
+) -> None:
+    colors = ("#237a57", "#b05a2a", "#456a9d", "#755181")
+    figure, axes = plt.subplots(1, 2, figsize=(10.5, 4.0), sharex=True)
+    panels = (
+        ("exact_match", "Exact sequence accuracy"),
+        ("valid_syntax", "Valid output syntax"),
+    )
+    for axis, (metric, title) in zip(axes, panels):
+        for (label, per_length), color in zip(runs, colors):
+            lengths = sorted(per_length)
+            axis.plot(
+                lengths,
+                [per_length[length][metric] for length in lengths],
+                marker="o",
+                markersize=2.5,
+                linewidth=1.6,
+                label=label,
+                color=color,
+            )
+        axis.axvline(
+            train_max_length + 0.5,
+            linestyle="--",
+            linewidth=1.2,
+            color="#555555",
+        )
+        axis.set(
+            title=title,
+            xlabel="Input list length",
+            ylabel="Fraction",
+            ylim=(-0.02, 1.02),
+        )
+        axis.grid(alpha=0.2)
+    axes[0].legend(frameon=False, loc="lower left")
+    figure.tight_layout()
+    figure.savefig(output_path, dpi=180)
+    plt.close(figure)

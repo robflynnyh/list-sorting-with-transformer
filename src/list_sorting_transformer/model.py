@@ -164,6 +164,8 @@ class TransformerBlock(nn.Module):
 
 
 class DecoderTransformer(nn.Module):
+    architecture = "transformer"
+
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
         self.config = config

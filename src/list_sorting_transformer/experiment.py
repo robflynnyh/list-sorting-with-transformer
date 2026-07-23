@@ -1,4 +1,4 @@
-"""Train a decoder-only Transformer to autoregressively sort symbol lists."""
+"""Train an autoregressive Transformer or LSTM to sort symbol lists."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from .evaluation import (
 from .metrics import masked_token_accuracy
 from .model import DecoderTransformer, ModelConfig
 from .plots import plot_length_generalization, plot_training_history
+from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import SymbolVocabulary
 
 
@@ -94,13 +95,14 @@ def selected_evaluation_lengths(config: TrainConfig) -> list[int]:
 def save_checkpoint(
     path: Path,
     *,
-    model: DecoderTransformer,
+    model: DecoderTransformer | LSTMSorter,
     optimizer: torch.optim.Optimizer,
     train_config: TrainConfig,
     step: int,
 ) -> None:
     torch.save(
         {
+            "architecture": model.architecture,
             "model_config": model.config.as_dict(),
             "train_config": asdict(train_config),
             "model_state": model.state_dict(),
@@ -112,7 +114,7 @@ def save_checkpoint(
 
 
 def train(
-    model: DecoderTransformer,
+    model: DecoderTransformer | LSTMSorter,
     config: TrainConfig,
     *,
     vocabulary: SymbolVocabulary,
@@ -228,6 +230,7 @@ def train(
         device=device,
     )
     results = {
+        "architecture": model.architecture,
         "model_config": model.config.as_dict(),
         "train_config": asdict(config),
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
@@ -259,6 +262,11 @@ def train(
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--architecture",
+        choices=("transformer", "lstm"),
+        default="transformer",
+    )
+    parser.add_argument(
         "--representation",
         choices=("alphabet", "numbers"),
         default="numbers",
@@ -283,6 +291,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-heads", type=int, default=4)
     parser.add_argument("--ffn-multiplier", type=float, default=4.0)
     parser.add_argument("--dropout", type=float, default=0.0)
+    parser.add_argument("--lstm-hidden-size", type=int, default=256)
+    parser.add_argument("--lstm-layers", type=int, default=2)
     parser.add_argument(
         "--position-pattern",
         choices=("alternating", "rotary", "none"),
@@ -318,34 +328,58 @@ def main() -> None:
         representation=train_config.representation,
         symbol_count=train_config.symbol_count,
     )
-    model_config = ModelConfig(
-        vocab_size=vocabulary.size,
-        symbol_count=train_config.symbol_count,
-        representation=train_config.representation,
-        d_model=args.d_model,
-        n_layers=args.n_layers,
-        n_heads=args.n_heads,
-        ffn_multiplier=args.ffn_multiplier,
-        dropout=args.dropout,
-        position_pattern=args.position_pattern,
-        rotary_base=args.rotary_base,
-    )
+    if args.architecture == "transformer":
+        model_config = ModelConfig(
+            vocab_size=vocabulary.size,
+            symbol_count=train_config.symbol_count,
+            representation=train_config.representation,
+            d_model=args.d_model,
+            n_layers=args.n_layers,
+            n_heads=args.n_heads,
+            ffn_multiplier=args.ffn_multiplier,
+            dropout=args.dropout,
+            position_pattern=args.position_pattern,
+            rotary_base=args.rotary_base,
+        )
+    else:
+        model_config = LSTMConfig(
+            vocab_size=vocabulary.size,
+            symbol_count=train_config.symbol_count,
+            representation=train_config.representation,
+            d_model=args.d_model,
+            hidden_size=args.lstm_hidden_size,
+            n_layers=args.lstm_layers,
+            dropout=args.dropout,
+        )
     torch.manual_seed(train_config.seed)
-    model = DecoderTransformer(model_config)
+    if args.architecture == "transformer":
+        model = DecoderTransformer(model_config)
+    else:
+        model = LSTMSorter(model_config)
     device = resolve_device(args.device)
     model.to(device)
     output_directory = args.output_directory
     if output_directory is None:
-        output_directory = Path(
-            f"artifacts/{train_config.representation}_"
-            f"{model_config.position_pattern}_seed{train_config.seed}"
-        )
+        if args.architecture == "transformer":
+            run_name = (
+                f"{train_config.representation}_"
+                f"{model_config.position_pattern}_seed{train_config.seed}"
+            )
+        else:
+            run_name = (
+                f"lstm_{train_config.representation}_seed{train_config.seed}"
+            )
+        output_directory = Path("artifacts") / run_name
     metadata = {
+        "architecture": model.architecture,
         "device": str(device),
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
-        "layer_position_modes": model.layer_position_modes,
         "output_directory": str(output_directory),
     }
+    if isinstance(model, DecoderTransformer):
+        metadata["layer_position_modes"] = model.layer_position_modes
+    else:
+        metadata["recurrent_layers"] = model.config.n_layers
     print(json.dumps(metadata), flush=True)
     results = train(
         model,

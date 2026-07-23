@@ -17,6 +17,7 @@ dev = [
 [project.scripts]
 sort-transformer-train = "list_sorting_transformer.experiment:main"
 sort-transformer-eval = "list_sorting_transformer.evaluate:main"
+sort-transformer-compare = "list_sorting_transformer.compare:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -28,4 +29,3 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-
