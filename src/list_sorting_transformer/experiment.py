@@ -185,18 +185,20 @@ def train(
     started_at = time.monotonic()
     model.train()
     for step in range(start_step + 1, config.steps + 1):
-        length = sample_length(
-            config.train_min_length,
-            config.train_max_length,
-            generator=generator,
-        )
         current_learning_rate = learning_rate_at_step(config, step)
         for parameter_group in optimizer.param_groups:
             parameter_group["lr"] = current_learning_rate
         optimizer.zero_grad(set_to_none=True)
         accumulated_loss = 0.0
         accumulated_accuracy = 0.0
+        microbatch_lengths = []
         for _ in range(config.gradient_accumulation_steps):
+            length = sample_length(
+                config.train_min_length,
+                config.train_max_length,
+                generator=generator,
+            )
+            microbatch_lengths.append(length)
             if config.task == "direct":
                 batch = make_sorting_batch(
                     config.batch_size,
@@ -243,7 +245,9 @@ def train(
         if step == 1 or step % config.log_interval == 0:
             row = {
                 "step": float(step),
-                "length": float(length),
+                "length": sum(microbatch_lengths) / len(microbatch_lengths),
+                "minimum_length": float(min(microbatch_lengths)),
+                "maximum_length": float(max(microbatch_lengths)),
                 "loss": accumulated_loss / config.gradient_accumulation_steps,
                 "token_accuracy": (
                     accumulated_accuracy / config.gradient_accumulation_steps
