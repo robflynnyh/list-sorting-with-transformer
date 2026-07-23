@@ -17,7 +17,7 @@ so charts should use the project metric `step` as their x-axis.
 
 | Metric | Meaning |
 | --- | --- |
-| `train/loss` | Mean teacher-forced cross-entropy over predicted outputs. Inputs and padding are excluded. Executor observations are excluded for `pointer_quicksort` and `adjacent_sort`, and included for their `*_no_tool` variants. Lower is better. |
+| `train/loss` | Mean teacher-forced cross-entropy over predicted outputs. Inputs and padding are excluded. Executor observations are excluded for executor-assisted tasks and included for their `*_no_tool` variants. Lower is better. |
 | `train/token_accuracy` | Teacher-forced next-token accuracy over the same included tokens. Correct preceding target tokens are supplied to the model. |
 | `train/length` | Mean problem length across the accumulated microbatches in this optimizer update. |
 | `train/minimum_length` | Shortest accumulated microbatch length in this optimizer update. |

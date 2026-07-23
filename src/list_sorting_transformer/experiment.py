@@ -15,6 +15,7 @@ import torch
 
 from .data import (
     make_adjacent_sort_batch,
+    make_auto_advance_sort_batch,
     make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
     make_sorting_batch,
@@ -34,6 +35,7 @@ from .quicksort import SNAPSHOT_MODES, SnapshotMode
 from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import (
     AdjacentSortVocabulary,
+    AutoAdvanceSortVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
     SymbolVocabulary,
@@ -72,6 +74,8 @@ class TrainConfig:
             "pointer_quicksort_no_tool",
             "adjacent_sort",
             "adjacent_sort_no_tool",
+            "adjacent_sort_auto_advance",
+            "adjacent_sort_auto_advance_no_tool",
         }:
             raise ValueError("invalid sorting task")
         if self.representation not in {"alphabet", "numbers"}:
@@ -253,7 +257,7 @@ def train(
                     ),
                     device=device,
                 )
-            else:
+            elif config.task in {"adjacent_sort", "adjacent_sort_no_tool"}:
                 if not isinstance(vocabulary, AdjacentSortVocabulary):
                     raise TypeError(
                         f"{config.task} requires AdjacentSortVocabulary"
@@ -265,6 +269,21 @@ def train(
                     vocabulary=vocabulary,
                     supervise_observations=(
                         config.task == "adjacent_sort_no_tool"
+                    ),
+                    device=device,
+                )
+            else:
+                if not isinstance(vocabulary, AutoAdvanceSortVocabulary):
+                    raise TypeError(
+                        f"{config.task} requires AutoAdvanceSortVocabulary"
+                    )
+                batch = make_auto_advance_sort_batch(
+                    config.batch_size,
+                    length,
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    supervise_observations=(
+                        config.task == "adjacent_sort_auto_advance_no_tool"
                     ),
                     device=device,
                 )
@@ -439,6 +458,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "pointer_quicksort_no_tool",
             "adjacent_sort",
             "adjacent_sort_no_tool",
+            "adjacent_sort_auto_advance",
+            "adjacent_sort_auto_advance_no_tool",
         ),
         default="direct",
     )

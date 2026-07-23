@@ -12,6 +12,7 @@ from .adjacent_sort import (
     AdjacentSortRollout,
     AdjacentSortTrace,
     replay_adjacent_sort_transcript,
+    replay_auto_advance_sort_transcript,
 )
 from .data import IGNORE_INDEX
 from .pointer_quicksort import (
@@ -24,6 +25,7 @@ from .tokens import (
     EOS,
     PAD,
     AdjacentSortVocabulary,
+    AutoAdvanceSortVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
     SymbolVocabulary,
@@ -317,6 +319,22 @@ def generated_adjacent_sort_metrics(
     )
 
 
+def generated_auto_advance_sort_metrics(
+    values: Tensor,
+    rollouts: Sequence[AdjacentSortRollout],
+    vocabulary: AutoAdvanceSortVocabulary,
+    traces: Sequence[AdjacentSortTrace],
+) -> dict[str, float]:
+    """Score executor-controlled adjacent-sort actions."""
+
+    return _generated_executor_machine_metrics(
+        values,
+        rollouts,
+        vocabulary.action_tokens,
+        traces,
+    )
+
+
 def _generated_no_tool_machine_metrics(
     values: Tensor,
     generated_tokens: Tensor,
@@ -471,6 +489,23 @@ def generated_adjacent_no_tool_metrics(
         vocabulary,
         traces,
         replay_adjacent_sort_transcript,
+    )
+
+
+def generated_auto_advance_no_tool_metrics(
+    values: Tensor,
+    generated_tokens: Tensor,
+    vocabulary: AutoAdvanceSortVocabulary,
+    traces: Sequence[AdjacentSortTrace],
+) -> dict[str, float]:
+    """Score auto-advance transcripts generated without live observations."""
+
+    return _generated_no_tool_machine_metrics(
+        values,
+        generated_tokens,
+        vocabulary,
+        traces,
+        replay_auto_advance_sort_transcript,
     )
 
 

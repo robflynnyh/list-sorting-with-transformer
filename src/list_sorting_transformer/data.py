@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
 from torch import Tensor
 
-from .adjacent_sort import AdjacentSortTrace, generate_adjacent_sort_trace
+from .adjacent_sort import (
+    AdjacentSortTrace,
+    generate_adjacent_sort_trace,
+    generate_auto_advance_sort_trace,
+)
 from .pointer_quicksort import (
     PointerQuicksortTrace,
     generate_pointer_quicksort_trace,
@@ -21,6 +26,7 @@ from .tokens import (
     SEP,
     VALUE_OFFSET,
     AdjacentSortVocabulary,
+    AutoAdvanceSortVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
 )
@@ -290,6 +296,49 @@ def make_adjacent_sort_batch(
 ) -> AdjacentSortBatch:
     """Generate adjacent-pair transcripts and mask tool observations."""
 
+    return _make_adjacent_sort_batch(
+        batch_size,
+        length,
+        generator=generator,
+        vocabulary=vocabulary,
+        trace_generator=generate_adjacent_sort_trace,
+        supervise_observations=supervise_observations,
+        device=device,
+    )
+
+
+def make_auto_advance_sort_batch(
+    batch_size: int,
+    length: int,
+    *,
+    generator: torch.Generator,
+    vocabulary: AutoAdvanceSortVocabulary,
+    supervise_observations: bool = False,
+    device: torch.device | str | None = None,
+) -> AdjacentSortBatch:
+    """Generate transcripts whose executor controls cursor advancement."""
+
+    return _make_adjacent_sort_batch(
+        batch_size,
+        length,
+        generator=generator,
+        vocabulary=vocabulary,
+        trace_generator=generate_auto_advance_sort_trace,
+        supervise_observations=supervise_observations,
+        device=device,
+    )
+
+
+def _make_adjacent_sort_batch(
+    batch_size: int,
+    length: int,
+    *,
+    generator: torch.Generator,
+    vocabulary: AdjacentSortVocabulary | AutoAdvanceSortVocabulary,
+    trace_generator: Callable[..., AdjacentSortTrace],
+    supervise_observations: bool,
+    device: torch.device | str | None,
+) -> AdjacentSortBatch:
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
     if length < 1:
@@ -302,7 +351,7 @@ def make_adjacent_sort_batch(
     )
     value_rows = values.tolist()
     traces = tuple(
-        generate_adjacent_sort_trace(row, vocabulary)
+        trace_generator(row, vocabulary)
         for row in value_rows
     )
     prompts = tuple(vocabulary.encode_prompt(row) for row in value_rows)

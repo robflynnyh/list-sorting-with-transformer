@@ -167,6 +167,38 @@ Render a complete adjacent trace with:
 sort-adjacent-trace 3,1,2
 ```
 
+### Executor-Controlled Advancement
+
+The `adjacent_sort_auto_advance` task removes the remaining position-counting
+requirement. After each `KEEP` or `SWAP`, the executor automatically advances
+and returns the next pair. At a pass boundary it either returns `CHANGED`
+followed by the first pair of the shorter next pass, or `UNCHANGED` when
+sorting is complete:
+
+```text
+<READ_PAIR> -> <PAIR> <PAIR_3_1>
+<SWAP> -> <PAIR> <PAIR_3_2>
+<SWAP> -> <CHANGED> <PAIR_1_2>
+<KEEP> -> <UNCHANGED> <NONE>
+<DONE>
+```
+
+Every nonterminal executor response has exactly two tokens, avoiding hidden
+padding during batched cached decoding. `PAIR PAIR_3_1` identifies the next
+comparison, `CHANGED PAIR_1_2` starts the next shorter pass, and
+`UNCHANGED NONE` marks completion. A dedicated token represents each ordered
+symbol pair, keeping the comparison in the immediately preceding token and
+shortening long traces. The model still decides whether each pair needs
+swapping; the executor owns cursor movement, pass boundaries, and resetting.
+`adjacent_sort_auto_advance_no_tool` uses the same transcript but requires the
+model to generate all pair and boundary observations itself.
+
+Render this protocol with:
+
+```bash
+sort-adjacent-trace --auto-advance 3,1,2
+```
+
 See the [metrics reference](docs/metrics.md) for every training and evaluation
 metric, its units, and interpretation guidance.
 
@@ -271,6 +303,26 @@ sort-transformer-train \
   --wandb-project list-sorting-with-transformer \
   --wandb-run-name adjacent-sort-no-tool-numbers-seed7 \
   --output-directory artifacts/adjacent_sort_no_tool_numbers_seed7
+
+sort-transformer-train \
+  --task adjacent_sort_auto_advance \
+  --representation numbers \
+  --batch-size 128 \
+  --gradient-accumulation-steps 2 \
+  --eval-batch-size 32 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name adjacent-sort-auto-advance-numbers-seed7 \
+  --output-directory artifacts/adjacent_sort_auto_advance_numbers_seed7
+
+sort-transformer-train \
+  --task adjacent_sort_auto_advance_no_tool \
+  --representation numbers \
+  --batch-size 128 \
+  --gradient-accumulation-steps 2 \
+  --eval-batch-size 32 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name adjacent-sort-auto-advance-no-tool-numbers-seed7 \
+  --output-directory artifacts/adjacent_sort_auto_advance_no_tool_numbers_seed7
 ```
 
 Install `.[tracking]` to enable W&B. Long trace runs can use gradient

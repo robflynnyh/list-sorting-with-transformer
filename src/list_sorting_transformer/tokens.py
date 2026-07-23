@@ -93,6 +93,19 @@ ADJACENT_SORT_OBSERVATIONS = (
     "UNCHANGED",
     "INVALID",
 )
+AUTO_ADVANCE_SORT_ACTIONS = (
+    "READ_PAIR",
+    "KEEP",
+    "SWAP",
+    "DONE",
+)
+AUTO_ADVANCE_SORT_OBSERVATIONS = (
+    "PAIR",
+    "CHANGED",
+    "UNCHANGED",
+    "NONE",
+    "INVALID",
+)
 _POINTER_ACTION_INDEX = {
     name: index for index, name in enumerate(POINTER_QUICKSORT_ACTIONS)
 }
@@ -104,6 +117,12 @@ _ADJACENT_ACTION_INDEX = {
 }
 _ADJACENT_OBSERVATION_INDEX = {
     name: index for index, name in enumerate(ADJACENT_SORT_OBSERVATIONS)
+}
+_AUTO_ADVANCE_ACTION_INDEX = {
+    name: index for index, name in enumerate(AUTO_ADVANCE_SORT_ACTIONS)
+}
+_AUTO_ADVANCE_OBSERVATION_INDEX = {
+    name: index for index, name in enumerate(AUTO_ADVANCE_SORT_OBSERVATIONS)
 }
 
 
@@ -440,6 +459,109 @@ class AdjacentSortVocabulary(SymbolVocabulary):
         return " ".join(rendered)
 
 
+@dataclass(frozen=True)
+class AutoAdvanceSortVocabulary(SymbolVocabulary):
+    """Vocabulary for adjacent sorting with executor-controlled movement."""
+
+    @property
+    def action_token_offset(self) -> int:
+        return VALUE_OFFSET + self.symbol_count
+
+    @property
+    def observation_token_offset(self) -> int:
+        return self.action_token_offset + len(AUTO_ADVANCE_SORT_ACTIONS)
+
+    @property
+    def pair_token_offset(self) -> int:
+        return self.observation_token_offset + len(
+            AUTO_ADVANCE_SORT_OBSERVATIONS
+        )
+
+    @property
+    def size(self) -> int:
+        return self.pair_token_offset + self.symbol_count**2
+
+    @property
+    def action_tokens(self) -> tuple[int, ...]:
+        return tuple(
+            self.action_token_offset + index
+            for index in range(len(AUTO_ADVANCE_SORT_ACTIONS))
+        )
+
+    def action_token(self, name: str) -> int:
+        try:
+            index = _AUTO_ADVANCE_ACTION_INDEX[name]
+        except KeyError as error:
+            raise ValueError(
+                f"unknown auto-advance sort action: {name}"
+            ) from error
+        return self.action_token_offset + index
+
+    def action_name(self, token: int) -> str:
+        index = int(token) - self.action_token_offset
+        if not 0 <= index < len(AUTO_ADVANCE_SORT_ACTIONS):
+            raise ValueError(f"token {token} is not an auto-advance sort action")
+        return AUTO_ADVANCE_SORT_ACTIONS[index]
+
+    def observation_token(self, name: str) -> int:
+        try:
+            index = _AUTO_ADVANCE_OBSERVATION_INDEX[name]
+        except KeyError as error:
+            raise ValueError(
+                f"unknown auto-advance sort observation: {name}"
+            ) from error
+        return self.observation_token_offset + index
+
+    def pair_token(self, left: int, right: int) -> int:
+        self.value_token(left)
+        self.value_token(right)
+        return self.pair_token_offset + left * self.symbol_count + right
+
+    def token_pair(self, token: int) -> tuple[int, int]:
+        index = int(token) - self.pair_token_offset
+        if not 0 <= index < self.symbol_count**2:
+            raise ValueError(f"token {token} is not an auto-advance pair")
+        return divmod(index, self.symbol_count)
+
+    def render_tokens(self, tokens: Sequence[int]) -> str:
+        rendered = []
+        for token_value in tokens:
+            token = int(token_value)
+            if token == PAD:
+                rendered.append("<pad>")
+            elif token == BOS:
+                rendered.append("<bos>")
+            elif token == SEP:
+                rendered.append("<auto_advance_trace>")
+            elif token == EOS:
+                rendered.append("<eos>")
+            elif token == COMMA:
+                rendered.append(",")
+            elif VALUE_OFFSET <= token < VALUE_OFFSET + self.symbol_count:
+                rendered.append(self.render_value(self.token_value(token)))
+            elif self.action_token_offset <= token < self.observation_token_offset:
+                rendered.append(
+                    f"<{AUTO_ADVANCE_SORT_ACTIONS[token - self.action_token_offset]}>"
+                )
+            elif self.observation_token_offset <= token < self.size:
+                if token >= self.pair_token_offset:
+                    left, right = self.token_pair(token)
+                    rendered.append(
+                        f"<PAIR_{self.render_value(left)}_{self.render_value(right)}>"
+                    )
+                    continue
+                rendered.append(
+                    "<"
+                    + AUTO_ADVANCE_SORT_OBSERVATIONS[
+                        token - self.observation_token_offset
+                    ]
+                    + ">"
+                )
+            else:
+                rendered.append(f"<?>[{token}]")
+        return " ".join(rendered)
+
+
 def make_vocabulary(
     task: str,
     *,
@@ -458,6 +580,10 @@ def make_vocabulary(
         return AdjacentSortVocabulary(representation, symbol_count)
     if task == "adjacent_sort_no_tool":
         return AdjacentSortVocabulary(representation, symbol_count)
+    if task == "adjacent_sort_auto_advance":
+        return AutoAdvanceSortVocabulary(representation, symbol_count)
+    if task == "adjacent_sort_auto_advance_no_tool":
+        return AutoAdvanceSortVocabulary(representation, symbol_count)
     raise ValueError(f"unsupported sorting task: {task}")
 
 

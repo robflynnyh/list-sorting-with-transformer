@@ -4,22 +4,33 @@ import torch
 
 from list_sorting_transformer.adjacent_sort import (
     AdjacentSortMachine,
+    AutoAdvanceSortMachine,
     execute_adjacent_sort_actions,
+    execute_auto_advance_sort_actions,
     generate_adjacent_sort_trace,
+    generate_auto_advance_sort_trace,
     replay_adjacent_sort_transcript,
+    replay_auto_advance_sort_transcript,
 )
 from list_sorting_transformer.data import (
     IGNORE_INDEX,
     make_adjacent_sort_batch,
+    make_auto_advance_sort_batch,
 )
-from list_sorting_transformer.evaluation import generate_adjacent_sort_rollouts
+from list_sorting_transformer.evaluation import (
+    generate_adjacent_sort_rollouts,
+    generate_auto_advance_sort_rollouts,
+)
 from list_sorting_transformer.metrics import (
     generated_adjacent_no_tool_metrics,
     generated_adjacent_sort_metrics,
+    generated_auto_advance_no_tool_metrics,
+    generated_auto_advance_sort_metrics,
 )
 from list_sorting_transformer.tokens import (
     VALUE_OFFSET,
     AdjacentSortVocabulary,
+    AutoAdvanceSortVocabulary,
 )
 
 
@@ -27,7 +38,7 @@ class ScriptedAdjacentPolicy:
     def __init__(
         self,
         action_rows: tuple[tuple[int, ...], ...],
-        vocabulary: AdjacentSortVocabulary,
+        vocabulary: AdjacentSortVocabulary | AutoAdvanceSortVocabulary,
     ) -> None:
         self.action_rows = action_rows
         self.action_tokens = frozenset(vocabulary.action_tokens)
@@ -259,3 +270,170 @@ def test_adjacent_no_tool_replay_checks_generated_pair_values() -> None:
     assert metrics["exact_match"] == 0.0
     assert metrics["trace_exact_match"] == 0.0
     assert metrics["observation_token_accuracy"] < 1.0
+
+
+def test_auto_advance_trace_exposes_boundaries_without_move_actions() -> None:
+    vocabulary = AutoAdvanceSortVocabulary()
+    trace = generate_auto_advance_sort_trace([3, 1, 2], vocabulary)
+
+    assert trace.final_values == (1, 2, 3)
+    assert vocabulary.render_tokens(trace.target_tokens) == (
+        "<READ_PAIR> <PAIR> <PAIR_3_1> "
+        "<SWAP> <PAIR> <PAIR_3_2> "
+        "<SWAP> <CHANGED> <PAIR_1_2> "
+        "<KEEP> <UNCHANGED> <NONE> "
+        "<DONE>"
+    )
+    assert [vocabulary.action_name(token) for token in trace.action_tokens] == [
+        "READ_PAIR",
+        "SWAP",
+        "SWAP",
+        "KEEP",
+        "DONE",
+    ]
+    action_positions = [
+        index
+        for index, predicted in enumerate(trace.target_prediction_mask)
+        if predicted
+    ]
+    observation_counts = [
+        (
+            action_positions[index + 1]
+            if index + 1 < len(action_positions)
+            else len(trace.target_tokens)
+        )
+        - action_position
+        - 1
+        for index, action_position in enumerate(action_positions)
+    ]
+    assert observation_counts == [2, 2, 2, 2, 0]
+
+
+def test_auto_advance_machine_sorts_random_lists_with_shorter_action_traces() -> None:
+    auto_vocabulary = AutoAdvanceSortVocabulary(symbol_count=5)
+    original_vocabulary = AdjacentSortVocabulary(symbol_count=5)
+    generator = torch.Generator().manual_seed(53)
+
+    for length in range(1, 41):
+        values = torch.randint(
+            0,
+            5,
+            (length,),
+            generator=generator,
+        ).tolist()
+        auto_trace = generate_auto_advance_sort_trace(values, auto_vocabulary)
+        original_trace = generate_adjacent_sort_trace(values, original_vocabulary)
+        assert list(auto_trace.final_values) == sorted(values)
+        assert len(auto_trace.action_tokens) <= len(original_trace.action_tokens)
+
+
+def test_auto_advance_machine_rejects_wrong_comparison_decision() -> None:
+    vocabulary = AutoAdvanceSortVocabulary()
+    machine = AutoAdvanceSortMachine([2, 0, 1], vocabulary)
+    machine.step(vocabulary.action_token("READ_PAIR"))
+
+    observations = machine.step(vocabulary.action_token("KEEP"))
+
+    assert observations == (
+        vocabulary.observation_token("INVALID"),
+        vocabulary.observation_token("NONE"),
+    )
+    assert machine.finished
+    assert not machine.valid
+    assert machine.last_error == "expected SWAP, received KEEP"
+
+
+def test_auto_advance_tool_and_no_tool_batches_use_the_same_transcript() -> None:
+    vocabulary = AutoAdvanceSortVocabulary()
+    tool_batch = make_auto_advance_sort_batch(
+        4,
+        6,
+        generator=torch.Generator().manual_seed(61),
+        vocabulary=vocabulary,
+    )
+    no_tool_batch = make_auto_advance_sort_batch(
+        4,
+        6,
+        generator=torch.Generator().manual_seed(61),
+        vocabulary=vocabulary,
+        supervise_observations=True,
+    )
+
+    torch.testing.assert_close(tool_batch.token_ids, no_tool_batch.token_ids)
+    assert tool_batch.traces == no_tool_batch.traces
+    assert tool_batch.labels.ne(IGNORE_INDEX).sum() < no_tool_batch.labels.ne(
+        IGNORE_INDEX
+    ).sum()
+
+
+def test_scripted_policy_completes_auto_advance_execution() -> None:
+    vocabulary = AutoAdvanceSortVocabulary()
+    batch = make_auto_advance_sort_batch(
+        4,
+        8,
+        generator=torch.Generator().manual_seed(67),
+        vocabulary=vocabulary,
+    )
+    model = ScriptedAdjacentPolicy(
+        tuple(trace.action_tokens for trace in batch.traces),
+        vocabulary,
+    )
+
+    rollouts = generate_auto_advance_sort_rollouts(
+        model,  # type: ignore[arg-type]
+        batch,
+        vocabulary,
+    )
+
+    assert all(rollout.completed for rollout in rollouts)
+    assert all(
+        list(rollout.final_values) == sorted(values)
+        for rollout, values in zip(rollouts, batch.values.tolist())
+    )
+    metrics = generated_auto_advance_sort_metrics(
+        batch.values,
+        rollouts,
+        vocabulary,
+        batch.traces,
+    )
+    assert metrics["exact_match"] == 1.0
+
+
+def test_auto_advance_no_tool_replay_checks_boundary_observations() -> None:
+    vocabulary = AutoAdvanceSortVocabulary()
+    values = torch.tensor([[3, 1, 2]])
+    trace = generate_auto_advance_sort_trace(values[0].tolist(), vocabulary)
+
+    perfect = replay_auto_advance_sort_transcript(
+        values[0].tolist(),
+        trace.target_tokens,
+        vocabulary,
+    )
+    assert perfect.completed
+    assert perfect.observations_valid
+    perfect_metrics = generated_auto_advance_no_tool_metrics(
+        values,
+        torch.tensor([trace.target_tokens]),
+        vocabulary,
+        [trace],
+    )
+    assert perfect_metrics["exact_match"] == 1.0
+
+    corrupted_tokens = list(trace.target_tokens)
+    changed_index = corrupted_tokens.index(vocabulary.observation_token("CHANGED"))
+    corrupted_tokens[changed_index] = vocabulary.observation_token("UNCHANGED")
+    corrupted = replay_auto_advance_sort_transcript(
+        values[0].tolist(),
+        corrupted_tokens,
+        vocabulary,
+    )
+    assert corrupted.completed
+    assert not corrupted.observations_valid
+
+    executed = execute_auto_advance_sort_actions(
+        values[0].tolist(),
+        trace.action_tokens,
+        vocabulary,
+    )
+    assert executed.completed
+    assert executed.final_values == (1, 2, 3)

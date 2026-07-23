@@ -10,12 +10,17 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from .adjacent_sort import AdjacentSortMachine, AdjacentSortRollout
+from .adjacent_sort import (
+    AdjacentSortMachine,
+    AdjacentSortRollout,
+    AutoAdvanceSortMachine,
+)
 from .data import (
     AdjacentSortBatch,
     IGNORE_INDEX,
     PointerQuicksortBatch,
     make_adjacent_sort_batch,
+    make_auto_advance_sort_batch,
     make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
     make_sorting_batch,
@@ -23,6 +28,8 @@ from .data import (
 from .metrics import (
     generated_adjacent_no_tool_metrics,
     generated_adjacent_sort_metrics,
+    generated_auto_advance_no_tool_metrics,
+    generated_auto_advance_sort_metrics,
     generated_pointer_no_tool_metrics,
     generated_pointer_quicksort_metrics,
     generated_quicksort_metrics,
@@ -39,6 +46,7 @@ from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import (
     PAD,
     AdjacentSortVocabulary,
+    AutoAdvanceSortVocabulary,
     PointerQuicksortVocabulary,
     QuicksortTraceVocabulary,
     SymbolVocabulary,
@@ -155,13 +163,46 @@ def generate_pointer_quicksort_rollouts(
     )
 
 
-@torch.inference_mode()
 def generate_adjacent_sort_rollouts(
     model: DecoderTransformer | LSTMSorter,
     batch: AdjacentSortBatch,
     vocabulary: AdjacentSortVocabulary,
     *,
     max_actions: int | None = None,
+) -> tuple[AdjacentSortRollout, ...]:
+    return _generate_adjacent_machine_rollouts(
+        model,
+        batch,
+        vocabulary,
+        AdjacentSortMachine,
+        max_actions=max_actions,
+    )
+
+
+def generate_auto_advance_sort_rollouts(
+    model: DecoderTransformer | LSTMSorter,
+    batch: AdjacentSortBatch,
+    vocabulary: AutoAdvanceSortVocabulary,
+    *,
+    max_actions: int | None = None,
+) -> tuple[AdjacentSortRollout, ...]:
+    return _generate_adjacent_machine_rollouts(
+        model,
+        batch,
+        vocabulary,
+        AutoAdvanceSortMachine,
+        max_actions=max_actions,
+    )
+
+
+@torch.inference_mode()
+def _generate_adjacent_machine_rollouts(
+    model: DecoderTransformer | LSTMSorter,
+    batch: AdjacentSortBatch,
+    vocabulary: AdjacentSortVocabulary | AutoAdvanceSortVocabulary,
+    machine_type: type[AdjacentSortMachine] | type[AutoAdvanceSortMachine],
+    *,
+    max_actions: int | None,
 ) -> tuple[AdjacentSortRollout, ...]:
     """Alternate model actions with one- or two-token machine observations."""
 
@@ -171,7 +212,7 @@ def generate_adjacent_sort_rollouts(
         raise ValueError("max_actions must be positive")
 
     machines = [
-        AdjacentSortMachine(row, vocabulary)
+        machine_type(row, vocabulary)  # type: ignore[arg-type]
         for row in batch.values.tolist()
     ]
     generated_actions: list[list[int]] = [[] for _ in machines]
@@ -341,6 +382,30 @@ def evaluate_lengths(
                     max_new_tokens = max(
                         len(trace.target_tokens) for trace in batch.traces
                     ) + 8
+            elif task in {
+                "adjacent_sort_auto_advance",
+                "adjacent_sort_auto_advance_no_tool",
+            }:
+                if not isinstance(vocabulary, AutoAdvanceSortVocabulary):
+                    raise TypeError(
+                        f"{task} requires AutoAdvanceSortVocabulary"
+                    )
+                batch = make_auto_advance_sort_batch(
+                    current_batch_size,
+                    int(length),
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    supervise_observations=(
+                        task == "adjacent_sort_auto_advance_no_tool"
+                    ),
+                    device=device,
+                )
+                if task == "adjacent_sort_auto_advance":
+                    max_new_tokens = 0
+                else:
+                    max_new_tokens = max(
+                        len(trace.target_tokens) for trace in batch.traces
+                    ) + 8
             else:
                 raise ValueError(f"unsupported sorting task: {task}")
             with autocast_context(device, enabled=use_autocast):
@@ -371,6 +436,21 @@ def evaluate_lengths(
                     )
                 elif task == "adjacent_sort_no_tool":
                     assert isinstance(vocabulary, AdjacentSortVocabulary)
+                    generated = model.generate(
+                        batch.prompt_ids,
+                        max_new_tokens=max_new_tokens,
+                        stop_token=vocabulary.action_token("DONE"),
+                    )
+                elif task == "adjacent_sort_auto_advance":
+                    assert isinstance(batch, AdjacentSortBatch)
+                    assert isinstance(vocabulary, AutoAdvanceSortVocabulary)
+                    rollouts = generate_auto_advance_sort_rollouts(
+                        model,
+                        batch,
+                        vocabulary,
+                    )
+                elif task == "adjacent_sort_auto_advance_no_tool":
+                    assert isinstance(vocabulary, AutoAdvanceSortVocabulary)
                     generated = model.generate(
                         batch.prompt_ids,
                         max_new_tokens=max_new_tokens,
@@ -422,10 +502,28 @@ def evaluate_lengths(
                     vocabulary,
                     batch.traces,
                 )
-            else:
+            elif task == "adjacent_sort_no_tool":
                 assert isinstance(batch, AdjacentSortBatch)
                 assert isinstance(vocabulary, AdjacentSortVocabulary)
                 metrics = generated_adjacent_no_tool_metrics(
+                    batch.values.cpu(),
+                    generated.cpu(),
+                    vocabulary,
+                    batch.traces,
+                )
+            elif task == "adjacent_sort_auto_advance":
+                assert isinstance(batch, AdjacentSortBatch)
+                assert isinstance(vocabulary, AutoAdvanceSortVocabulary)
+                metrics = generated_auto_advance_sort_metrics(
+                    batch.values.cpu(),
+                    rollouts,
+                    vocabulary,
+                    batch.traces,
+                )
+            else:
+                assert isinstance(batch, AdjacentSortBatch)
+                assert isinstance(vocabulary, AutoAdvanceSortVocabulary)
+                metrics = generated_auto_advance_no_tool_metrics(
                     batch.values.cpu(),
                     generated.cpu(),
                     vocabulary,
