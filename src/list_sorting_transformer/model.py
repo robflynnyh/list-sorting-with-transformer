@@ -11,6 +11,9 @@ from torch import Tensor, nn
 from .tokens import EOS, PAD, VALUE_OFFSET
 
 
+KeyValueCache = tuple[Tensor, Tensor]
+
+
 @dataclass(frozen=True)
 class ModelConfig:
     vocab_size: int
@@ -67,11 +70,12 @@ class RotaryEmbedding(nn.Module):
         )
         self.register_buffer("inverse_frequency", inverse_frequency, persistent=False)
 
-    def forward(self, tensor: Tensor) -> Tensor:
+    def forward(self, tensor: Tensor, *, position_offset: int = 0) -> Tensor:
         """Rotate adjacent feature pairs in ``[batch, heads, time, dim]``."""
 
         positions = torch.arange(
-            tensor.shape[-2],
+            position_offset,
+            position_offset + tensor.shape[-2],
             device=tensor.device,
             dtype=self.inverse_frequency.dtype,
         )
@@ -102,37 +106,54 @@ class CausalSelfAttention(nn.Module):
             else None
         )
 
-    def forward(self, hidden: Tensor) -> Tensor:
+    def _split_heads(self, tensor: Tensor) -> Tensor:
+        batch_size, sequence_length, model_dim = tensor.shape
+        return tensor.view(
+            batch_size,
+            sequence_length,
+            self.n_heads,
+            model_dim // self.n_heads,
+        ).transpose(1, 2)
+
+    def forward_with_cache(
+        self,
+        hidden: Tensor,
+        *,
+        cache: KeyValueCache | None = None,
+    ) -> tuple[Tensor, KeyValueCache]:
         batch_size, sequence_length, model_dim = hidden.shape
         query, key, value = self.qkv(hidden).chunk(3, dim=-1)
-
-        def split_heads(tensor: Tensor) -> Tensor:
-            return tensor.view(
-                batch_size,
-                sequence_length,
-                self.n_heads,
-                self.head_dim,
-            ).transpose(1, 2)
-
-        query = split_heads(query)
-        key = split_heads(key)
-        value = split_heads(value)
+        query = self._split_heads(query)
+        key = self._split_heads(key)
+        value = self._split_heads(value)
+        position_offset = 0 if cache is None else cache[0].shape[-2]
         if self.rotary is not None:
-            query = self.rotary(query)
-            key = self.rotary(key)
+            query = self.rotary(query, position_offset=position_offset)
+            key = self.rotary(key, position_offset=position_offset)
+        if cache is not None:
+            if sequence_length != 1:
+                raise ValueError(
+                    "cached attention accepts one new token at a time"
+                )
+            key = torch.cat((cache[0], key), dim=-2)
+            value = torch.cat((cache[1], value), dim=-2)
         attended = F.scaled_dot_product_attention(
             query,
             key,
             value,
             dropout_p=self.dropout if self.training else 0.0,
-            is_causal=True,
+            is_causal=cache is None,
         )
         attended = attended.transpose(1, 2).contiguous().view(
             batch_size,
             sequence_length,
             model_dim,
         )
-        return self.output(attended)
+        return self.output(attended), (key, value)
+
+    def forward(self, hidden: Tensor) -> Tensor:
+        attended, _ = self.forward_with_cache(hidden)
+        return attended
 
 
 class SwiGLU(nn.Module):
@@ -161,6 +182,20 @@ class TransformerBlock(nn.Module):
         hidden = hidden + self.dropout(self.attention(self.attention_norm(hidden)))
         hidden = hidden + self.dropout(self.ffn(self.ffn_norm(hidden)))
         return hidden
+
+    def forward_with_cache(
+        self,
+        hidden: Tensor,
+        *,
+        cache: KeyValueCache | None = None,
+    ) -> tuple[Tensor, KeyValueCache]:
+        attended, new_cache = self.attention.forward_with_cache(
+            self.attention_norm(hidden),
+            cache=cache,
+        )
+        hidden = hidden + self.dropout(attended)
+        hidden = hidden + self.dropout(self.ffn(self.ffn_norm(hidden)))
+        return hidden, new_cache
 
 
 class DecoderTransformer(nn.Module):
@@ -217,6 +252,24 @@ class DecoderTransformer(nn.Module):
         hidden = self.final_norm(hidden)
         return F.linear(hidden, self.token_embedding.weight)
 
+    def forward_with_cache(
+        self,
+        token_ids: Tensor,
+        *,
+        caches: tuple[KeyValueCache, ...] | None = None,
+    ) -> tuple[Tensor, tuple[KeyValueCache, ...]]:
+        if caches is not None and len(caches) != len(self.blocks):
+            raise ValueError("one key/value cache is required per layer")
+        hidden = self.embed(token_ids)
+        new_caches = []
+        for layer_index, block in enumerate(self.blocks):
+            cache = None if caches is None else caches[layer_index]
+            hidden, new_cache = block.forward_with_cache(hidden, cache=cache)
+            new_caches.append(new_cache)
+        hidden = self.final_norm(hidden)
+        logits = F.linear(hidden, self.token_embedding.weight)
+        return logits, tuple(new_caches)
+
     @torch.inference_mode()
     def generate(
         self,
@@ -231,21 +284,26 @@ class DecoderTransformer(nn.Module):
         if max_new_tokens < 1:
             raise ValueError("max_new_tokens must be positive")
         self.eval()
-        full_sequence = prompt_ids
+        next_logits, caches = self.forward_with_cache(prompt_ids)
+        generated = []
         finished = torch.zeros(
             prompt_ids.shape[0],
             dtype=torch.bool,
             device=prompt_ids.device,
         )
         for _ in range(max_new_tokens):
-            next_token = self(full_sequence)[:, -1].argmax(dim=-1)
+            next_token = next_logits[:, -1].argmax(dim=-1)
             next_token = torch.where(
                 finished,
                 torch.full_like(next_token, PAD),
                 next_token,
             )
-            full_sequence = torch.cat((full_sequence, next_token[:, None]), dim=1)
+            generated.append(next_token)
             finished = finished | next_token.eq(EOS)
             if bool(finished.all()):
                 break
-        return full_sequence[:, prompt_ids.shape[1] :]
+            next_logits, caches = self.forward_with_cache(
+                next_token[:, None],
+                caches=caches,
+            )
+        return torch.stack(generated, dim=1)

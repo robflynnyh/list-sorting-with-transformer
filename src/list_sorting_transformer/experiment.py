@@ -12,7 +12,7 @@ from pathlib import Path
 
 import torch
 
-from .data import make_sorting_batch, sample_length
+from .data import make_quicksort_trace_batch, make_sorting_batch, sample_length
 from .evaluate import resolve_device
 from .evaluation import (
     aggregate_length_ranges,
@@ -23,12 +23,18 @@ from .evaluation import (
 from .metrics import masked_token_accuracy
 from .model import DecoderTransformer, ModelConfig
 from .plots import plot_length_generalization, plot_training_history
+from .quicksort import SNAPSHOT_MODES, SnapshotMode
 from .recurrent import LSTMConfig, LSTMSorter
-from .tokens import SymbolVocabulary
+from .tokens import (
+    QuicksortTraceVocabulary,
+    SymbolVocabulary,
+    make_vocabulary,
+)
 
 
 @dataclass(frozen=True)
 class TrainConfig:
+    task: str = "direct"
     representation: str = "numbers"
     symbol_count: int = 10
     train_min_length: int = 2
@@ -45,10 +51,15 @@ class TrainConfig:
     eval_examples: int = 128
     eval_batch_size: int = 128
     seed: int = 7
+    trace_snapshot_mode: SnapshotMode = "partition"
 
     def __post_init__(self) -> None:
+        if self.task not in {"direct", "quicksort_trace"}:
+            raise ValueError("invalid sorting task")
         if self.representation not in {"alphabet", "numbers"}:
             raise ValueError("invalid representation")
+        if self.trace_snapshot_mode not in SNAPSHOT_MODES:
+            raise ValueError("invalid trace snapshot mode")
         if not 1 <= self.train_min_length <= self.train_max_length:
             raise ValueError("invalid training length range")
         if self.eval_max_length < self.train_max_length:
@@ -145,13 +156,27 @@ def train(
             config.train_max_length,
             generator=generator,
         )
-        batch = make_sorting_batch(
-            config.batch_size,
-            length,
-            generator=generator,
-            symbol_count=config.symbol_count,
-            device=device,
-        )
+        if config.task == "direct":
+            batch = make_sorting_batch(
+                config.batch_size,
+                length,
+                generator=generator,
+                symbol_count=config.symbol_count,
+                device=device,
+            )
+        else:
+            if not isinstance(vocabulary, QuicksortTraceVocabulary):
+                raise TypeError(
+                    "quicksort_trace requires QuicksortTraceVocabulary"
+                )
+            batch = make_quicksort_trace_batch(
+                config.batch_size,
+                length,
+                generator=generator,
+                vocabulary=vocabulary,
+                snapshot_mode=config.trace_snapshot_mode,
+                device=device,
+            )
         current_learning_rate = learning_rate_at_step(config, step)
         for parameter_group in optimizer.param_groups:
             parameter_group["lr"] = current_learning_rate
@@ -180,6 +205,13 @@ def train(
             print(json.dumps(row), flush=True)
 
         if step % config.eval_interval == 0 or step == config.steps:
+            save_checkpoint(
+                output_directory / "checkpoint.pt",
+                model=model,
+                optimizer=optimizer,
+                train_config=config,
+                step=step,
+            )
             per_length = evaluate_lengths(
                 model,
                 vocabulary,
@@ -188,6 +220,8 @@ def train(
                 batch_size=config.eval_batch_size,
                 seed=config.seed + 20_000,
                 device=device,
+                task=config.task,
+                trace_snapshot_mode=config.trace_snapshot_mode,
             )
             evaluation_row = {
                 "step": step,
@@ -228,6 +262,8 @@ def train(
         batch_size=config.eval_batch_size,
         seed=config.seed + 30_000,
         device=device,
+        task=config.task,
+        trace_snapshot_mode=config.trace_snapshot_mode,
     )
     results = {
         "architecture": model.architecture,
@@ -267,6 +303,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default="transformer",
     )
     parser.add_argument(
+        "--task",
+        choices=("direct", "quicksort_trace"),
+        default="direct",
+    )
+    parser.add_argument(
         "--representation",
         choices=("alphabet", "numbers"),
         default="numbers",
@@ -299,6 +340,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default="alternating",
     )
     parser.add_argument("--rotary-base", type=float, default=10_000.0)
+    parser.add_argument(
+        "--trace-snapshot-mode",
+        choices=SNAPSHOT_MODES,
+        default="partition",
+        help="when quicksort traces include complete array snapshots",
+    )
     parser.add_argument("--device", default="auto")
     parser.add_argument("--output-directory", type=Path)
     return parser
@@ -307,6 +354,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_argument_parser().parse_args()
     train_config = TrainConfig(
+        task=args.task,
         representation=args.representation,
         symbol_count=args.symbol_count,
         train_min_length=args.train_min_length,
@@ -323,8 +371,10 @@ def main() -> None:
         eval_examples=args.eval_examples,
         eval_batch_size=args.eval_batch_size,
         seed=args.seed,
+        trace_snapshot_mode=args.trace_snapshot_mode,
     )
-    vocabulary = SymbolVocabulary(
+    vocabulary = make_vocabulary(
+        train_config.task,
         representation=train_config.representation,
         symbol_count=train_config.symbol_count,
     )
@@ -362,16 +412,18 @@ def main() -> None:
     if output_directory is None:
         if args.architecture == "transformer":
             run_name = (
-                f"{train_config.representation}_"
+                f"{train_config.task}_{train_config.representation}_"
                 f"{model_config.position_pattern}_seed{train_config.seed}"
             )
         else:
             run_name = (
-                f"lstm_{train_config.representation}_seed{train_config.seed}"
+                f"lstm_{train_config.task}_"
+                f"{train_config.representation}_seed{train_config.seed}"
             )
         output_directory = Path("artifacts") / run_name
     metadata = {
         "architecture": model.architecture,
+        "task": train_config.task,
         "device": str(device),
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
         "output_directory": str(output_directory),

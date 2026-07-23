@@ -75,6 +75,47 @@ def test_model_backpropagates_output_loss_and_accepts_longer_sequences() -> None
     assert long_logits.shape == (2, 96, model.config.vocab_size)
 
 
+def test_transformer_cache_matches_full_prefix_logits() -> None:
+    torch.manual_seed(13)
+    model = DecoderTransformer(small_config()).eval()
+    prompt = torch.randint(0, model.config.vocab_size, (2, 9))
+    next_token = torch.randint(0, model.config.vocab_size, (2, 1))
+
+    prompt_logits, caches = model.forward_with_cache(prompt)
+    full_prompt_logits = model(prompt)
+    torch.testing.assert_close(prompt_logits, full_prompt_logits)
+
+    cached_logits, caches = model.forward_with_cache(
+        next_token,
+        caches=caches,
+    )
+    full_logits = model(torch.cat((prompt, next_token), dim=1))
+    torch.testing.assert_close(
+        cached_logits[:, -1],
+        full_logits[:, -1],
+        atol=1e-5,
+        rtol=1e-4,
+    )
+    assert all(cache[0].shape[-2] == 10 for cache in caches)
+
+
+def test_transformer_cached_generation_matches_full_prefix_generation() -> None:
+    torch.manual_seed(17)
+    model = DecoderTransformer(small_config()).eval()
+    prompt = torch.randint(0, model.config.vocab_size, (2, 7))
+
+    generated = model.generate(prompt, max_new_tokens=8)
+    full_sequence = prompt
+    reference_tokens = []
+    for _ in range(8):
+        next_token = model(full_sequence)[:, -1].argmax(dim=-1)
+        reference_tokens.append(next_token)
+        full_sequence = torch.cat((full_sequence, next_token[:, None]), dim=1)
+    reference = torch.stack(reference_tokens, dim=1)
+
+    torch.testing.assert_close(generated, reference)
+
+
 def test_lstm_baseline_backpropagates_and_generates_with_cached_state() -> None:
     vocabulary = SymbolVocabulary("alphabet", 10)
     model = LSTMSorter(

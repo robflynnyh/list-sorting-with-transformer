@@ -13,6 +13,35 @@ EOS = 3
 COMMA = 4
 VALUE_OFFSET = 5
 
+QUICKSORT_OPERATIONS = (
+    "CHECK_RANGE",
+    "PUSH",
+    "POP",
+    "LOAD_PIVOT",
+    "SET_LT",
+    "SET_SCAN",
+    "SET_GT",
+    "COMPARE",
+    "SWAP",
+    "INC_LT",
+    "INC_SCAN",
+    "DEC_GT",
+    "PARTITION_DONE",
+    "ARRAY",
+    "DONE",
+    "ANSWER",
+)
+QUICKSORT_MARKERS = (
+    "ACTIVE",
+    "SKIP",
+    "LESS",
+    "EQUAL",
+    "GREATER",
+    "IDX",
+    "NEG",
+)
+INDEX_DIGIT_COUNT = 10
+
 
 @dataclass(frozen=True)
 class SymbolVocabulary:
@@ -88,7 +117,7 @@ class SymbolVocabulary:
             if token == PAD:
                 break
             if expect_value:
-                if not VALUE_OFFSET <= token < self.size:
+                if not VALUE_OFFSET <= token < VALUE_OFFSET + self.symbol_count:
                     return None
                 output.append(self.token_value(token))
             elif token != COMMA:
@@ -116,6 +145,92 @@ class SymbolVocabulary:
             else:
                 parts.append(f"<?>[{token}]")
         return "".join(parts)
+
+
+@dataclass(frozen=True)
+class QuicksortTraceVocabulary(SymbolVocabulary):
+    """Extend the symbol vocabulary with quicksort instructions and indices."""
+
+    @property
+    def trace_token_offset(self) -> int:
+        return VALUE_OFFSET + self.symbol_count
+
+    @property
+    def index_digit_offset(self) -> int:
+        return self.trace_token_offset + len(QUICKSORT_OPERATIONS) + len(
+            QUICKSORT_MARKERS
+        )
+
+    @property
+    def size(self) -> int:
+        return self.index_digit_offset + INDEX_DIGIT_COUNT
+
+    @property
+    def operation_tokens(self) -> frozenset[int]:
+        return frozenset(self.trace_token(name) for name in QUICKSORT_OPERATIONS)
+
+    def trace_token(self, name: str) -> int:
+        names = QUICKSORT_OPERATIONS + QUICKSORT_MARKERS
+        try:
+            offset = names.index(name)
+        except ValueError as error:
+            raise ValueError(f"unknown quicksort trace token: {name}") from error
+        return self.trace_token_offset + offset
+
+    def index_digit_token(self, digit: int) -> int:
+        if not 0 <= digit < INDEX_DIGIT_COUNT:
+            raise ValueError("index digits must be in [0, 9]")
+        return self.index_digit_offset + digit
+
+    def encode_index(self, index: int) -> list[int]:
+        encoded = [self.trace_token("IDX")]
+        if index < 0:
+            encoded.append(self.trace_token("NEG"))
+        encoded.extend(
+            self.index_digit_token(int(character))
+            for character in str(abs(index))
+        )
+        return encoded
+
+    def render_tokens(self, tokens: Sequence[int]) -> str:
+        trace_names = QUICKSORT_OPERATIONS + QUICKSORT_MARKERS
+        rendered = []
+        for token_value in tokens:
+            token = int(token_value)
+            if token == PAD:
+                rendered.append("<pad>")
+            elif token == BOS:
+                rendered.append("<bos>")
+            elif token == SEP:
+                rendered.append("<trace>")
+            elif token == EOS:
+                rendered.append("<eos>")
+            elif token == COMMA:
+                rendered.append(",")
+            elif VALUE_OFFSET <= token < VALUE_OFFSET + self.symbol_count:
+                rendered.append(self.render_value(self.token_value(token)))
+            elif self.trace_token_offset <= token < self.index_digit_offset:
+                rendered.append(
+                    f"<{trace_names[token - self.trace_token_offset]}>"
+                )
+            elif self.index_digit_offset <= token < self.size:
+                rendered.append(f"<I{token - self.index_digit_offset}>")
+            else:
+                rendered.append(f"<?>[{token}]")
+        return " ".join(rendered)
+
+
+def make_vocabulary(
+    task: str,
+    *,
+    representation: str,
+    symbol_count: int,
+) -> SymbolVocabulary:
+    if task == "direct":
+        return SymbolVocabulary(representation, symbol_count)
+    if task == "quicksort_trace":
+        return QuicksortTraceVocabulary(representation, symbol_count)
+    raise ValueError(f"unsupported sorting task: {task}")
 
 
 DEFAULT_VOCABULARY = SymbolVocabulary()

@@ -3,9 +3,10 @@
 ![Architecture of the list-sorting Transformer](assets/architecture.svg)
 
 A small, standalone benchmark for training a decoder-only Transformer to sort
-comma-separated symbols. The default experiment trains on list lengths 2-20
-and evaluates every length through 40, making the failure or success of length
-extrapolation explicit.
+comma-separated symbols, either by predicting the answer directly or by
+generating an instruction-level quicksort execution trace first. The default
+experiment trains on list lengths 2-20 and evaluates every length through 40,
+making the failure or success of length extrapolation explicit.
 
 ## Task
 
@@ -27,6 +28,52 @@ Two representation settings use the same token IDs and architecture:
 
 This isolates the effect of exposing ordinal structure while keeping the
 sequence task unchanged.
+
+## Quicksort Execution Traces
+
+The `quicksort_trace` task makes the model execute deterministic three-way
+quicksort before emitting its answer. It uses the middle element as the pivot
+and an explicit LIFO stack rather than hiding recursion inside a partition
+step. An abbreviated trace looks like:
+
+```text
+<bos>3,1,2<trace>
+<CHECK_RANGE> <IDX> <I0> <IDX> <I2> <ACTIVE>
+<PUSH> <IDX> <I0> <IDX> <I2>
+<POP> <IDX> <I0> <IDX> <I2>
+<LOAD_PIVOT> <IDX> <I1> 1
+<SET_LT> <IDX> <I0>
+<SET_SCAN> <IDX> <I0>
+<SET_GT> <IDX> <I2>
+<COMPARE> <IDX> <I0> 3 1 <GREATER>
+<SWAP> <IDX> <I0> <IDX> <I2>
+<DEC_GT> <IDX> <I1>
+...
+<DONE>
+<ANSWER>1,2,3<eos>
+```
+
+Every operation has a dedicated vocabulary token. Values and indices also use
+different tokens: value `2` and index digit `<I2>` do not share an embedding.
+Indices are represented as reusable decimal digits after `<IDX>`, rather than
+one embedding per position, so evaluating positions beyond the training length
+does not introduce untrained position tokens.
+
+The default hybrid encoding emits every comparison, pointer movement, swap,
+range check, stack push, and stack pop. It repeats the complete array after
+each finished partition, where that checkpoint can help the model recover its
+state without repeating the unchanged array after every operation. Use
+`--trace-snapshot-mode swap` to checkpoint after every swap or `none` to remove
+array checkpoints.
+
+Trace evaluation reports:
+
+- `exact_match`: the generated final answer is exactly correct;
+- `trace_exact_match`: every generated operation matches the deterministic
+  execution;
+- `full_exact_match`: both the trace and final answer are exact;
+- `operation_prefix_fraction`: the fraction of operations completed before
+  the first invalid operation.
 
 ## Model
 
@@ -75,6 +122,13 @@ sort-transformer-train \
   --architecture lstm \
   --representation numbers \
   --output-directory artifacts/lstm_numbers_seed7
+
+sort-transformer-train \
+  --task quicksort_trace \
+  --representation numbers \
+  --trace-snapshot-mode partition \
+  --eval-batch-size 32 \
+  --output-directory artifacts/quicksort_trace_numbers_seed7
 ```
 
 Each run writes:
@@ -166,6 +220,14 @@ test for learned sequence models.
 - [Neural Execution Engines](https://proceedings.neurips.cc/paper/2020/hash/c8b9abffb45bf79a630fb613dcd23449-Abstract.html)
   finds that vanilla Transformers can fit sorting examples yet fail on longer
   lists, and explores execution-oriented masking as a remedy.
+- [CLRS-Text](https://arxiv.org/abs/2406.04229) serializes intermediate
+  execution states and final outputs for the 30 CLRS algorithms, including
+  quicksort. Its weak extrapolation results also make clear that supplying a
+  trace does not by itself guarantee length generalization.
+- [Show Your Work](https://arxiv.org/abs/2112.00114) trains language models to
+  emit intermediate scratchpad computations before their final answers. The
+  quicksort task here uses a fully deterministic, mechanically verifiable
+  scratchpad rather than an unconstrained rationale.
 - [Exploring Length Generalization in Large Language
   Models](https://proceedings.neurips.cc/paper_files/paper/2022/hash/fb7451e43f9c1c35b774bcfad7a5714b-Abstract-Conference.html)
   similarly shows that standard sequence models often need intermediate

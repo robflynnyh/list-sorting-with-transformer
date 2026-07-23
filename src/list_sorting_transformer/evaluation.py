@@ -10,11 +10,20 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from .data import IGNORE_INDEX, make_sorting_batch
-from .metrics import generated_sorting_metrics, masked_token_accuracy
+from .data import (
+    IGNORE_INDEX,
+    make_quicksort_trace_batch,
+    make_sorting_batch,
+)
+from .metrics import (
+    generated_quicksort_metrics,
+    generated_sorting_metrics,
+    masked_token_accuracy,
+)
 from .model import DecoderTransformer, ModelConfig
+from .quicksort import SnapshotMode
 from .recurrent import LSTMConfig, LSTMSorter
-from .tokens import SymbolVocabulary
+from .tokens import QuicksortTraceVocabulary, SymbolVocabulary
 
 
 def autocast_context(device: torch.device, enabled: bool = True):
@@ -42,6 +51,8 @@ def evaluate_lengths(
     seed: int,
     device: torch.device,
     use_autocast: bool = True,
+    task: str = "direct",
+    trace_snapshot_mode: SnapshotMode = "partition",
 ) -> dict[int, dict[str, float]]:
     if examples_per_length < 1 or batch_size < 1:
         raise ValueError("evaluation sizes must be positive")
@@ -54,25 +65,54 @@ def evaluate_lengths(
         processed = 0
         while processed < examples_per_length:
             current_batch_size = min(batch_size, examples_per_length - processed)
-            batch = make_sorting_batch(
-                current_batch_size,
-                int(length),
-                generator=generator,
-                symbol_count=vocabulary.symbol_count,
-                device=device,
-            )
+            if task == "direct":
+                batch = make_sorting_batch(
+                    current_batch_size,
+                    int(length),
+                    generator=generator,
+                    symbol_count=vocabulary.symbol_count,
+                    device=device,
+                )
+                max_new_tokens = 2 * int(length) + 2
+            elif task == "quicksort_trace":
+                if not isinstance(vocabulary, QuicksortTraceVocabulary):
+                    raise TypeError(
+                        "quicksort_trace requires QuicksortTraceVocabulary"
+                    )
+                batch = make_quicksort_trace_batch(
+                    current_batch_size,
+                    int(length),
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    snapshot_mode=trace_snapshot_mode,
+                    device=device,
+                )
+                max_new_tokens = max(
+                    len(trace.target_tokens) for trace in batch.traces
+                ) + 8
+            else:
+                raise ValueError(f"unsupported sorting task: {task}")
             with autocast_context(device, enabled=use_autocast):
                 logits = model(batch.model_inputs)
                 loss = output_cross_entropy(logits, batch.labels)
                 generated = model.generate(
                     batch.prompt_ids,
-                    max_new_tokens=2 * int(length) + 2,
+                    max_new_tokens=max_new_tokens,
                 )
-            metrics = generated_sorting_metrics(
-                batch.values.cpu(),
-                generated.cpu(),
-                vocabulary,
-            )
+            if task == "direct":
+                metrics = generated_sorting_metrics(
+                    batch.values.cpu(),
+                    generated.cpu(),
+                    vocabulary,
+                )
+            else:
+                assert isinstance(vocabulary, QuicksortTraceVocabulary)
+                metrics = generated_quicksort_metrics(
+                    batch.values.cpu(),
+                    generated.cpu(),
+                    vocabulary,
+                    batch.traces,
+                )
             metrics["teacher_forced_loss"] = float(loss.item())
             metrics["teacher_forced_token_accuracy"] = masked_token_accuracy(
                 logits,

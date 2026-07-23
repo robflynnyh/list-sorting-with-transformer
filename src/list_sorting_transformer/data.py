@@ -7,7 +7,16 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from .tokens import BOS, COMMA, EOS, SEP, VALUE_OFFSET
+from .quicksort import QuicksortTrace, SnapshotMode, generate_quicksort_trace
+from .tokens import (
+    BOS,
+    COMMA,
+    EOS,
+    PAD,
+    SEP,
+    VALUE_OFFSET,
+    QuicksortTraceVocabulary,
+)
 
 
 IGNORE_INDEX = -100
@@ -27,6 +36,24 @@ class SortingBatch:
     @property
     def prompt_ids(self) -> Tensor:
         return self.token_ids[:, : 2 * self.length + 1]
+
+
+@dataclass(frozen=True)
+class QuicksortTraceBatch:
+    token_ids: Tensor
+    labels: Tensor
+    values: Tensor
+    length: int
+    prompt_length: int
+    traces: tuple[QuicksortTrace, ...]
+
+    @property
+    def model_inputs(self) -> Tensor:
+        return self.token_ids[:, :-1]
+
+    @property
+    def prompt_ids(self) -> Tensor:
+        return self.token_ids[:, : self.prompt_length]
 
 
 def make_sorting_batch(
@@ -80,6 +107,63 @@ def make_sorting_batch(
         labels=labels,
         values=values,
         length=length,
+    )
+
+
+def make_quicksort_trace_batch(
+    batch_size: int,
+    length: int,
+    *,
+    generator: torch.Generator,
+    vocabulary: QuicksortTraceVocabulary,
+    snapshot_mode: SnapshotMode = "partition",
+    device: torch.device | str | None = None,
+) -> QuicksortTraceBatch:
+    """Generate and pad instruction-level quicksort traces."""
+
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    if length < 1:
+        raise ValueError("length must be positive")
+    values = torch.randint(
+        0,
+        vocabulary.symbol_count,
+        (batch_size, length),
+        generator=generator,
+    )
+    traces = tuple(
+        generate_quicksort_trace(row, vocabulary, snapshot_mode=snapshot_mode)
+        for row in values.tolist()
+    )
+    prompts = tuple(vocabulary.encode_prompt(row) for row in values.tolist())
+    prompt_length = len(prompts[0])
+    examples = tuple(
+        [*prompt, *trace.target_tokens]
+        for prompt, trace in zip(prompts, traces)
+    )
+    sequence_length = max(len(example) for example in examples)
+    token_ids = torch.full(
+        (batch_size, sequence_length),
+        PAD,
+        dtype=torch.long,
+    )
+    for row_index, example in enumerate(examples):
+        token_ids[row_index, : len(example)] = torch.tensor(example)
+
+    labels = token_ids[:, 1:].clone()
+    labels[:, : prompt_length - 1] = IGNORE_INDEX
+    labels[labels.eq(PAD)] = IGNORE_INDEX
+    if device is not None:
+        token_ids = token_ids.to(device)
+        labels = labels.to(device)
+        values = values.to(device)
+    return QuicksortTraceBatch(
+        token_ids=token_ids,
+        labels=labels,
+        values=values,
+        length=length,
+        prompt_length=prompt_length,
+        traces=traces,
     )
 
 

@@ -14,7 +14,7 @@ from .evaluation import (
     load_model_checkpoint,
 )
 from .plots import plot_length_generalization
-from .tokens import SymbolVocabulary
+from .tokens import make_vocabulary
 
 
 def parse_lengths(specification: str) -> list[int]:
@@ -63,7 +63,13 @@ def main() -> None:
     device = resolve_device(args.device)
     model, checkpoint = load_model_checkpoint(str(args.checkpoint), device=device)
     config = model.config
-    vocabulary = SymbolVocabulary(
+    train_config = checkpoint.get("train_config", {})
+    task = str(train_config.get("task", "direct"))
+    trace_snapshot_mode = str(
+        train_config.get("trace_snapshot_mode", "partition")
+    )
+    vocabulary = make_vocabulary(
+        task,
         representation=config.representation,
         symbol_count=config.symbol_count,
     )
@@ -76,13 +82,16 @@ def main() -> None:
         batch_size=args.batch_size,
         seed=args.seed,
         device=device,
+        task=task,
+        trace_snapshot_mode=trace_snapshot_mode,
     )
-    train_config = checkpoint.get("train_config", {})
     train_min_length = int(train_config.get("train_min_length", min(lengths)))
     train_max_length = int(train_config.get("train_max_length", max(lengths)))
     output = {
         "checkpoint": str(args.checkpoint),
         "step": checkpoint.get("step"),
+        "task": task,
+        "trace_snapshot_mode": trace_snapshot_mode,
         "model_config": config.as_dict(),
         "train_length_range": [train_min_length, train_max_length],
         "per_length": {str(length): metrics for length, metrics in per_length.items()},
