@@ -54,6 +54,7 @@ from .pointer_quicksort import (
 )
 from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import (
+    LOCAL_WINDOW_PAIR_ENCODINGS,
     VOCAB_SIZE,
     AdjacentSortVocabulary,
     AutoAdvanceSortVocabulary,
@@ -81,6 +82,7 @@ __all__ = [
     "LocalWindowSortTrace",
     "LocalWindowSortVocabulary",
     "LocalWindowTransition",
+    "LOCAL_WINDOW_PAIR_ENCODINGS",
     "ModelConfig",
     "LSTMConfig",
     "LSTMSorter",

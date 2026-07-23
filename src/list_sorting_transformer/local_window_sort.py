@@ -104,6 +104,19 @@ class LocalWindowSortMachine:
             return self.vocabulary.window_token("ACTIVE_END")
         return self.vocabulary.value_token(self.array[index])
 
+    def _pair_slots(self) -> tuple[int, int]:
+        left = self.array[self.cursor]
+        right = self.array[self.cursor + 1]
+        if self.vocabulary.pair_encoding == "atomic":
+            return (
+                self.vocabulary.pair_token(left, right),
+                self.vocabulary.pair_end_token,
+            )
+        return (
+            self.vocabulary.value_token(left),
+            self.vocabulary.value_token(right),
+        )
+
     def window_tokens(self, kind: str) -> tuple[int, ...]:
         """Render left context, current pair, and one right-lookahead slot."""
 
@@ -127,14 +140,14 @@ class LocalWindowSortMachine:
             )
         else:
             pass_name = "PASS_CHANGED" if self.changed else "PASS_CLEAN"
+            pair_slots = self._pair_slots()
             tokens = (
                 self.vocabulary.window_token("WINDOW"),
                 self.vocabulary.window_token(kind),
                 self.vocabulary.window_token(pass_name),
                 self._slot(self.cursor - 1),
                 self.vocabulary.window_token("PTR"),
-                self._slot(self.cursor),
-                self._slot(self.cursor + 1),
+                *pair_slots,
                 self._slot(self.cursor + 2),
                 self.vocabulary.window_token("WINDOW_END"),
             )

@@ -85,6 +85,59 @@ def test_local_window_tracks_pointer_and_boundaries() -> None:
     )
 
 
+def test_atomic_pair_window_preserves_width_and_other_slots() -> None:
+    separate_vocabulary = LocalWindowSortVocabulary()
+    atomic_vocabulary = LocalWindowSortVocabulary(pair_encoding="atomic")
+    separate_machine = LocalWindowSortMachine(
+        [3, 1, 2],
+        separate_vocabulary,
+    )
+    atomic_machine = LocalWindowSortMachine([3, 1, 2], atomic_vocabulary)
+
+    separate_window = separate_machine.initial_window_tokens()
+    atomic_window = atomic_machine.initial_window_tokens()
+
+    assert len(separate_window) == len(atomic_window) == 9
+    assert separate_window[:5] == atomic_window[:5]
+    assert separate_window[7:] == atomic_window[7:]
+    assert atomic_vocabulary.token_pair(atomic_window[5]) == (3, 1)
+    assert atomic_window[6] == atomic_vocabulary.pair_end_token
+    assert atomic_vocabulary.render_tokens(atomic_window) == (
+        "<WINDOW> <INITIAL> <PASS_CLEAN> <LEFT_EDGE> "
+        "<PTR> <PAIR_3_1> <PAIR_END> 2 <WINDOW_END>"
+    )
+
+
+def test_atomic_pair_scripted_policy_handles_tool_and_no_tool() -> None:
+    vocabulary = LocalWindowSortVocabulary(pair_encoding="atomic")
+    batch = make_local_window_sort_batch(
+        8,
+        9,
+        generator=torch.Generator().manual_seed(107),
+        vocabulary=vocabulary,
+        tool_events=(),
+    )
+    model = ScriptedLocalWindowPolicy(batch.traces, vocabulary)
+
+    for tool_events in (
+        ("KEEP", "SWAP", "RESET", "FINISH"),
+        (),
+    ):
+        rollouts = generate_local_window_sort_rollouts(
+            model,  # type: ignore[arg-type]
+            batch,
+            vocabulary,
+            tool_events=tool_events,
+        )
+        metrics = generated_local_window_sort_metrics(
+            batch.values,
+            rollouts,
+            batch.traces,
+        )
+        assert metrics["exact_match"] == 1.0
+        assert metrics["window_exact_match"] == 1.0
+
+
 def test_wrong_comparison_decision_continues_execution() -> None:
     vocabulary = LocalWindowSortVocabulary()
     machine = LocalWindowSortMachine([3, 1, 2], vocabulary)

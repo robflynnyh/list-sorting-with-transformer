@@ -36,6 +36,7 @@ from .plots import plot_length_generalization, plot_training_history
 from .quicksort import SNAPSHOT_MODES, SnapshotMode
 from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import (
+    LOCAL_WINDOW_PAIR_ENCODINGS,
     AdjacentSortVocabulary,
     AutoAdvanceSortVocabulary,
     LocalWindowSortVocabulary,
@@ -69,6 +70,7 @@ class TrainConfig:
     gradient_accumulation_steps: int = 1
     checkpoint_interval: int = 1_000
     window_tool_events: tuple[str, ...] = WINDOW_TOOL_EVENTS
+    window_pair_encoding: str = "separate"
 
     def __post_init__(self) -> None:
         if self.task not in {
@@ -113,6 +115,11 @@ class TrainConfig:
             allowed = ", ".join(WINDOW_TOOL_EVENTS)
             raise ValueError(
                 f"window_tool_events may only contain {allowed}"
+            )
+        if self.window_pair_encoding not in LOCAL_WINDOW_PAIR_ENCODINGS:
+            allowed = ", ".join(LOCAL_WINDOW_PAIR_ENCODINGS)
+            raise ValueError(
+                f"window_pair_encoding must be one of: {allowed}"
             )
 
 
@@ -543,6 +550,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
             "windows supplied by the executor; use 'none' for no tools"
         ),
     )
+    parser.add_argument(
+        "--window-pair-encoding",
+        choices=LOCAL_WINDOW_PAIR_ENCODINGS,
+        default="separate",
+        help=(
+            "encode the active values as two separate tokens or one atomic "
+            "ordered-pair token plus PAIR_END"
+        ),
+    )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--n-layers", type=int, default=4)
@@ -596,11 +612,13 @@ def main() -> None:
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         checkpoint_interval=args.checkpoint_interval,
         window_tool_events=args.window_tool_events,
+        window_pair_encoding=args.window_pair_encoding,
     )
     vocabulary = make_vocabulary(
         train_config.task,
         representation=train_config.representation,
         symbol_count=train_config.symbol_count,
+        window_pair_encoding=train_config.window_pair_encoding,
     )
     if args.architecture == "transformer":
         model_config = ModelConfig(

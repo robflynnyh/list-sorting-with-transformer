@@ -236,6 +236,19 @@ to the same KV cache. Consequently, assistance can be changed per event
 without changing the protocol, and trace length remains quadratic rather than
 becoming cubic from repeatedly emitting the complete list.
 
+`--window-pair-encoding atomic` replaces the two active value slots with one
+ordered-pair token and a fixed filler while preserving the nine-token window:
+
+```text
+<WINDOW> <INITIAL> <PASS_CLEAN> <LEFT_EDGE>
+<PTR> <PAIR_3_1> <PAIR_END> 2 <WINDOW_END>
+```
+
+This is a controlled comparison with the default `separate` encoding. It
+tests whether treating each of the finite ordered pairs as one categorical
+lookup is responsible for the stronger length generalization of the compact
+auto-advance protocol.
+
 While a pair is active, both `KEEP` and `SWAP` are executable commands. The
 executor applies the model's choice and returns the resulting window even when
 that choice differs from the canonical bubble-sort action. Such a rollout can
@@ -371,6 +384,7 @@ sort-transformer-train \
 sort-transformer-train \
   --task adjacent_sort_local_window \
   --window-tool-events KEEP,SWAP,RESET,FINISH \
+  --window-pair-encoding atomic \
   --representation numbers \
   --batch-size 32 \
   --gradient-accumulation-steps 4 \

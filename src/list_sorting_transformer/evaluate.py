@@ -75,10 +75,14 @@ def main() -> None:
             ("KEEP", "SWAP", "RESET", "FINISH"),
         )
     )
+    window_pair_encoding = str(
+        train_config.get("window_pair_encoding", "separate")
+    )
     vocabulary = make_vocabulary(
         task,
         representation=config.representation,
         symbol_count=config.symbol_count,
+        window_pair_encoding=window_pair_encoding,
     )
     lengths = parse_lengths(args.lengths)
     per_length = evaluate_lengths(
@@ -101,6 +105,7 @@ def main() -> None:
         "task": task,
         "trace_snapshot_mode": trace_snapshot_mode,
         "window_tool_events": list(window_tool_events),
+        "window_pair_encoding": window_pair_encoding,
         "model_config": config.as_dict(),
         "train_length_range": [train_min_length, train_max_length],
         "per_length": {str(length): metrics for length, metrics in per_length.items()},

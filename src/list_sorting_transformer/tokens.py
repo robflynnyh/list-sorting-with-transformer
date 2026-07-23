@@ -125,6 +125,10 @@ LOCAL_WINDOW_SORT_MARKERS = (
     "PASS_CHANGED",
     "WINDOW_END",
 )
+LOCAL_WINDOW_PAIR_ENCODINGS = (
+    "separate",
+    "atomic",
+)
 _POINTER_ACTION_INDEX = {
     name: index for index, name in enumerate(POINTER_QUICKSORT_ACTIONS)
 }
@@ -591,6 +595,14 @@ class AutoAdvanceSortVocabulary(SymbolVocabulary):
 class LocalWindowSortVocabulary(SymbolVocabulary):
     """Vocabulary for fixed-width windows around a bubble-sort pointer."""
 
+    pair_encoding: str = "separate"
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.pair_encoding not in LOCAL_WINDOW_PAIR_ENCODINGS:
+            allowed = ", ".join(LOCAL_WINDOW_PAIR_ENCODINGS)
+            raise ValueError(f"pair_encoding must be one of: {allowed}")
+
     @property
     def separator_token(self) -> int:
         return SEP
@@ -605,7 +617,20 @@ class LocalWindowSortVocabulary(SymbolVocabulary):
 
     @property
     def size(self) -> int:
+        base_size = self.window_token_offset + len(LOCAL_WINDOW_SORT_MARKERS)
+        if self.pair_encoding == "atomic":
+            return base_size + 1 + self.symbol_count**2
+        return base_size
+
+    @property
+    def pair_end_token(self) -> int:
+        if self.pair_encoding != "atomic":
+            raise ValueError("PAIR_END is only available with atomic pairs")
         return self.window_token_offset + len(LOCAL_WINDOW_SORT_MARKERS)
+
+    @property
+    def pair_token_offset(self) -> int:
+        return self.pair_end_token + 1
 
     @property
     def action_tokens(self) -> tuple[int, ...]:
@@ -646,6 +671,21 @@ class LocalWindowSortVocabulary(SymbolVocabulary):
             raise ValueError(f"token {token} is not a local-window marker")
         return LOCAL_WINDOW_SORT_MARKERS[index]
 
+    def pair_token(self, left: int, right: int) -> int:
+        if self.pair_encoding != "atomic":
+            raise ValueError("pair tokens require pair_encoding='atomic'")
+        self.value_token(left)
+        self.value_token(right)
+        return self.pair_token_offset + left * self.symbol_count + right
+
+    def token_pair(self, token: int) -> tuple[int, int]:
+        if self.pair_encoding != "atomic":
+            raise ValueError("pair tokens require pair_encoding='atomic'")
+        index = int(token) - self.pair_token_offset
+        if not 0 <= index < self.symbol_count**2:
+            raise ValueError(f"token {token} is not a local-window pair")
+        return divmod(index, self.symbol_count)
+
     def render_tokens(self, tokens: Sequence[int]) -> str:
         rendered = []
         for token_value in tokens:
@@ -670,13 +710,30 @@ class LocalWindowSortVocabulary(SymbolVocabulary):
                     ]
                     + ">"
                 )
-            elif self.window_token_offset <= token < self.size:
+            elif (
+                self.window_token_offset
+                <= token
+                < self.window_token_offset + len(LOCAL_WINDOW_SORT_MARKERS)
+            ):
                 rendered.append(
                     "<"
                     + LOCAL_WINDOW_SORT_MARKERS[
                         token - self.window_token_offset
                     ]
                     + ">"
+                )
+            elif (
+                self.pair_encoding == "atomic"
+                and token == self.pair_end_token
+            ):
+                rendered.append("<PAIR_END>")
+            elif (
+                self.pair_encoding == "atomic"
+                and self.pair_token_offset <= token < self.size
+            ):
+                left, right = self.token_pair(token)
+                rendered.append(
+                    f"<PAIR_{self.render_value(left)}_{self.render_value(right)}>"
                 )
             else:
                 rendered.append(f"<?>[{token}]")
@@ -688,6 +745,7 @@ def make_vocabulary(
     *,
     representation: str,
     symbol_count: int,
+    window_pair_encoding: str = "separate",
 ) -> SymbolVocabulary:
     if task == "direct":
         return SymbolVocabulary(representation, symbol_count)
@@ -706,7 +764,11 @@ def make_vocabulary(
     if task == "adjacent_sort_auto_advance_no_tool":
         return AutoAdvanceSortVocabulary(representation, symbol_count)
     if task == "adjacent_sort_local_window":
-        return LocalWindowSortVocabulary(representation, symbol_count)
+        return LocalWindowSortVocabulary(
+            representation,
+            symbol_count,
+            pair_encoding=window_pair_encoding,
+        )
     raise ValueError(f"unsupported sorting task: {task}")
 
 
