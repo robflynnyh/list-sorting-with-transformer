@@ -117,6 +117,37 @@ class CausalSelfAttention(nn.Module):
             model_dim // self.n_heads,
         ).transpose(1, 2)
 
+    def query_key_logits(
+        self,
+        hidden: Tensor,
+        *,
+        query_index: int,
+    ) -> Tensor:
+        """Return causal pre-softmax scores for one query in every head."""
+
+        sequence_length = hidden.shape[1]
+        if not -sequence_length <= query_index < sequence_length:
+            raise IndexError("query_index is outside the sequence")
+        resolved_query_index = query_index % sequence_length
+        query, key, _ = self.qkv(hidden).chunk(3, dim=-1)
+        query = self._split_heads(query)
+        key = self._split_heads(key)
+        if self.rotary is not None:
+            query = self.rotary(query)
+            key = self.rotary(key)
+        logits = (
+            query[:, :, resolved_query_index].unsqueeze(-2)
+            @ key.transpose(-2, -1)
+            / self.head_dim**0.5
+        ).squeeze(-2)
+        if resolved_query_index + 1 < sequence_length:
+            logits = logits.masked_fill(
+                torch.arange(sequence_length, device=hidden.device)
+                > resolved_query_index,
+                float("-inf"),
+            )
+        return logits
+
     def forward_with_cache(
         self,
         hidden: Tensor,

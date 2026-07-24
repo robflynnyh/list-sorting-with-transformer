@@ -9,6 +9,7 @@ from list_sorting_transformer.pointer_position_sequence import (
     PositionSequenceConfig,
     generated_metrics,
     gradient_noise_std,
+    sequence_loss_and_metrics,
 )
 from list_sorting_transformer.tokens import PointerNextVocabulary
 
@@ -86,6 +87,64 @@ def test_teacher_forced_sequence_has_eight_categorical_predictions() -> None:
     ]
 
 
+def test_attention_supervision_covers_every_layer_and_head() -> None:
+    torch.manual_seed(5)
+    model = small_model()
+    vocabulary = PointerNextVocabulary("numbers", 10)
+    prompt = torch.tensor(
+        [
+            vocabulary.encode_prompt_with_pointer([3, 1, 4], 1),
+            vocabulary.encode_prompt_with_pointer([2, 7, 1], 0),
+        ]
+    )
+    pointers = torch.tensor([1, 0])
+    offsets = torch.tensor([-12, 30])
+    targets = model.target_sequence(pointers, offsets)
+
+    logits, attention_logits = (
+        model.teacher_forced_logits_with_successor_attention(
+            prompt,
+            targets,
+            offsets=offsets,
+        )
+    )
+
+    assert len(logits) == 2
+    assert attention_logits.shape == (
+        2,
+        model.encoder.config.n_layers,
+        model.encoder.config.n_heads,
+        prompt.shape[1] + 1,
+    )
+
+
+def test_attention_supervision_adds_routing_metrics_and_gradients() -> None:
+    torch.manual_seed(6)
+    model = small_model()
+    vocabulary = PointerNextVocabulary("numbers", 10)
+    prompt = torch.tensor(
+        [
+            vocabulary.encode_prompt_with_pointer([3, 1, 4], 1),
+            vocabulary.encode_prompt_with_pointer([2, 7, 1], 0),
+        ]
+    )
+
+    loss, metrics = sequence_loss_and_metrics(
+        model,
+        prompt,
+        torch.tensor([1, 0]),
+        torch.tensor([-12, 30]),
+        successor_attention_supervision_weight=0.1,
+    )
+    loss.backward()
+
+    assert metrics["loss"] > metrics["position_loss"]
+    assert metrics["successor_attention_supervision_loss"] > 0
+    assert 0 <= metrics["successor_attention_target_accuracy"] <= 1
+    assert 0 <= metrics["successor_attention_target_probability"] <= 1
+    assert model.encoder.blocks[0].attention.qkv.weight.grad is not None
+
+
 def test_successor_attention_isolation_only_changes_final_query_row() -> None:
     mask = ModularPositionSequenceModel.successor_attention_mask(
         batch_size=2,
@@ -109,6 +168,17 @@ def test_gradient_noise_std_uses_configured_decay() -> None:
 
     assert gradient_noise_std(config, 1) == pytest.approx(0.01)
     assert gradient_noise_std(config, 100) == pytest.approx(0.001)
+
+
+def test_attention_supervision_replaces_successor_isolation() -> None:
+    with pytest.raises(
+        ValueError,
+        match="supervision replaces successor isolation",
+    ):
+        PositionSequenceConfig(
+            successor_attention_supervision_weight=0.1,
+            successor_attention_isolation_probability=0.5,
+        )
 
 
 def test_generated_metrics_separate_accuracy_from_successor_consistency() -> None:

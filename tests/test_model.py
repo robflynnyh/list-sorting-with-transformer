@@ -105,6 +105,21 @@ def test_hidden_states_accept_batch_specific_extra_input_embeddings() -> None:
     assert not torch.equal(shared_hidden, batch_hidden)
 
 
+def test_query_key_logits_are_causal_for_an_intermediate_query() -> None:
+    torch.manual_seed(3)
+    model = DecoderTransformer(small_config())
+    hidden = torch.randn(2, 6, model.config.d_model)
+
+    logits = model.blocks[0].attention.query_key_logits(
+        hidden,
+        query_index=2,
+    )
+
+    assert logits.shape == (2, model.config.n_heads, 6)
+    assert torch.isfinite(logits[..., :3]).all()
+    assert torch.isneginf(logits[..., 3:]).all()
+
+
 def test_transformer_cache_matches_full_prefix_logits() -> None:
     torch.manual_seed(13)
     model = DecoderTransformer(small_config()).eval()

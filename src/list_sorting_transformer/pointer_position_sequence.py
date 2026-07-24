@@ -39,6 +39,7 @@ class PositionSequenceConfig:
     gradient_clip: float = 1.0
     gradient_noise_scale: float = 0.0
     gradient_noise_decay: float = 0.25
+    successor_attention_supervision_weight: float = 0.0
     log_interval: int = 250
     eval_interval: int = 1_000
     eval_examples: int = 512
@@ -79,9 +80,20 @@ class PositionSequenceConfig:
             raise ValueError("gradient_clip must be positive")
         if self.gradient_noise_scale < 0 or self.gradient_noise_decay < 0:
             raise ValueError("gradient noise settings must be nonnegative")
+        if self.successor_attention_supervision_weight < 0:
+            raise ValueError(
+                "successor attention supervision weight must be nonnegative"
+            )
         if not 0.0 <= self.successor_attention_isolation_probability <= 1.0:
             raise ValueError(
                 "successor_attention_isolation_probability must be in [0, 1]"
+            )
+        if (
+            self.successor_attention_supervision_weight > 0
+            and self.successor_attention_isolation_probability > 0
+        ):
+            raise ValueError(
+                "successor attention supervision replaces successor isolation"
             )
         if self.input_layout not in {"additive", "split"}:
             raise ValueError("input_layout must be 'additive' or 'split'")
@@ -176,24 +188,16 @@ class ModularPositionSequenceModel(nn.Module):
             dim=-1,
         )
 
-    def hidden_states(
+    def input_hidden_states(
         self,
         prompt_ids: Tensor,
         history: Tensor,
         *,
         offsets: Tensor,
-        isolate_successor: Tensor | None = None,
     ) -> Tensor:
         batch_size, prompt_length = prompt_ids.shape
         history_length = history.shape[1]
         stream_length = prompt_length + history_length
-        attention_mask = self.successor_attention_mask(
-            batch_size=batch_size,
-            stream_length=stream_length,
-            history_length=history_length,
-            isolate_successor=isolate_successor,
-            device=prompt_ids.device,
-        )
         stream_positions = (
             offsets[:, None]
             + torch.arange(stream_length, device=prompt_ids.device)[None, :]
@@ -206,11 +210,7 @@ class ModularPositionSequenceModel(nn.Module):
                     (content_embeddings, self.history_embeddings(history)),
                     dim=1,
                 )
-            return self.encoder.hidden_states_from_embeddings(
-                content_embeddings,
-                position_embeddings,
-                attention_mask=attention_mask,
-            )
+            return torch.cat((content_embeddings, position_embeddings), dim=-1)
 
         placeholder_ids = torch.full(
             (batch_size, history_length),
@@ -225,11 +225,59 @@ class ModularPositionSequenceModel(nn.Module):
             extra_embeddings[:, prompt_length:] = (
                 self.history_embeddings(history) - placeholder_embeddings
             )
-        return self.encoder.hidden_states(
-            token_ids,
-            extra_input_embeddings=extra_embeddings,
-            attention_mask=attention_mask,
+        return self.encoder.embed(token_ids) + extra_embeddings
+
+    def hidden_states(
+        self,
+        prompt_ids: Tensor,
+        history: Tensor,
+        *,
+        offsets: Tensor,
+        isolate_successor: Tensor | None = None,
+    ) -> Tensor:
+        hidden = self.input_hidden_states(
+            prompt_ids,
+            history,
+            offsets=offsets,
         )
+        attention_mask = self.successor_attention_mask(
+            batch_size=prompt_ids.shape[0],
+            stream_length=hidden.shape[1],
+            history_length=history.shape[1],
+            isolate_successor=isolate_successor,
+            device=prompt_ids.device,
+        )
+        for block in self.encoder.blocks:
+            hidden = block(hidden, attention_mask=attention_mask)
+        return self.encoder.final_norm(hidden)
+
+    def hidden_states_with_successor_attention(
+        self,
+        prompt_ids: Tensor,
+        history: Tensor,
+        *,
+        offsets: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        if history.shape[1] != 1:
+            raise ValueError(
+                "successor attention supervision requires one position in history"
+            )
+        hidden = self.input_hidden_states(
+            prompt_ids,
+            history,
+            offsets=offsets,
+        )
+        layer_logits = []
+        for block in self.encoder.blocks:
+            normalized = block.attention_norm(hidden)
+            layer_logits.append(
+                block.attention.query_key_logits(
+                    normalized,
+                    query_index=-1,
+                )
+            )
+            hidden = block(hidden)
+        return self.encoder.final_norm(hidden), torch.stack(layer_logits, dim=1)
 
     @staticmethod
     def successor_attention_mask(
@@ -304,6 +352,30 @@ class ModularPositionSequenceModel(nn.Module):
             for step in range(self.output_steps)
         )
 
+    def teacher_forced_logits_with_successor_attention(
+        self,
+        prompt_ids: Tensor,
+        targets: Tensor,
+        *,
+        offsets: Tensor,
+    ) -> tuple[tuple[tuple[Tensor, ...], ...], Tensor]:
+        history = targets[:, :-1]
+        hidden, attention_logits = self.hidden_states_with_successor_attention(
+            prompt_ids,
+            history,
+            offsets=offsets,
+        )
+        first_prediction_index = prompt_ids.shape[1] - 1
+        prediction_states = hidden[
+            :,
+            first_prediction_index : first_prediction_index + self.output_steps,
+        ]
+        logits = tuple(
+            self.position_logits(prediction_states[:, step])
+            for step in range(self.output_steps)
+        )
+        return logits, attention_logits
+
     @torch.inference_mode()
     def generate_positions(
         self,
@@ -356,19 +428,68 @@ def sequence_loss_and_metrics(
     offsets: Tensor,
     *,
     isolate_successor: Tensor | None = None,
+    successor_attention_supervision_weight: float = 0.0,
 ) -> tuple[Tensor, dict[str, float]]:
     targets = model.target_sequence(pointers, offsets)
-    logits = model.teacher_forced_logits(
-        prompt_ids,
-        targets,
-        offsets=offsets,
-        isolate_successor=isolate_successor,
-    )
+    attention_logits = None
+    if successor_attention_supervision_weight:
+        if isolate_successor is not None and bool(isolate_successor.any()):
+            raise ValueError(
+                "attention supervision cannot be combined with isolation"
+            )
+        logits, attention_logits = (
+            model.teacher_forced_logits_with_successor_attention(
+                prompt_ids,
+                targets,
+                offsets=offsets,
+            )
+        )
+    else:
+        logits = model.teacher_forced_logits(
+            prompt_ids,
+            targets,
+            offsets=offsets,
+            isolate_successor=isolate_successor,
+        )
     losses = [
         F.cross_entropy(component_logits, targets[:, step, component])
         for step, step_logits in enumerate(logits)
         for component, component_logits in enumerate(step_logits)
     ]
+    position_loss = torch.stack(losses).mean()
+    total_loss = position_loss
+    attention_metrics = {}
+    if attention_logits is not None:
+        flattened_logits = attention_logits.flatten(0, 2)
+        attention_targets = torch.full(
+            (flattened_logits.shape[0],),
+            flattened_logits.shape[-1] - 1,
+            dtype=torch.long,
+            device=flattened_logits.device,
+        )
+        attention_loss = F.cross_entropy(
+            flattened_logits,
+            attention_targets,
+        )
+        attention_metrics = {
+            "successor_attention_supervision_loss": float(
+                attention_loss.detach().item()
+            ),
+            "successor_attention_target_accuracy": float(
+                attention_logits.argmax(dim=-1)
+                .eq(attention_logits.shape[-1] - 1)
+                .float()
+                .mean()
+                .item()
+            ),
+            "successor_attention_target_probability": float(
+                attention_logits.softmax(dim=-1)[..., -1].mean().item()
+            ),
+        }
+        total_loss = (
+            position_loss
+            + successor_attention_supervision_weight * attention_loss
+        )
     predictions = torch.stack(
         [
             torch.stack(
@@ -382,8 +503,9 @@ def sequence_loss_and_metrics(
     component_correct = predictions.eq(targets)
     pointer_exact = component_correct[:, 0].all(dim=1)
     next_exact = component_correct[:, 1].all(dim=1)
-    return torch.stack(losses).mean(), {
-        "loss": float(torch.stack(losses).mean().detach().item()),
+    return total_loss, {
+        "loss": float(total_loss.detach().item()),
+        "position_loss": float(position_loss.detach().item()),
         "successor_attention_isolation_fraction": (
             float(isolate_successor.float().mean().item())
             if isolate_successor is not None
@@ -401,6 +523,7 @@ def sequence_loss_and_metrics(
         "teacher_forced_residue_accuracy": float(
             component_correct.float().mean().item()
         ),
+        **attention_metrics,
     }
 
 
@@ -652,6 +775,9 @@ def train(
                 batch.pointers,
                 offsets,
                 isolate_successor=isolate_successor,
+                successor_attention_supervision_weight=(
+                    config.successor_attention_supervision_weight
+                ),
             )
         loss.backward()
         noise_std = add_gradient_noise(model, config=config, step=step)
@@ -794,6 +920,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gradient-clip", type=float, default=1.0)
     parser.add_argument("--gradient-noise-scale", type=float, default=0.0)
     parser.add_argument("--gradient-noise-decay", type=float, default=0.25)
+    parser.add_argument(
+        "--successor-attention-supervision-weight",
+        type=float,
+        default=0.0,
+    )
     parser.add_argument("--log-interval", type=int, default=250)
     parser.add_argument("--eval-interval", type=int, default=1_000)
     parser.add_argument("--eval-examples", type=int, default=512)
@@ -847,6 +978,9 @@ def main() -> None:
         gradient_clip=args.gradient_clip,
         gradient_noise_scale=args.gradient_noise_scale,
         gradient_noise_decay=args.gradient_noise_decay,
+        successor_attention_supervision_weight=(
+            args.successor_attention_supervision_weight
+        ),
         log_interval=args.log_interval,
         eval_interval=args.eval_interval,
         eval_examples=args.eval_examples,
