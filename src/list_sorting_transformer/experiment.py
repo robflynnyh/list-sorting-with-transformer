@@ -18,6 +18,7 @@ from .data import (
     make_auto_advance_sort_batch,
     make_local_window_sort_batch,
     make_pointer_next_batch,
+    make_pointer_pair_batch,
     make_pointer_value_batch,
     make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
@@ -89,6 +90,7 @@ class TrainConfig:
         if self.task not in {
             "direct",
             "pointer_next",
+            "pointer_pair",
             "pointer_value",
             "quicksort_trace",
             "pointer_quicksort",
@@ -109,7 +111,7 @@ class TrainConfig:
         if self.eval_max_length < self.train_max_length:
             raise ValueError("eval_max_length must include the training range")
         if (
-            self.task in {"pointer_next", "pointer_value"}
+            self.task in {"pointer_next", "pointer_pair", "pointer_value"}
             and self.train_min_length < 2
         ):
             raise ValueError(f"{self.task} requires train_min_length >= 2")
@@ -330,6 +332,36 @@ def initialize_from_pointer_position_checkpoint(
     }
 
 
+def initialize_from_checkpoint(
+    model: DecoderTransformer | LSTMSorter,
+    checkpoint_path: Path,
+) -> dict[str, object]:
+    """Copy compatible model weights from a checkpoint without optimizer state."""
+
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    state = checkpoint.get("model_state")
+    if not isinstance(state, dict):
+        raise ValueError("checkpoint is missing model_state")
+    model_state = model.state_dict()
+    transferred = {}
+    skipped = []
+    for name, source_value in state.items():
+        target_value = model_state.get(name)
+        if target_value is None or target_value.shape != source_value.shape:
+            skipped.append(name)
+            continue
+        transferred[name] = source_value
+    if not transferred:
+        raise ValueError("no compatible model weights found to transfer")
+    model_state.update(transferred)
+    model.load_state_dict(model_state)
+    return {
+        "initialized_from_checkpoint": str(checkpoint_path),
+        "transferred_tensors": len(transferred),
+        "skipped_tensors": skipped,
+    }
+
+
 def train(
     model: DecoderTransformer | LSTMSorter,
     config: TrainConfig,
@@ -418,6 +450,16 @@ def train(
                 if not isinstance(vocabulary, PointerNextVocabulary):
                     raise TypeError("pointer_next requires PointerNextVocabulary")
                 batch = make_pointer_next_batch(
+                    config.batch_size,
+                    length,
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    device=device,
+                )
+            elif config.task == "pointer_pair":
+                if not isinstance(vocabulary, PointerNextVocabulary):
+                    raise TypeError("pointer_pair requires PointerNextVocabulary")
+                batch = make_pointer_pair_batch(
                     config.batch_size,
                     length,
                     generator=generator,
@@ -698,6 +740,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=(
             "direct",
             "pointer_next",
+            "pointer_pair",
             "pointer_value",
             "quicksort_trace",
             "pointer_quicksort",
@@ -796,6 +839,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--output-directory", type=Path)
     parser.add_argument("--resume-checkpoint", type=Path)
+    parser.add_argument("--init-from-checkpoint", type=Path)
     parser.add_argument("--init-from-pointer-position-checkpoint", type=Path)
     parser.add_argument("--wandb-project")
     parser.add_argument("--wandb-entity")
@@ -875,7 +919,20 @@ def main() -> None:
     else:
         model = LSTMSorter(model_config)
     initialization_metadata = None
-    if args.init_from_pointer_position_checkpoint is not None:
+    if (
+        args.init_from_checkpoint is not None
+        and args.init_from_pointer_position_checkpoint is not None
+    ):
+        raise ValueError(
+            "use only one of --init-from-checkpoint and "
+            "--init-from-pointer-position-checkpoint"
+        )
+    if args.init_from_checkpoint is not None:
+        initialization_metadata = initialize_from_checkpoint(
+            model,
+            args.init_from_checkpoint,
+        )
+    elif args.init_from_pointer_position_checkpoint is not None:
         if not isinstance(model, DecoderTransformer):
             raise ValueError(
                 "pointer-position initialization requires transformer architecture"

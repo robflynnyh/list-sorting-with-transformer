@@ -5,6 +5,7 @@ import torch
 from list_sorting_transformer.experiment import (
     TrainConfig,
     curriculum_max_length_at_step,
+    initialize_from_checkpoint,
     initialize_from_pointer_position_checkpoint,
     learning_rate_at_step,
     sample_training_length,
@@ -98,3 +99,20 @@ def test_pointer_position_checkpoint_initializes_decoder_body(tmp_path) -> None:
         torch.full_like(target.token_embedding.weight, 0.123),
     )
     assert "query_projection.weight" not in target.state_dict()
+
+
+def test_model_checkpoint_initializes_matching_decoder_weights(tmp_path) -> None:
+    source = small_transformer()
+    target = small_transformer()
+    with torch.no_grad():
+        source.token_embedding.weight.fill_(0.456)
+    checkpoint_path = tmp_path / "pointer_value.pt"
+    torch.save({"model_state": source.state_dict()}, checkpoint_path)
+
+    metadata = initialize_from_checkpoint(target, checkpoint_path)
+
+    assert metadata["transferred_tensors"] > 0
+    assert torch.allclose(
+        target.token_embedding.weight,
+        torch.full_like(target.token_embedding.weight, 0.456),
+    )

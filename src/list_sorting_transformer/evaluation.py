@@ -25,6 +25,7 @@ from .data import (
     make_auto_advance_sort_batch,
     make_local_window_sort_batch,
     make_pointer_next_batch,
+    make_pointer_pair_batch,
     make_pointer_value_batch,
     make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
@@ -43,6 +44,7 @@ from .metrics import (
     generated_auto_advance_sort_metrics,
     generated_local_window_sort_metrics,
     generated_pointer_next_metrics,
+    generated_pointer_pair_metrics,
     generated_pointer_value_metrics,
     generated_pointer_no_tool_metrics,
     generated_pointer_quicksort_metrics,
@@ -530,6 +532,17 @@ def evaluate_lengths(
                     device=device,
                 )
                 max_new_tokens = 2
+            elif task == "pointer_pair":
+                if not isinstance(vocabulary, PointerNextVocabulary):
+                    raise TypeError("pointer_pair requires PointerNextVocabulary")
+                batch = make_pointer_pair_batch(
+                    current_batch_size,
+                    int(length),
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    device=device,
+                )
+                max_new_tokens = 4
             elif task == "pointer_value":
                 if not isinstance(vocabulary, PointerNextVocabulary):
                     raise TypeError("pointer_value requires PointerNextVocabulary")
@@ -725,6 +738,19 @@ def evaluate_lengths(
                     None if train_max_length is None else train_max_length - 1
                 )
                 metrics = generated_pointer_value_metrics(
+                    batch.values.cpu(),
+                    batch.pointers.cpu(),
+                    generated.cpu(),
+                    vocabulary,
+                    train_max_pointer_index=train_max_pointer_index,
+                )
+            elif task == "pointer_pair":
+                assert isinstance(batch, PointerNextBatch)
+                assert isinstance(vocabulary, PointerNextVocabulary)
+                train_max_pointer_index = (
+                    None if train_max_length is None else train_max_length - 2
+                )
+                metrics = generated_pointer_pair_metrics(
                     batch.values.cpu(),
                     batch.pointers.cpu(),
                     generated.cpu(),

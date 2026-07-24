@@ -52,6 +52,29 @@ high-length confirmation gets 99.76% at length 900 and 98.93% at length 1000.
 
 ![Pointer-value length generalization to 1000](artifacts/pointer_value_nocurr_gn0_10k_seed7/length_generalization_to_1000.png)
 
+## Pointer-Pair Probe
+
+The `pointer_pair` task is the next autoregressive stage. It uses the same
+marked-list prompt as `pointer_value`, but the target is now the marked value
+followed by the next value:
+
+```text
+<bos>7,<PTR>4,2=4,2<eos>
+```
+
+This tests whether the model can use the pointer-value skill as the first
+output token, then continue by retrieving the following list token from the same
+local context. Use `--init-from-checkpoint` to initialize from the trained
+pointer-value stage while starting a fresh optimizer for the new target.
+
+Current stage result: initializing from the pointer-value checkpoint and
+training for 2k optimizer steps reaches 100% exact match through length 200 and
+99.95% at length 400 on a 2048-example confirmation eval. Longer lengths expose
+the next failure mode: length 800 is 63.28% and length 1000 is 32.96%.
+
+![Pointer-pair length generalization to 1000](artifacts/pointer_pair_from_value_gn0_2000_seed7/length_generalization_to_1000.png)
+
+
 ## Pointer-Next Probe
 
 The `pointer_next` task isolates relative retrieval from the sorting
@@ -406,6 +429,26 @@ sort-transformer-train \
   --wandb-project list-sorting-with-transformer \
   --wandb-run-name pointer-value-nocurr-gn0-10k-seed7 \
   --output-directory artifacts/pointer_value_nocurr_gn0_10k_seed7
+
+sort-transformer-train \
+  --task pointer_pair \
+  --representation numbers \
+  --position-pattern none \
+  --dropout 0.1 \
+  --init-from-checkpoint artifacts/pointer_value_nocurr_gn0_10k_seed7/checkpoint.pt \
+  --lr-schedule constant \
+  --gradient-noise-scale 0 \
+  --train-min-length 2 \
+  --train-max-length 20 \
+  --eval-max-length 400 \
+  --steps 2000 \
+  --eval-examples 512 \
+  --eval-batch-size 64 \
+  --eval-interval 1000 \
+  --checkpoint-interval 1000 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-pair-from-value-gn0-2k-seed7 \
+  --output-directory artifacts/pointer_pair_from_value_gn0_2000_seed7
 
 sort-transformer-train \
   --task pointer_next \

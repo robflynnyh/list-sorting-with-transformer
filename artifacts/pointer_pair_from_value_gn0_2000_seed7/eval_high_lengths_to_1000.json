@@ -1,0 +1,104 @@
+{
+  "aggregate": {
+    "out_of_domain": {
+      "comma_accuracy": 1.0,
+      "eos_accuracy": 0.8427734375,
+      "exact_match": 0.740478515625,
+      "first_value_accuracy": 0.964111328125,
+      "second_value_accuracy": 0.919921875,
+      "seen_pointer_exact_match": 0.2177734375,
+      "target_token_accuracy": 0.93170166015625,
+      "teacher_forced_loss": 0.48933607765866327,
+      "teacher_forced_token_accuracy": 0.931793212890625,
+      "unseen_pointer_exact_match": 0.7457159133184524,
+      "unseen_pointer_fraction": 0.9554443359375,
+      "valid_syntax": 0.740478515625
+    }
+  },
+  "checkpoint": "artifacts/pointer_pair_from_value_gn0_2000_seed7/checkpoint.pt",
+  "model_config": {
+    "d_model": 128,
+    "dropout": 0.1,
+    "ffn_multiplier": 4.0,
+    "n_heads": 4,
+    "n_layers": 4,
+    "position_pattern": "none",
+    "representation": "numbers",
+    "rotary_base": 10000.0,
+    "rotate_values_with_rope": false,
+    "symbol_count": 10,
+    "vocab_size": 16
+  },
+  "per_length": {
+    "1000": {
+      "comma_accuracy": 1.0,
+      "eos_accuracy": 0.6015625,
+      "exact_match": 0.32958984375,
+      "first_value_accuracy": 0.90771484375,
+      "second_value_accuracy": 0.7763671875,
+      "seen_pointer_exact_match": 0.0,
+      "target_token_accuracy": 0.8214111328125,
+      "teacher_forced_loss": 1.3981697262497619,
+      "teacher_forced_token_accuracy": 0.8218994140625,
+      "unseen_pointer_exact_match": 0.33421688988095244,
+      "unseen_pointer_fraction": 0.9833984375,
+      "valid_syntax": 0.32958984375
+    },
+    "200": {
+      "comma_accuracy": 1.0,
+      "eos_accuracy": 1.0,
+      "exact_match": 1.0,
+      "first_value_accuracy": 1.0,
+      "second_value_accuracy": 1.0,
+      "seen_pointer_exact_match": 0.53125,
+      "target_token_accuracy": 1.0,
+      "teacher_forced_loss": 3.642227966338396e-06,
+      "teacher_forced_token_accuracy": 1.0,
+      "unseen_pointer_exact_match": 1.0,
+      "unseen_pointer_fraction": 0.9130859375,
+      "valid_syntax": 1.0
+    },
+    "400": {
+      "comma_accuracy": 1.0,
+      "eos_accuracy": 1.0,
+      "exact_match": 0.99951171875,
+      "first_value_accuracy": 1.0,
+      "second_value_accuracy": 0.99951171875,
+      "seen_pointer_exact_match": 0.33984375,
+      "target_token_accuracy": 0.9998779296875,
+      "teacher_forced_loss": 0.00021981347526889294,
+      "teacher_forced_token_accuracy": 0.9998779296875,
+      "unseen_pointer_exact_match": 0.99951171875,
+      "unseen_pointer_fraction": 0.94970703125,
+      "valid_syntax": 0.99951171875
+    },
+    "800": {
+      "comma_accuracy": 1.0,
+      "eos_accuracy": 0.76953125,
+      "exact_match": 0.6328125,
+      "first_value_accuracy": 0.94873046875,
+      "second_value_accuracy": 0.90380859375,
+      "seen_pointer_exact_match": 0.0,
+      "target_token_accuracy": 0.905517578125,
+      "teacher_forced_loss": 0.558951128681656,
+      "teacher_forced_token_accuracy": 0.9053955078125,
+      "unseen_pointer_exact_match": 0.6491350446428573,
+      "unseen_pointer_fraction": 0.9755859375,
+      "valid_syntax": 0.6328125
+    }
+  },
+  "step": 2000,
+  "task": "pointer_pair",
+  "trace_snapshot_mode": "partition",
+  "train_length_range": [
+    2,
+    20
+  ],
+  "window_pair_encoding": "separate",
+  "window_tool_events": [
+    "KEEP",
+    "SWAP",
+    "RESET",
+    "FINISH"
+  ]
+}

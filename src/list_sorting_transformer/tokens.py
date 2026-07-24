@@ -805,6 +805,19 @@ class PointerNextVocabulary(SymbolVocabulary):
             EOS,
         ]
 
+    def encode_pair_example_with_pointer(
+        self,
+        values: Sequence[int],
+        pointer_index: int,
+    ) -> list[int]:
+        return [
+            *self.encode_prompt_with_pointer(values, pointer_index),
+            self.value_token(int(values[pointer_index])),
+            COMMA,
+            self.value_token(int(values[pointer_index + 1])),
+            EOS,
+        ]
+
     def encode_example_with_pointer(
         self,
         values: Sequence[int],
@@ -872,7 +885,7 @@ def make_vocabulary(
         )
     if task == "pointer_next":
         return PointerNextVocabulary(representation, symbol_count)
-    if task == "pointer_value":
+    if task in {"pointer_value", "pointer_pair"}:
         return PointerNextVocabulary(representation, symbol_count)
     raise ValueError(f"unsupported sorting task: {task}")
 

@@ -27,6 +27,7 @@ from .pointer_quicksort import (
 )
 from .quicksort import QuicksortTrace, split_generated_events
 from .tokens import (
+    COMMA,
     EOS,
     PAD,
     AdjacentSortVocabulary,
@@ -134,6 +135,95 @@ def generated_pointer_value_metrics(
         value_metric_name="value_accuracy",
         train_max_pointer_index=train_max_pointer_index,
     )
+
+
+def generated_pointer_pair_metrics(
+    values: Tensor,
+    pointers: Tensor,
+    generated_tokens: Tensor,
+    vocabulary: PointerNextVocabulary,
+    *,
+    train_max_pointer_index: int | None = None,
+) -> dict[str, float]:
+    """Measure autoregressive retrieval of the marked value and following value."""
+
+    if values.ndim != 2 or generated_tokens.ndim != 2 or pointers.ndim != 1:
+        raise ValueError(
+            "values/generated_tokens must be rank two and pointers rank one"
+        )
+    if (
+        values.shape[0] != generated_tokens.shape[0]
+        or values.shape[0] != pointers.shape[0]
+    ):
+        raise ValueError(
+            "values, pointers, and generated_tokens must share batch size"
+        )
+
+    totals = {
+        "valid_syntax": 0.0,
+        "first_value_accuracy": 0.0,
+        "second_value_accuracy": 0.0,
+        "comma_accuracy": 0.0,
+        "eos_accuracy": 0.0,
+        "exact_match": 0.0,
+    }
+    seen_exact = 0.0
+    seen_total = 0
+    unseen_exact = 0.0
+    unseen_total = 0
+    target_token_correct = 0
+    target_token_total = 0
+
+    for row, pointer, generated_row in zip(
+        values.tolist(),
+        pointers.tolist(),
+        generated_tokens.tolist(),
+    ):
+        target_index = int(pointer)
+        if not 0 <= target_index < len(row) - 1:
+            raise ValueError("pointer pair target is outside the input row")
+        expected = [
+            vocabulary.value_token(int(row[target_index])),
+            COMMA,
+            vocabulary.value_token(int(row[target_index + 1])),
+            EOS,
+        ]
+        for index, expected_token in enumerate(expected):
+            if index < len(generated_row) and generated_row[index] == expected_token:
+                target_token_correct += 1
+            target_token_total += 1
+
+        first_ok = len(generated_row) >= 1 and generated_row[0] == expected[0]
+        comma_ok = len(generated_row) >= 2 and generated_row[1] == expected[1]
+        second_ok = len(generated_row) >= 3 and generated_row[2] == expected[2]
+        eos_ok = len(generated_row) >= 4 and generated_row[3] == EOS
+        syntax_ok = first_ok and comma_ok and second_ok and eos_ok
+        exact = generated_row[:4] == expected
+        totals["valid_syntax"] += float(syntax_ok)
+        totals["first_value_accuracy"] += float(first_ok)
+        totals["second_value_accuracy"] += float(second_ok)
+        totals["comma_accuracy"] += float(comma_ok)
+        totals["eos_accuracy"] += float(eos_ok)
+        totals["exact_match"] += float(exact)
+        if train_max_pointer_index is not None:
+            if int(pointer) <= train_max_pointer_index:
+                seen_exact += float(exact)
+                seen_total += 1
+            else:
+                unseen_exact += float(exact)
+                unseen_total += 1
+
+    batch_size = values.shape[0]
+    metrics = {name: count / batch_size for name, count in totals.items()}
+    metrics["target_token_accuracy"] = target_token_correct / max(
+        target_token_total,
+        1,
+    )
+    if train_max_pointer_index is not None:
+        metrics["seen_pointer_exact_match"] = seen_exact / max(seen_total, 1)
+        metrics["unseen_pointer_exact_match"] = unseen_exact / max(unseen_total, 1)
+        metrics["unseen_pointer_fraction"] = unseen_total / batch_size
+    return metrics
 
 
 def generated_pointer_retrieval_metrics(
