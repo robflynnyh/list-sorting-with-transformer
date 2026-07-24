@@ -34,6 +34,7 @@ so charts should use the project metric `step` as their x-axis.
 | `train/successor_attention_target_probability` | Mean softmax attention probability assigned to the preceding `p` latent across layers and heads. |
 | `train/stage_three_loss` | For Stage 4, the retained Stage-3 loss over `address(PTR)`, `address(PTR+1)`, and the marked value token. |
 | `train/next_value_position_loss` | For Stage 4, mean residue cross-entropy for the following list value's modular address at `PTR+3`. |
+| `train/next_value_position_attention_isolation_fraction` | Fraction of the Stage-4 batch whose final query can attend only to the preceding `PTR+1` address latent. |
 | `train/teacher_forced_next_value_position_accuracy` | Fraction of Stage-4 training examples where every residue of the following value's address is correct with the gold Stage-3 history supplied. |
 | `train/teacher_forced_next_value_position_residue_accuracy` | Accuracy over individual Stage-4 address residue predictions with the gold Stage-3 history supplied. |
 

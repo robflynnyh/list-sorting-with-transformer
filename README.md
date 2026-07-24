@@ -153,7 +153,10 @@ Stage 4 starts from Stage 3 and predicts the position of the following list
 value. Because the comma is a token, this address is `p+3`, not `p+2`. For
 example, `<bos>7,<PTR>4,2=` produces the Stage-4 trace
 `[address(<PTR>)][address(4)][4][address(2)]`. Retrieving `2` itself is left for
-the next pipeline stage.
+the next pipeline stage. On half of Stage-4 training examples, the final
+query's attention is restricted to `address(4)`. This encourages the new
+address to be computed as a local modular shift instead of recovered from the
+original prompt.
 
 During the 50%-isolation stage-2 run, the final query can attend only to the
 inserted `p` item on half of the training examples. Other examples retain full
@@ -681,6 +684,7 @@ sort-pointer-position-sequence \
   --eval-max-length 400 \
   --steps 20000 \
   --successor-attention-isolation-probability 0.5 \
+  --next-value-position-attention-isolation-probability 0.5 \
   --gradient-noise-scale 0 \
   --dropout 0.02 \
   --wandb-project list-sorting-with-transformer \

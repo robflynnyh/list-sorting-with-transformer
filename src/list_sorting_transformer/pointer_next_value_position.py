@@ -38,11 +38,21 @@ from .tokens import PointerNextVocabulary
 @dataclass(frozen=True)
 class NextValuePositionConfig(PositionValueConfig):
     next_value_position_loss_weight: float = 1.0
+    next_value_position_attention_isolation_probability: float = 0.5
 
     def __post_init__(self) -> None:
         super().__post_init__()
         if self.next_value_position_loss_weight <= 0:
             raise ValueError("next_value_position_loss_weight must be positive")
+        if not (
+            0.0
+            <= self.next_value_position_attention_isolation_probability
+            <= 1.0
+        ):
+            raise ValueError(
+                "next-value position attention isolation probability "
+                "must be in [0, 1]"
+            )
 
 
 class ModularNextValuePositionModel(ModularPositionValueModel):
@@ -69,6 +79,7 @@ class ModularNextValuePositionModel(ModularPositionValueModel):
         token_history: Tensor,
         *,
         offsets: Tensor,
+        isolate_next_value_position: Tensor | None = None,
     ) -> Tensor:
         if position_history.shape != (
             prompt_ids.shape[0],
@@ -106,9 +117,51 @@ class ModularNextValuePositionModel(ModularPositionValueModel):
             hidden = content_embeddings + position_embeddings
             hidden[:, prompt_length : prompt_length + 2] = address_content
 
+        attention_mask = self.next_value_position_attention_mask(
+            batch_size=batch_size,
+            stream_length=stream_length,
+            isolate_next_value_position=isolate_next_value_position,
+            device=prompt_ids.device,
+        )
         for block in self.encoder.blocks:
-            hidden = block(hidden)
+            hidden = block(hidden, attention_mask=attention_mask)
         return self.encoder.final_norm(hidden)
+
+    @staticmethod
+    def next_value_position_attention_mask(
+        *,
+        batch_size: int,
+        stream_length: int,
+        isolate_next_value_position: Tensor | None,
+        device: torch.device,
+    ) -> Tensor | None:
+        if isolate_next_value_position is None:
+            return None
+        if stream_length < 2:
+            raise ValueError("Stage-4 isolation requires an address history")
+        if isolate_next_value_position.shape != (batch_size,):
+            raise ValueError(
+                "isolate_next_value_position must have shape [batch]"
+            )
+        if isolate_next_value_position.dtype != torch.bool:
+            raise ValueError(
+                "isolate_next_value_position must be boolean"
+            )
+        isolate_next_value_position = isolate_next_value_position.to(
+            device=device
+        )
+        if not bool(isolate_next_value_position.any()):
+            return None
+        mask = torch.ones(
+            batch_size,
+            stream_length,
+            stream_length,
+            device=device,
+            dtype=torch.bool,
+        )
+        mask[isolate_next_value_position, -1, :] = False
+        mask[isolate_next_value_position, -1, -2] = True
+        return mask
 
     def teacher_forced_next_value_position_logits(
         self,
@@ -117,12 +170,14 @@ class ModularNextValuePositionModel(ModularPositionValueModel):
         token_targets: Tensor,
         *,
         offsets: Tensor,
+        isolate_next_value_position: Tensor | None = None,
     ) -> tuple[Tensor, ...]:
         hidden = self.mixed_hidden_states(
             prompt_ids,
             position_targets,
             token_targets[:, None],
             offsets=offsets,
+            isolate_next_value_position=isolate_next_value_position,
         )
         return self.position_logits(hidden[:, -1])
 
@@ -183,6 +238,7 @@ def next_value_position_loss_and_metrics(
     *,
     config: NextValuePositionConfig,
     isolate_successor: Tensor | None = None,
+    isolate_next_value_position: Tensor | None = None,
 ) -> tuple[Tensor, dict[str, float]]:
     stage_three_loss, metrics = position_value_loss_and_metrics(
         model,
@@ -199,6 +255,7 @@ def next_value_position_loss_and_metrics(
         position_targets,
         token_targets,
         offsets=offsets,
+        isolate_next_value_position=isolate_next_value_position,
     )
     component_losses = [
         F.cross_entropy(component_logits, next_targets[:, component])
@@ -219,6 +276,11 @@ def next_value_position_loss_and_metrics(
         "loss": float(total_loss.detach().item()),
         "stage_three_loss": float(stage_three_loss.detach().item()),
         "next_value_position_loss": float(next_loss.detach().item()),
+        "next_value_position_attention_isolation_fraction": (
+            float(isolate_next_value_position.float().mean().item())
+            if isolate_next_value_position is not None
+            else 0.0
+        ),
         "teacher_forced_next_value_position_accuracy": float(
             next_correct.all(dim=1).float().mean().item()
         ),
@@ -411,6 +473,9 @@ def train(
         torch.set_float32_matmul_precision("high")
     generator = torch.Generator().manual_seed(config.seed + 1)
     isolation_generator = torch.Generator().manual_seed(config.seed + 2)
+    next_position_isolation_generator = torch.Generator().manual_seed(
+        config.seed + 3
+    )
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config.learning_rate,
@@ -448,6 +513,13 @@ def train(
             torch.rand(config.batch_size, generator=isolation_generator)
             < config.successor_attention_isolation_probability
         ).to(device=device)
+        isolate_next_value_position = (
+            torch.rand(
+                config.batch_size,
+                generator=next_position_isolation_generator,
+            )
+            < config.next_value_position_attention_isolation_probability
+        ).to(device=device)
         optimizer.zero_grad(set_to_none=True)
         with autocast_context(device):
             loss, metrics = next_value_position_loss_and_metrics(
@@ -456,6 +528,7 @@ def train(
                 offsets,
                 config=config,
                 isolate_successor=isolate_successor,
+                isolate_next_value_position=isolate_next_value_position,
             )
         loss.backward()
         noise_std = add_gradient_noise(model, config=config, step=step)
@@ -610,6 +683,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
     )
+    parser.add_argument(
+        "--next-value-position-attention-isolation-probability",
+        type=float,
+        default=0.5,
+    )
     parser.add_argument("--log-interval", type=int, default=250)
     parser.add_argument("--eval-interval", type=int, default=1_000)
     parser.add_argument("--eval-examples", type=int, default=512)
@@ -673,6 +751,9 @@ def main() -> None:
         token_loss_weight=args.token_loss_weight,
         next_value_position_loss_weight=(
             args.next_value_position_loss_weight
+        ),
+        next_value_position_attention_isolation_probability=(
+            args.next_value_position_attention_isolation_probability
         ),
     )
     vocabulary = PointerNextVocabulary(

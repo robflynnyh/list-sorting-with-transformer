@@ -41,6 +41,7 @@ def small_config() -> NextValuePositionConfig:
         position_offset_min=-50,
         position_offset_max=50,
         successor_attention_isolation_probability=0.5,
+        next_value_position_attention_isolation_probability=0.5,
     )
 
 
@@ -130,14 +131,44 @@ def test_stage_four_loss_trains_address_head_after_marked_token() -> None:
         torch.tensor([-20, -3, 17, 40]),
         config=config,
         isolate_successor=torch.tensor([True, False, True, False]),
+        isolate_next_value_position=torch.tensor(
+            [False, True, False, True]
+        ),
     )
     loss.backward()
 
     assert metrics["stage_three_loss"] > 0
     assert metrics["next_value_position_loss"] > 0
+    assert (
+        metrics["next_value_position_attention_isolation_fraction"] == 0.5
+    )
     assert 0 <= metrics["teacher_forced_next_value_position_accuracy"] <= 1
     assert model.query_projection.weight.grad is not None
     assert model.token_query_projection.weight.grad is not None
+
+
+def test_stage_four_isolation_exposes_only_preceding_address() -> None:
+    mask = ModularNextValuePositionModel.next_value_position_attention_mask(
+        batch_size=2,
+        stream_length=9,
+        isolate_next_value_position=torch.tensor([True, False]),
+        device=torch.device("cpu"),
+    )
+
+    assert mask is not None
+    assert mask[0, :-1].all()
+    assert mask[0, -1].tolist() == [
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        True,
+        False,
+    ]
+    assert mask[1].all()
 
 
 def test_complete_trace_includes_the_next_value_position() -> None:
