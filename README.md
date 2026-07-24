@@ -47,9 +47,10 @@ shared Transformer body and leaves optimizer state fresh.
 
 Current stage result: starting from the pointer-position checkpoint and training
 without curriculum or gradient noise for 10k optimizer steps reaches 100% exact
-match at all reported lengths, including length 400.
+match through length 800 on the extended evaluation grid. A 2048-example
+high-length confirmation gets 99.76% at length 900 and 98.93% at length 1000.
 
-![Pointer-value length generalization](artifacts/pointer_value_nocurr_gn0_10k_seed7/length_generalization.png)
+![Pointer-value length generalization to 1000](artifacts/pointer_value_nocurr_gn0_10k_seed7/length_generalization_to_1000.png)
 
 ## Pointer-Next Probe
 

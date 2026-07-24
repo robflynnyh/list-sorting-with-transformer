@@ -1,0 +1,82 @@
+{
+  "aggregate": {
+    "out_of_domain": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.99560546875,
+      "seen_pointer_exact_match": 0.14583333333333334,
+      "target_token_accuracy": 0.997802734375,
+      "teacher_forced_loss": 0.00547123063976566,
+      "teacher_forced_token_accuracy": 0.9978841145833334,
+      "unseen_pointer_exact_match": 0.9954427083333334,
+      "unseen_pointer_fraction": 0.98046875,
+      "valid_syntax": 0.99560546875,
+      "value_accuracy": 0.99560546875
+    }
+  },
+  "checkpoint": "artifacts/pointer_value_nocurr_gn0_10k_seed7/checkpoint.pt",
+  "model_config": {
+    "d_model": 128,
+    "dropout": 0.1,
+    "ffn_multiplier": 4.0,
+    "n_heads": 4,
+    "n_layers": 4,
+    "position_pattern": "none",
+    "representation": "numbers",
+    "rotary_base": 10000.0,
+    "rotate_values_with_rope": false,
+    "symbol_count": 10,
+    "vocab_size": 16
+  },
+  "per_length": {
+    "1000": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.9892578125,
+      "seen_pointer_exact_match": 0.171875,
+      "target_token_accuracy": 0.99462890625,
+      "teacher_forced_loss": 0.01392185824806802,
+      "teacher_forced_token_accuracy": 0.994873046875,
+      "unseen_pointer_exact_match": 0.9888392857142857,
+      "unseen_pointer_fraction": 0.97802734375,
+      "valid_syntax": 0.9892578125,
+      "value_accuracy": 0.9892578125
+    },
+    "800": {
+      "eos_accuracy": 1.0,
+      "exact_match": 1.0,
+      "seen_pointer_exact_match": 0.15625,
+      "target_token_accuracy": 1.0,
+      "teacher_forced_loss": 1.4153425581753254e-05,
+      "teacher_forced_token_accuracy": 1.0,
+      "unseen_pointer_exact_match": 1.0,
+      "unseen_pointer_fraction": 0.97900390625,
+      "valid_syntax": 1.0,
+      "value_accuracy": 1.0
+    },
+    "900": {
+      "eos_accuracy": 1.0,
+      "exact_match": 0.99755859375,
+      "seen_pointer_exact_match": 0.109375,
+      "target_token_accuracy": 0.998779296875,
+      "teacher_forced_loss": 0.002477680245647207,
+      "teacher_forced_token_accuracy": 0.998779296875,
+      "unseen_pointer_exact_match": 0.9974888392857143,
+      "unseen_pointer_fraction": 0.984375,
+      "valid_syntax": 0.99755859375,
+      "value_accuracy": 0.99755859375
+    }
+  },
+  "step": 10000,
+  "task": "pointer_value",
+  "trace_snapshot_mode": "partition",
+  "train_length_range": [
+    2,
+    20
+  ],
+  "window_pair_encoding": "separate",
+  "window_tool_events": [
+    "KEEP",
+    "SWAP",
+    "RESET",
+    "FINISH"
+  ]
+}
