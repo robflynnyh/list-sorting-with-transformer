@@ -11,6 +11,7 @@ from list_sorting_transformer.pointer_next_value_position import (
     generated_stage_four_metrics,
     load_stage_three_checkpoint,
     next_value_position_loss_and_metrics,
+    relative_logit_distillation_loss,
 )
 from list_sorting_transformer.pointer_value_from_position import (
     ModularPositionValueModel,
@@ -44,6 +45,7 @@ def small_config() -> NextValuePositionConfig:
         successor_attention_isolation_probability=0.5,
         next_value_position_attention_isolation_probability=0.5,
         next_value_position_consistency_weight=1.0,
+        stage_three_distillation_weight=1.0,
     )
 
 
@@ -140,6 +142,13 @@ def test_stage_three_checkpoint_transfers_without_new_parameters(tmp_path) -> No
 def test_stage_four_loss_trains_address_head_after_marked_token() -> None:
     torch.manual_seed(4)
     model = small_model()
+    torch.manual_seed(44)
+    teacher = ModularPositionValueModel(
+        model.encoder.config,
+        model.moduli,
+    )
+    teacher.requires_grad_(False)
+    teacher.eval()
     config = small_config()
     vocabulary = PointerNextVocabulary("numbers", 10)
     batch = make_pointer_value_batch(
@@ -158,6 +167,7 @@ def test_stage_four_loss_trains_address_head_after_marked_token() -> None:
         isolate_next_value_position=torch.tensor(
             [False, True, False, True]
         ),
+        stage_three_teacher=teacher,
     )
     loss.backward()
 
@@ -169,10 +179,22 @@ def test_stage_four_loss_trains_address_head_after_marked_token() -> None:
     assert metrics["next_value_position_consistency_loss"] > 0
     assert metrics["unrestricted_next_value_position_loss"] > 0
     assert metrics["teacher_branch_next_value_position_loss"] > 0
+    assert metrics["stage_three_distillation_loss"] > 0
     assert 0 <= metrics["teacher_branch_next_value_position_accuracy"] <= 1
     assert 0 <= metrics["teacher_forced_next_value_position_accuracy"] <= 1
     assert model.query_projection.weight.grad is not None
     assert model.token_query_projection.weight.grad is not None
+    assert all(parameter.grad is None for parameter in teacher.parameters())
+
+
+def test_relative_logit_distillation_ignores_additive_offsets() -> None:
+    teacher = torch.tensor([[1.0, 2.0, 4.0], [-3.0, 0.0, 2.0]])
+
+    identical = relative_logit_distillation_loss(teacher + 10.0, teacher)
+    changed = relative_logit_distillation_loss(teacher * 1.5, teacher)
+
+    assert identical.item() == pytest.approx(0.0, abs=1e-12)
+    assert changed.item() > 0
 
 
 def test_consistency_weight_must_be_nonnegative() -> None:
@@ -180,6 +202,8 @@ def test_consistency_weight_must_be_nonnegative() -> None:
         NextValuePositionConfig(
             next_value_position_consistency_weight=-1.0
         )
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        NextValuePositionConfig(stage_three_distillation_weight=-1.0)
 
 
 def test_stage_four_isolation_exposes_only_preceding_address() -> None:

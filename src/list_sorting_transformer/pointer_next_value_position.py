@@ -40,6 +40,7 @@ class NextValuePositionConfig(PositionValueConfig):
     next_value_position_loss_weight: float = 1.0
     next_value_position_attention_isolation_probability: float = 0.5
     next_value_position_consistency_weight: float = 1.0
+    stage_three_distillation_weight: float = 1.0
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -48,6 +49,10 @@ class NextValuePositionConfig(PositionValueConfig):
         if self.next_value_position_consistency_weight < 0:
             raise ValueError(
                 "next_value_position_consistency_weight must be nonnegative"
+            )
+        if self.stage_three_distillation_weight < 0:
+            raise ValueError(
+                "stage_three_distillation_weight must be nonnegative"
             )
         if not (
             0.0
@@ -254,6 +259,78 @@ def load_stage_three_checkpoint(
     }
 
 
+def relative_logit_distillation_loss(
+    student_logits: Tensor,
+    teacher_logits: Tensor,
+) -> Tensor:
+    if student_logits.shape != teacher_logits.shape:
+        raise ValueError("student and teacher logits must have matching shapes")
+    teacher_target = teacher_logits.detach()
+    teacher_centered = teacher_target - teacher_target.mean(
+        dim=-1,
+        keepdim=True,
+    )
+    student_centered = student_logits - student_logits.mean(
+        dim=-1,
+        keepdim=True,
+    )
+    teacher_rms = (
+        teacher_centered.square()
+        .mean(dim=-1, keepdim=True)
+        .sqrt()
+        .clamp_min(1e-6)
+    )
+    return F.mse_loss(
+        student_centered / teacher_rms,
+        teacher_centered / teacher_rms,
+    )
+
+
+def stage_three_distillation_loss(
+    model: ModularNextValuePositionModel,
+    teacher: ModularPositionValueModel,
+    batch: PointerNextBatch,
+    offsets: Tensor,
+) -> Tensor:
+    position_targets = model.target_sequence(batch.pointers, offsets)
+    student_position_logits = model.teacher_forced_logits(
+        batch.prompt_ids,
+        position_targets,
+        offsets=offsets,
+    )
+    student_token_logits = model.teacher_forced_token_logits(
+        batch.prompt_ids,
+        position_targets,
+        offsets=offsets,
+    )
+    with torch.no_grad():
+        teacher_position_logits = teacher.teacher_forced_logits(
+            batch.prompt_ids,
+            position_targets,
+            offsets=offsets,
+        )
+        teacher_token_logits = teacher.teacher_forced_token_logits(
+            batch.prompt_ids,
+            position_targets,
+            offsets=offsets,
+        )
+    losses = [
+        relative_logit_distillation_loss(student, source)
+        for student_step, teacher_step in zip(
+            student_position_logits,
+            teacher_position_logits,
+        )
+        for student, source in zip(student_step, teacher_step)
+    ]
+    losses.append(
+        relative_logit_distillation_loss(
+            student_token_logits,
+            teacher_token_logits,
+        )
+    )
+    return torch.stack(losses).mean()
+
+
 def next_value_position_loss_and_metrics(
     model: ModularNextValuePositionModel,
     batch: PointerNextBatch,
@@ -262,6 +339,7 @@ def next_value_position_loss_and_metrics(
     config: NextValuePositionConfig,
     isolate_successor: Tensor | None = None,
     isolate_next_value_position: Tensor | None = None,
+    stage_three_teacher: ModularPositionValueModel | None = None,
 ) -> tuple[Tensor, dict[str, float]]:
     stage_three_loss, metrics = position_value_loss_and_metrics(
         model,
@@ -332,10 +410,19 @@ def next_value_position_loss_and_metrics(
             )
 
     next_loss = 0.5 * (student_loss + isolated_loss)
+    distillation_loss = student_query.new_zeros(())
+    if stage_three_teacher is not None:
+        distillation_loss = stage_three_distillation_loss(
+            model,
+            stage_three_teacher,
+            batch,
+            offsets,
+        )
     total_loss = (
         stage_three_loss
         + config.next_value_position_loss_weight * next_loss
         + config.next_value_position_consistency_weight * consistency_loss
+        + config.stage_three_distillation_weight * distillation_loss
     )
     return total_loss, {
         **metrics,
@@ -350,6 +437,9 @@ def next_value_position_loss_and_metrics(
         ),
         "next_value_position_consistency_loss": float(
             consistency_loss.detach().item()
+        ),
+        "stage_three_distillation_loss": float(
+            distillation_loss.detach().item()
         ),
         "next_value_position_attention_isolation_fraction": (
             float(isolate_next_value_position.float().mean().item())
@@ -545,6 +635,7 @@ def train(
     output_directory: Path,
     device: torch.device,
     tracker: Any | None = None,
+    stage_three_teacher: ModularPositionValueModel | None = None,
 ) -> dict[str, object]:
     output_directory.mkdir(parents=True, exist_ok=True)
     torch.manual_seed(config.seed)
@@ -610,6 +701,7 @@ def train(
                 config=config,
                 isolate_successor=isolate_successor,
                 isolate_next_value_position=isolate_next_value_position,
+                stage_three_teacher=stage_three_teacher,
             )
         loss.backward()
         noise_std = add_gradient_noise(model, config=config, step=step)
@@ -774,6 +866,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
     )
+    parser.add_argument(
+        "--stage-three-distillation-weight",
+        type=float,
+        default=1.0,
+    )
     parser.add_argument("--log-interval", type=int, default=250)
     parser.add_argument("--eval-interval", type=int, default=1_000)
     parser.add_argument("--eval-examples", type=int, default=512)
@@ -844,6 +941,7 @@ def main() -> None:
         next_value_position_consistency_weight=(
             args.next_value_position_consistency_weight
         ),
+        stage_three_distillation_weight=args.stage_three_distillation_weight,
     )
     vocabulary = PointerNextVocabulary(
         config.representation,
@@ -861,8 +959,24 @@ def main() -> None:
         model,
         args.stage_three_checkpoint,
     )
+    stage_three_teacher = ModularPositionValueModel(
+        model_config,
+        config.position_moduli,
+        split_input=config.input_layout == "split",
+    )
+    teacher_missing, teacher_unexpected = (
+        stage_three_teacher.load_state_dict(
+            checkpoint["model_state"],
+            strict=True,
+        )
+    )
+    if teacher_missing or teacher_unexpected:
+        raise ValueError("could not initialize the Stage-3 teacher")
+    stage_three_teacher.requires_grad_(False)
+    stage_three_teacher.eval()
     device = resolve_device(args.device)
     model.to(device)
+    stage_three_teacher.to(device)
     metadata = {
         "probe": "pointer_next_value_position",
         "device": str(device),
@@ -900,6 +1014,7 @@ def main() -> None:
             output_directory=args.output_directory,
             device=device,
             tracker=tracker,
+            stage_three_teacher=stage_three_teacher,
         )
     finally:
         if tracker is not None:

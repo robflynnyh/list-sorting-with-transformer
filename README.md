@@ -159,7 +159,11 @@ address to be computed as a local modular shift instead of recovered from the
 original prompt. During consistency training, the same batch also receives an
 unrestricted Stage-4 pass. On isolated examples, a relative MSE loss trains the
 unrestricted pass's 64-dimensional position query to match the detached
-isolated query. Evaluation remains fully unrestricted.
+isolated query. A frozen copy of the incoming Stage-3 checkpoint also supplies
+centered, scale-normalized address and token logits. Matching those complete
+score vectors constrains Stage 4 training to preserve the inherited Stage-3
+function more strongly than target cross-entropy alone. Evaluation remains
+fully unrestricted and uses only the student model.
 
 During the 50%-isolation stage-2 run, the final query can attend only to the
 inserted `p` item on half of the training examples. Other examples retain full
@@ -689,6 +693,7 @@ sort-pointer-position-sequence \
   --successor-attention-isolation-probability 0.5 \
   --next-value-position-attention-isolation-probability 0.5 \
   --next-value-position-consistency-weight 1 \
+  --stage-three-distillation-weight 1 \
   --gradient-noise-scale 0 \
   --dropout 0.02 \
   --wandb-project list-sorting-with-transformer \

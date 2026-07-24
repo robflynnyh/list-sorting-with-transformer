@@ -37,6 +37,7 @@ so charts should use the project metric `step` as their x-axis.
 | `train/unrestricted_next_value_position_loss` | Stage-4 address cross-entropy from the unrestricted student pass used at evaluation. |
 | `train/teacher_branch_next_value_position_loss` | Stage-4 address cross-entropy from the branch containing the sampled isolated examples. |
 | `train/next_value_position_consistency_loss` | Relative MSE between unrestricted and detached isolated 64-dimensional position queries, measured only on isolated examples. |
+| `train/stage_three_distillation_loss` | Mean centered, teacher-scale-normalized logit MSE against a frozen Stage-3 checkpoint over both address steps and the retrieved token. |
 | `train/next_value_position_attention_isolation_fraction` | Fraction of the Stage-4 batch whose final query can attend only to the preceding `PTR+1` address latent. |
 | `train/teacher_forced_next_value_position_accuracy` | Fraction of Stage-4 training examples where every residue of the following value's address is correct with the gold Stage-3 history supplied. |
 | `train/teacher_forced_next_value_position_residue_accuracy` | Accuracy over individual Stage-4 address residue predictions with the gold Stage-3 history supplied. |
