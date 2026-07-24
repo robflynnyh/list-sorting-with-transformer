@@ -39,11 +39,16 @@ from .tokens import PointerNextVocabulary
 class NextValuePositionConfig(PositionValueConfig):
     next_value_position_loss_weight: float = 1.0
     next_value_position_attention_isolation_probability: float = 0.5
+    next_value_position_consistency_weight: float = 1.0
 
     def __post_init__(self) -> None:
         super().__post_init__()
         if self.next_value_position_loss_weight <= 0:
             raise ValueError("next_value_position_loss_weight must be positive")
+        if self.next_value_position_consistency_weight < 0:
+            raise ValueError(
+                "next_value_position_consistency_weight must be nonnegative"
+            )
         if not (
             0.0
             <= self.next_value_position_attention_isolation_probability
@@ -163,7 +168,7 @@ class ModularNextValuePositionModel(ModularPositionValueModel):
         mask[isolate_next_value_position, -1, -2] = True
         return mask
 
-    def teacher_forced_next_value_position_logits(
+    def teacher_forced_next_value_position_query(
         self,
         prompt_ids: Tensor,
         position_targets: Tensor,
@@ -179,7 +184,25 @@ class ModularNextValuePositionModel(ModularPositionValueModel):
             offsets=offsets,
             isolate_next_value_position=isolate_next_value_position,
         )
-        return self.position_logits(hidden[:, -1])
+        return self.query_projection(hidden[:, -1])
+
+    def teacher_forced_next_value_position_logits(
+        self,
+        prompt_ids: Tensor,
+        position_targets: Tensor,
+        token_targets: Tensor,
+        *,
+        offsets: Tensor,
+        isolate_next_value_position: Tensor | None = None,
+    ) -> tuple[Tensor, ...]:
+        query = self.teacher_forced_next_value_position_query(
+            prompt_ids,
+            position_targets,
+            token_targets,
+            offsets=offsets,
+            isolate_next_value_position=isolate_next_value_position,
+        )
+        return self.position_embedding.component_logits(query)
 
     @torch.inference_mode()
     def generate_stage_four_trace(
@@ -250,42 +273,100 @@ def next_value_position_loss_and_metrics(
     position_targets = model.target_sequence(batch.pointers, offsets)
     token_targets = target_token_ids(batch)
     next_targets = model.target_next_value_position(batch.pointers, offsets)
-    next_logits = model.teacher_forced_next_value_position_logits(
+    student_query = model.teacher_forced_next_value_position_query(
         batch.prompt_ids,
         position_targets,
         token_targets,
         offsets=offsets,
-        isolate_next_value_position=isolate_next_value_position,
     )
-    component_losses = [
+    student_logits = model.position_embedding.component_logits(student_query)
+    student_component_losses = [
         F.cross_entropy(component_logits, next_targets[:, component])
-        for component, component_logits in enumerate(next_logits)
+        for component, component_logits in enumerate(student_logits)
     ]
-    next_loss = torch.stack(component_losses).mean()
-    next_predictions = torch.stack(
-        [component.argmax(dim=-1) for component in next_logits],
+    student_loss = torch.stack(student_component_losses).mean()
+    student_predictions = torch.stack(
+        [component.argmax(dim=-1) for component in student_logits],
         dim=-1,
     )
-    next_correct = next_predictions.eq(next_targets)
+    student_correct = student_predictions.eq(next_targets)
+
+    isolated_loss = student_loss
+    consistency_loss = student_query.new_zeros(())
+    isolated_correct = student_correct
+    if isolate_next_value_position is not None:
+        teacher_query = model.teacher_forced_next_value_position_query(
+            batch.prompt_ids,
+            position_targets,
+            token_targets,
+            offsets=offsets,
+            isolate_next_value_position=isolate_next_value_position,
+        )
+        teacher_logits = model.position_embedding.component_logits(
+            teacher_query
+        )
+        teacher_component_losses = [
+            F.cross_entropy(component_logits, next_targets[:, component])
+            for component, component_logits in enumerate(teacher_logits)
+        ]
+        isolated_loss = torch.stack(teacher_component_losses).mean()
+        isolated_predictions = torch.stack(
+            [component.argmax(dim=-1) for component in teacher_logits],
+            dim=-1,
+        )
+        isolated_correct = isolated_predictions.eq(next_targets)
+        if bool(isolate_next_value_position.any()):
+            teacher_target = teacher_query[
+                isolate_next_value_position
+            ].detach()
+            student_target = student_query[isolate_next_value_position]
+            teacher_rms = (
+                teacher_target.square()
+                .mean(dim=-1, keepdim=True)
+                .sqrt()
+                .clamp_min(1e-6)
+            )
+            consistency_loss = F.mse_loss(
+                student_target / teacher_rms,
+                teacher_target / teacher_rms,
+            )
+
+    next_loss = 0.5 * (student_loss + isolated_loss)
     total_loss = (
         stage_three_loss
         + config.next_value_position_loss_weight * next_loss
+        + config.next_value_position_consistency_weight * consistency_loss
     )
     return total_loss, {
         **metrics,
         "loss": float(total_loss.detach().item()),
         "stage_three_loss": float(stage_three_loss.detach().item()),
         "next_value_position_loss": float(next_loss.detach().item()),
+        "unrestricted_next_value_position_loss": float(
+            student_loss.detach().item()
+        ),
+        "teacher_branch_next_value_position_loss": float(
+            isolated_loss.detach().item()
+        ),
+        "next_value_position_consistency_loss": float(
+            consistency_loss.detach().item()
+        ),
         "next_value_position_attention_isolation_fraction": (
             float(isolate_next_value_position.float().mean().item())
             if isolate_next_value_position is not None
             else 0.0
         ),
         "teacher_forced_next_value_position_accuracy": float(
-            next_correct.all(dim=1).float().mean().item()
+            student_correct.all(dim=1).float().mean().item()
         ),
         "teacher_forced_next_value_position_residue_accuracy": float(
-            next_correct.float().mean().item()
+            student_correct.float().mean().item()
+        ),
+        "teacher_branch_next_value_position_accuracy": float(
+            isolated_correct.all(dim=1).float().mean().item()
+        ),
+        "teacher_branch_next_value_position_residue_accuracy": float(
+            isolated_correct.float().mean().item()
         ),
     }
 
@@ -688,6 +769,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.5,
     )
+    parser.add_argument(
+        "--next-value-position-consistency-weight",
+        type=float,
+        default=1.0,
+    )
     parser.add_argument("--log-interval", type=int, default=250)
     parser.add_argument("--eval-interval", type=int, default=1_000)
     parser.add_argument("--eval-examples", type=int, default=512)
@@ -754,6 +840,9 @@ def main() -> None:
         ),
         next_value_position_attention_isolation_probability=(
             args.next_value_position_attention_isolation_probability
+        ),
+        next_value_position_consistency_weight=(
+            args.next_value_position_consistency_weight
         ),
     )
     vocabulary = PointerNextVocabulary(

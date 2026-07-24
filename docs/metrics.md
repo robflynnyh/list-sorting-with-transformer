@@ -34,9 +34,14 @@ so charts should use the project metric `step` as their x-axis.
 | `train/successor_attention_target_probability` | Mean softmax attention probability assigned to the preceding `p` latent across layers and heads. |
 | `train/stage_three_loss` | For Stage 4, the retained Stage-3 loss over `address(PTR)`, `address(PTR+1)`, and the marked value token. |
 | `train/next_value_position_loss` | For Stage 4, mean residue cross-entropy for the following list value's modular address at `PTR+3`. |
+| `train/unrestricted_next_value_position_loss` | Stage-4 address cross-entropy from the unrestricted student pass used at evaluation. |
+| `train/teacher_branch_next_value_position_loss` | Stage-4 address cross-entropy from the branch containing the sampled isolated examples. |
+| `train/next_value_position_consistency_loss` | Relative MSE between unrestricted and detached isolated 64-dimensional position queries, measured only on isolated examples. |
 | `train/next_value_position_attention_isolation_fraction` | Fraction of the Stage-4 batch whose final query can attend only to the preceding `PTR+1` address latent. |
 | `train/teacher_forced_next_value_position_accuracy` | Fraction of Stage-4 training examples where every residue of the following value's address is correct with the gold Stage-3 history supplied. |
 | `train/teacher_forced_next_value_position_residue_accuracy` | Accuracy over individual Stage-4 address residue predictions with the gold Stage-3 history supplied. |
+| `train/teacher_branch_next_value_position_accuracy` | Exact Stage-4 address accuracy from the branch containing sampled isolated examples. |
+| `train/teacher_branch_next_value_position_residue_accuracy` | Residue accuracy from the branch containing sampled isolated examples. |
 
 Older runs created before independent microbatch-length sampling may contain
 only `train/length`. In those runs, all accumulated microbatches used that same

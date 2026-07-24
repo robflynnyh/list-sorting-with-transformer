@@ -156,7 +156,10 @@ example, `<bos>7,<PTR>4,2=` produces the Stage-4 trace
 the next pipeline stage. On half of Stage-4 training examples, the final
 query's attention is restricted to `address(4)`. This encourages the new
 address to be computed as a local modular shift instead of recovered from the
-original prompt.
+original prompt. During consistency training, the same batch also receives an
+unrestricted Stage-4 pass. On isolated examples, a relative MSE loss trains the
+unrestricted pass's 64-dimensional position query to match the detached
+isolated query. Evaluation remains fully unrestricted.
 
 During the 50%-isolation stage-2 run, the final query can attend only to the
 inserted `p` item on half of the training examples. Other examples retain full
@@ -685,6 +688,7 @@ sort-pointer-position-sequence \
   --steps 20000 \
   --successor-attention-isolation-probability 0.5 \
   --next-value-position-attention-isolation-probability 0.5 \
+  --next-value-position-consistency-weight 1 \
   --gradient-noise-scale 0 \
   --dropout 0.02 \
   --wandb-project list-sorting-with-transformer \

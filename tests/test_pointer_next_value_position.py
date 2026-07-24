@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import torch
 
 from list_sorting_transformer.data import make_pointer_value_batch
@@ -42,6 +43,7 @@ def small_config() -> NextValuePositionConfig:
         position_offset_max=50,
         successor_attention_isolation_probability=0.5,
         next_value_position_attention_isolation_probability=0.5,
+        next_value_position_consistency_weight=1.0,
     )
 
 
@@ -84,6 +86,28 @@ def test_mixed_history_appends_two_addresses_then_marked_token() -> None:
     )
 
     assert hidden.shape == (2, prompt.shape[1] + 3, 32)
+
+
+def test_position_query_has_the_modular_embedding_dimension() -> None:
+    torch.manual_seed(2)
+    model = small_model()
+    vocabulary = PointerNextVocabulary("numbers", 10)
+    prompt = torch.tensor(
+        [vocabulary.encode_prompt_with_pointer([3, 1, 4], 1)]
+    )
+    pointers = torch.tensor([1])
+    offsets = torch.tensor([-12])
+    positions = model.target_sequence(pointers, offsets)
+    marked_tokens = torch.tensor([vocabulary.value_token(1)])
+
+    query = model.teacher_forced_next_value_position_query(
+        prompt,
+        positions,
+        marked_tokens,
+        offsets=offsets,
+    )
+
+    assert query.shape == (1, model.position_embedding.dim)
 
 
 def test_stage_three_checkpoint_transfers_without_new_parameters(tmp_path) -> None:
@@ -142,9 +166,20 @@ def test_stage_four_loss_trains_address_head_after_marked_token() -> None:
     assert (
         metrics["next_value_position_attention_isolation_fraction"] == 0.5
     )
+    assert metrics["next_value_position_consistency_loss"] > 0
+    assert metrics["unrestricted_next_value_position_loss"] > 0
+    assert metrics["teacher_branch_next_value_position_loss"] > 0
+    assert 0 <= metrics["teacher_branch_next_value_position_accuracy"] <= 1
     assert 0 <= metrics["teacher_forced_next_value_position_accuracy"] <= 1
     assert model.query_projection.weight.grad is not None
     assert model.token_query_projection.weight.grad is not None
+
+
+def test_consistency_weight_must_be_nonnegative() -> None:
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        NextValuePositionConfig(
+            next_value_position_consistency_weight=-1.0
+        )
 
 
 def test_stage_four_isolation_exposes_only_preceding_address() -> None:
