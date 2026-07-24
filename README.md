@@ -149,8 +149,11 @@ Stage 1 predicts the absolute position `p` of `<PTR>`. Stage 2 starts from that
 checkpoint, predicts `p`, inserts the predicted modular address as one
 autoregressive latent item, and predicts `p+1`. Stage 3 starts from the Stage-2
 checkpoint and retrieves the list token stored at the computed `p+1` address.
-For example, `<bos>7,<PTR>4,2=` produces the latent trace
-`[address(<PTR>)][address(4)][4]`.
+Stage 4 starts from Stage 3 and predicts the position of the following list
+value. Because the comma is a token, this address is `p+3`, not `p+2`. For
+example, `<bos>7,<PTR>4,2=` produces the Stage-4 trace
+`[address(<PTR>)][address(4)][4][address(2)]`. Retrieving `2` itself is left for
+the next pipeline stage.
 
 During the 50%-isolation stage-2 run, the final query can attend only to the
 inserted `p` item on half of the training examples. Other examples retain full
@@ -693,6 +696,16 @@ sort-pointer-value-from-position \
   --wandb-project list-sorting-with-transformer \
   --wandb-run-name pointer-value-smallbases-stage3-20k-seed7 \
   --output-directory artifacts/pointer_value_smallbases_stage3_20k_seed7
+
+sort-pointer-next-value-position \
+  --stage-three-checkpoint artifacts/pointer_value_smallbases_stage3_20k_seed7/checkpoint.pt \
+  --eval-max-length 400 \
+  --steps 20000 \
+  --successor-attention-isolation-probability 0.5 \
+  --gradient-noise-scale 0 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-next-value-position-smallbases-stage4-20k-seed7 \
+  --output-directory artifacts/pointer_next_value_position_smallbases_stage4_20k_seed7
 
 sort-transformer-train \
   --task quicksort_trace \

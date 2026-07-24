@@ -32,6 +32,10 @@ so charts should use the project metric `step` as their x-axis.
 | `train/successor_attention_supervision_loss` | For attention-supervised modular position sequences, cross-entropy over visible keys for every layer and head. The target is the preceding `p` latent at the `p+1` query. |
 | `train/successor_attention_target_accuracy` | Fraction of layer-head pairs whose highest pre-softmax score selects the preceding `p` latent. |
 | `train/successor_attention_target_probability` | Mean softmax attention probability assigned to the preceding `p` latent across layers and heads. |
+| `train/stage_three_loss` | For Stage 4, the retained Stage-3 loss over `address(PTR)`, `address(PTR+1)`, and the marked value token. |
+| `train/next_value_position_loss` | For Stage 4, mean residue cross-entropy for the following list value's modular address at `PTR+3`. |
+| `train/teacher_forced_next_value_position_accuracy` | Fraction of Stage-4 training examples where every residue of the following value's address is correct with the gold Stage-3 history supplied. |
+| `train/teacher_forced_next_value_position_residue_accuracy` | Accuracy over individual Stage-4 address residue predictions with the gold Stage-3 history supplied. |
 
 Older runs created before independent microbatch-length sampling may contain
 only `train/length`. In those runs, all accumulated microbatches used that same
@@ -78,9 +82,15 @@ executor assistance.
 | `both_positions_accuracy` | Both autoregressively generated modular positions are exact. |
 | `successor_consistency` | The second generated position is exactly one greater than the first in every modulus, even if the pair is not the target pair. |
 | `token_accuracy` | For Stage 3 of the modular position pipeline, the generated token equals the list token stored at the generated target address `p+1`. |
-| `complete_trace_accuracy` | For Stage 3, both generated modular positions and the retrieved token are exact. |
+| `complete_trace_accuracy` | For Stage 3, both generated modular positions and the retrieved token are exact. For Stage 4, the following value's generated address must also be exact. |
 | `token_accuracy_given_correct_positions` | Stage-3 token accuracy restricted to examples where both generated modular positions are exact. |
 | `correct_position_fraction` | For Stage 3, the fraction of examples where both generated modular positions are exact. |
+| `stage_three_complete_trace_accuracy` | For Stage 4, whether the generated Stage-3 prefix remains entirely correct. |
+| `next_value_position_accuracy` | For Stage 4, whether every generated residue identifies the following list value at `PTR+3`. |
+| `next_value_position_residue_accuracy` | Accuracy over the individual residues of the generated Stage-4 address. |
+| `next_value_position_consistency` | Whether the generated Stage-4 address is exactly two token positions after the generated marked-value address, independently of whether either address is correct. |
+| `all_positions_accuracy` | Whether all three generated modular addresses are correct. |
+| `next_value_position_accuracy_given_stage_three_correct` | Stage-4 address accuracy restricted to examples with a fully correct generated Stage-3 prefix. |
 | `full_target_token_accuracy` | Positional accuracy over the complete generated target. It equals action accuracy for fully executor-assisted runs and includes every model-generated observation or window for partial- and no-tool runs. |
 | `execution_completed` | Offline or interactive executor reached `DONE` without an invalid action. |
 | `observation_token_accuracy` | Positional accuracy of observations assigned to the model. Missing observations after an early failure count as incorrect. |
