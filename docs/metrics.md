@@ -29,6 +29,9 @@ so charts should use the project metric `step` as their x-axis.
 | `train/gradient_norm` | Global gradient norm returned before clipping. The default clipping threshold is `1.0`, so the logged value can exceed `1.0`. |
 | `train/elapsed_seconds` | Wall-clock training time since this process started. |
 | `train/successor_attention_isolation_fraction` | For the modular position sequence, the fraction of the current batch whose `p+1` query could attend only to the preceding `p` latent item. Evaluation always reports zero because isolation is disabled. |
+| `train/successor_attention_supervision_loss` | For attention-supervised modular position sequences, cross-entropy over visible keys for every layer and head. The target is the preceding `p` latent at the `p+1` query. |
+| `train/successor_attention_target_accuracy` | Fraction of layer-head pairs whose highest pre-softmax score selects the preceding `p` latent. |
+| `train/successor_attention_target_probability` | Mean softmax attention probability assigned to the preceding `p` latent across layers and heads. |
 
 Older runs created before independent microbatch-length sampling may contain
 only `train/length`. In those runs, all accumulated microbatches used that same

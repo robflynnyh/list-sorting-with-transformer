@@ -186,6 +186,16 @@ Stage-2 configuration therefore keeps gradient noise disabled. The W&B runs are
 and
 [gradient noise](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/ov2fpw50).
 
+An alternative replaced successor isolation with an auxiliary cross-entropy
+loss that trained every attention head in every layer to select the preceding
+`p` latent while predicting `p+1`. Training-length routing accuracy reached
+approximately 100%, but L400 exact accuracy was unstable: 97.66% at step 5,000,
+50.00% at 6,000, 95.70% at 7,000, 54.30% at 8,000, and 46.68% at 9,000. The run
+was stopped because correct routing on short training sequences did not produce
+stable length generalization. This setup is available through
+`--successor-attention-supervision-weight`, but is not recommended. See the
+[W&B run](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/apbvq1s2).
+
 ## Quicksort Execution Traces
 
 The `quicksort_trace` task makes the model execute deterministic three-way
