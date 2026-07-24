@@ -47,6 +47,8 @@ class PointerPositionConfig:
     ffn_multiplier: float = 4.0
     dropout: float = 0.0
     rotary_base: float = 10_000.0
+    position_offset_min: int = -1_000_000
+    position_offset_max: int = 1_000_000
     checkpoint_interval: int = 1_000
 
     def __post_init__(self) -> None:
@@ -82,6 +84,8 @@ class PointerPositionConfig:
             raise ValueError("gradient_clip must be positive")
         if self.rotary_base <= 1.0:
             raise ValueError("rotary_base must be greater than one")
+        if self.position_offset_min > self.position_offset_max:
+            raise ValueError("position_offset_min must be <= position_offset_max")
 
 
 class SinusoidalPositionEmbedding(nn.Module):
@@ -90,23 +94,23 @@ class SinusoidalPositionEmbedding(nn.Module):
     def __init__(self, dim: int, base: float) -> None:
         super().__init__()
         inverse_frequency = 1.0 / (
-            base ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim)
+            base ** (torch.arange(0, dim, 2, dtype=torch.float64) / dim)
         )
         self.register_buffer("inverse_frequency", inverse_frequency, persistent=False)
 
     def forward(self, positions: Tensor) -> Tensor:
-        angles = torch.outer(
-            positions.to(dtype=self.inverse_frequency.dtype),
-            self.inverse_frequency,
+        angles = (
+            positions.to(dtype=self.inverse_frequency.dtype).unsqueeze(-1)
+            * self.inverse_frequency
         )
         embedding = torch.empty(
-            positions.shape[0],
+            *positions.shape,
             self.inverse_frequency.shape[0] * 2,
             device=positions.device,
             dtype=torch.float32,
         )
-        embedding[:, 0::2] = angles.sin()
-        embedding[:, 1::2] = angles.cos()
+        embedding[..., 0::2] = angles.sin().to(dtype=torch.float32)
+        embedding[..., 1::2] = angles.cos().to(dtype=torch.float32)
         return embedding
 
 
@@ -128,31 +132,60 @@ class PointerPositionProbe(nn.Module):
     def layer_position_modes(self) -> tuple[str, ...]:
         return self.encoder.layer_position_modes
 
-    def candidate_positions(self, length: int, *, device: torch.device) -> Tensor:
+    def candidate_token_offsets(self, length: int, *, device: torch.device) -> Tensor:
         if length < 2:
             raise ValueError("length must be at least two")
         list_indices = torch.arange(length - 1, device=device)
         return 1 + 2 * list_indices
+
+    def candidate_positions(
+        self,
+        length: int,
+        *,
+        device: torch.device,
+        offsets: Tensor | None = None,
+    ) -> Tensor:
+        token_offsets = self.candidate_token_offsets(length, device=device)
+        if offsets is None:
+            return token_offsets
+        return offsets[:, None] + token_offsets[None, :]
 
     def input_position_embeddings(
         self,
         sequence_length: int,
         *,
         device: torch.device,
+        offsets: Tensor | None = None,
     ) -> Tensor:
-        positions = torch.arange(sequence_length, device=device)
+        token_offsets = torch.arange(sequence_length, device=device)
+        positions = (
+            token_offsets
+            if offsets is None
+            else offsets[:, None] + token_offsets[None, :]
+        )
         return self.position_embedding(positions)
 
-    def target_positions(self, pointers: Tensor) -> Tensor:
+    def target_token_offsets(self, pointers: Tensor) -> Tensor:
         return 1 + 2 * pointers
 
-    def target_embeddings(self, pointers: Tensor) -> Tensor:
-        return self.position_embedding(self.target_positions(pointers))
+    def target_positions(self, pointers: Tensor, offsets: Tensor | None = None) -> Tensor:
+        token_offsets = self.target_token_offsets(pointers)
+        if offsets is None:
+            return token_offsets
+        return offsets + token_offsets
 
-    def forward(self, prompt_ids: Tensor) -> Tensor:
+    def target_embeddings(
+        self,
+        pointers: Tensor,
+        offsets: Tensor | None = None,
+    ) -> Tensor:
+        return self.position_embedding(self.target_positions(pointers, offsets))
+
+    def forward(self, prompt_ids: Tensor, *, offsets: Tensor | None = None) -> Tensor:
         input_positions = self.input_position_embeddings(
             prompt_ids.shape[1],
             device=prompt_ids.device,
+            offsets=offsets,
         )
         hidden = self.encoder.hidden_states(
             prompt_ids,
@@ -160,10 +193,22 @@ class PointerPositionProbe(nn.Module):
         )[:, -1]
         return self.query_projection(hidden)
 
-    def logits_for_length(self, predictions: Tensor, *, length: int) -> Tensor:
-        positions = self.candidate_positions(length, device=predictions.device)
+    def logits_for_length(
+        self,
+        predictions: Tensor,
+        *,
+        length: int,
+        offsets: Tensor | None = None,
+    ) -> Tensor:
+        positions = self.candidate_positions(
+            length,
+            device=predictions.device,
+            offsets=offsets,
+        )
         candidates = self.position_embedding(positions).to(dtype=predictions.dtype)
-        squared_distances = (predictions[:, None, :] - candidates[None, :, :]).square()
+        if candidates.ndim == 2:
+            candidates = candidates[None, :, :]
+        squared_distances = (predictions[:, None, :] - candidates).square()
         return -squared_distances.mean(dim=-1)
 
 
@@ -189,23 +234,41 @@ def selected_evaluation_lengths(config: PointerPositionConfig) -> list[int]:
     return sorted(candidates)
 
 
+def sample_position_offsets(
+    batch_size: int,
+    *,
+    config: PointerPositionConfig,
+    generator: torch.Generator,
+    device: torch.device,
+) -> Tensor:
+    offsets = torch.randint(
+        config.position_offset_min,
+        config.position_offset_max + 1,
+        (batch_size,),
+        generator=generator,
+    )
+    return offsets.to(device)
+
+
 def pointer_position_metrics(
     emitted_vectors: Tensor,
     pointers: Tensor,
     *,
     model: PointerPositionProbe,
     length: int,
+    offsets: Tensor | None = None,
     train_max_length: int,
 ) -> dict[str, float]:
-    targets = model.target_embeddings(pointers).to(dtype=emitted_vectors.dtype)
-    logits = model.logits_for_length(emitted_vectors, length=length)
+    targets = model.target_embeddings(pointers, offsets).to(dtype=emitted_vectors.dtype)
+    logits = model.logits_for_length(emitted_vectors, length=length, offsets=offsets)
     predicted_classes = logits.argmax(dim=-1)
-    target_positions = model.target_positions(pointers)
-    predicted_positions = model.candidate_positions(length, device=pointers.device)[
-        predicted_classes
-    ]
-    absolute_errors = (predicted_positions - target_positions).abs()
-    correct = predicted_positions.eq(target_positions)
+    target_token_offsets = model.target_token_offsets(pointers)
+    predicted_token_offsets = model.candidate_token_offsets(
+        length,
+        device=pointers.device,
+    )[predicted_classes]
+    absolute_errors = (predicted_token_offsets - target_token_offsets).abs()
+    correct = predicted_token_offsets.eq(target_token_offsets)
     unseen = pointers.gt(train_max_length - 2)
     seen = ~unseen
     return {
@@ -259,13 +322,20 @@ def evaluate_lengths(
                 vocabulary=vocabulary,
                 device=device,
             )
+            offsets = sample_position_offsets(
+                current_batch_size,
+                config=config,
+                generator=generator,
+                device=device,
+            )
             with autocast_context(device):
-                emitted_vectors = model(batch.prompt_ids)
+                emitted_vectors = model(batch.prompt_ids, offsets=offsets)
             metrics = pointer_position_metrics(
                 emitted_vectors.float(),
                 batch.pointers,
                 model=model,
                 length=int(length),
+                offsets=offsets,
                 train_max_length=config.train_max_length,
             )
             for name, value in metrics.items():
@@ -375,10 +445,16 @@ def train(
             vocabulary=vocabulary,
             device=device,
         )
+        offsets = sample_position_offsets(
+            config.batch_size,
+            config=config,
+            generator=generator,
+            device=device,
+        )
         optimizer.zero_grad(set_to_none=True)
         with autocast_context(device):
-            emitted_vectors = model(batch.prompt_ids)
-            targets = model.target_embeddings(batch.pointers).to(
+            emitted_vectors = model(batch.prompt_ids, offsets=offsets)
+            targets = model.target_embeddings(batch.pointers, offsets).to(
                 dtype=emitted_vectors.dtype
             )
             loss = F.mse_loss(emitted_vectors, targets)
@@ -405,6 +481,7 @@ def train(
                 batch.pointers,
                 model=model,
                 length=length,
+                offsets=offsets,
                 train_max_length=config.train_max_length,
             )
             row = {
@@ -557,6 +634,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ffn-multiplier", type=float, default=4.0)
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument("--rotary-base", type=float, default=10_000.0)
+    parser.add_argument("--position-offset-min", type=int, default=-1_000_000)
+    parser.add_argument("--position-offset-max", type=int, default=1_000_000)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--output-directory", type=Path)
     parser.add_argument("--wandb-project")
@@ -590,6 +669,8 @@ def main() -> None:
         ffn_multiplier=args.ffn_multiplier,
         dropout=args.dropout,
         rotary_base=args.rotary_base,
+        position_offset_min=args.position_offset_min,
+        position_offset_max=args.position_offset_max,
         checkpoint_interval=args.checkpoint_interval,
     )
     vocabulary = PointerNextVocabulary(config.representation, config.symbol_count)
@@ -612,7 +693,9 @@ def main() -> None:
     model.to(device)
     output_directory = args.output_directory
     if output_directory is None:
-        output_directory = Path("artifacts") / "pointer_position_sinusoidal_mse_seed7"
+        output_directory = (
+            Path("artifacts") / "pointer_position_random_offset_mse_seed7"
+        )
     metadata = {
         "probe": "pointer_position",
         "device": str(device),

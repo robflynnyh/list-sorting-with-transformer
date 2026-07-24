@@ -57,11 +57,13 @@ vector. The decoder reads:
 <bos>7,<PTR>4,2=
 ```
 
-Fixed sinusoidal position vectors are added to the token embeddings. The final
+Fixed sinusoidal position vectors are added to the token embeddings. Each
+example samples a fresh absolute offset, so the first prompt token can be
+embedded as position `-734291` in one example and `18204` in another. The final
 hidden state at `=` is projected to a vector and trained with MSE to reproduce
 the same sinusoidal vector that was added at the `<PTR>` token. With the
-repository's prompt format, `<bos>` is token position 0 and valid pointer
-offsets are:
+repository's prompt format, `<bos>` is token offset 0 within the prompt and
+valid pointer offsets are:
 
 ```text
 pointer list index: 0  1  2  ...
@@ -71,7 +73,9 @@ actual token offset: 1  3  5  ...
 Evaluation decodes the emitted vector by nearest sinusoidal pointer-offset
 candidate and reports both exact `argmax_accuracy` and `argmax_token_mae`, the
 mean absolute error between the predicted and true token offsets. The model
-remains causal because it only reads the prompt up to `=`.
+remains causal because it only reads the prompt up to `=`. The random absolute
+offset prevents a fixed lookup table over seen pointer slots; the easiest
+solution is to retrieve the actual position vector attached to `<PTR>`.
 
 ## Quicksort Execution Traces
 
@@ -366,9 +370,11 @@ sort-transformer-train \
 sort-pointer-position-probe \
   --representation numbers \
   --eval-max-length 400 \
+  --position-offset-min -1000000 \
+  --position-offset-max 1000000 \
   --wandb-project list-sorting-with-transformer \
-  --wandb-run-name pointer-position-sinusoidal-mse-seed7 \
-  --output-directory artifacts/pointer_position_sinusoidal_mse_seed7
+  --wandb-run-name pointer-position-random-offset-mse-seed7 \
+  --output-directory artifacts/pointer_position_random_offset_mse_seed7
 
 sort-transformer-train \
   --task quicksort_trace \

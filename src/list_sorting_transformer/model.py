@@ -264,14 +264,22 @@ class DecoderTransformer(nn.Module):
     ) -> Tensor:
         hidden = self.embed(token_ids)
         if extra_input_embeddings is not None:
-            if extra_input_embeddings.shape != hidden.shape[-2:]:
-                raise ValueError(
-                    "extra_input_embeddings must have shape [time, d_model]"
+            if extra_input_embeddings.shape == hidden.shape[-2:]:
+                extra_input_embeddings = extra_input_embeddings.to(
+                    device=hidden.device,
+                    dtype=hidden.dtype,
                 )
-            hidden = hidden + extra_input_embeddings.to(
-                device=hidden.device,
-                dtype=hidden.dtype,
-            )
+            elif extra_input_embeddings.shape == hidden.shape:
+                extra_input_embeddings = extra_input_embeddings.to(
+                    device=hidden.device,
+                    dtype=hidden.dtype,
+                )
+            else:
+                raise ValueError(
+                    "extra_input_embeddings must have shape [time, d_model] "
+                    "or [batch, time, d_model]"
+                )
+            hidden = hidden + extra_input_embeddings
         for block in self.blocks:
             hidden = block(hidden)
         return self.final_norm(hidden)

@@ -90,6 +90,21 @@ def test_model_backpropagates_output_loss_and_accepts_longer_sequences() -> None
     assert long_logits.shape == (2, 96, model.config.vocab_size)
 
 
+def test_hidden_states_accept_batch_specific_extra_input_embeddings() -> None:
+    torch.manual_seed(2)
+    model = DecoderTransformer(small_config())
+    tokens = torch.randint(0, model.config.vocab_size, (2, 5))
+    shared_extra = torch.randn(5, model.config.d_model)
+    batch_extra = torch.randn(2, 5, model.config.d_model)
+
+    shared_hidden = model.hidden_states(tokens, extra_input_embeddings=shared_extra)
+    batch_hidden = model.hidden_states(tokens, extra_input_embeddings=batch_extra)
+
+    assert shared_hidden.shape == (2, 5, model.config.d_model)
+    assert batch_hidden.shape == (2, 5, model.config.d_model)
+    assert not torch.equal(shared_hidden, batch_hidden)
+
+
 def test_transformer_cache_matches_full_prefix_logits() -> None:
     torch.manual_seed(13)
     model = DecoderTransformer(small_config()).eval()
