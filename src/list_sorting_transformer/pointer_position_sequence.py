@@ -579,6 +579,7 @@ def selected_evaluation_lengths(config: PositionSequenceConfig) -> list[int]:
         config.train_max_length,
         min(config.eval_max_length, config.train_max_length + 5),
         min(config.eval_max_length, 40),
+        min(config.eval_max_length, 400),
         config.eval_max_length,
     }
     return sorted(candidates)

@@ -41,7 +41,9 @@ length.
 
 Metrics under `eval/length_N/` evaluate newly generated examples of list length
 `N`. With the default training range of 2-20, lengths 2, 11, and 20 are
-in-domain checks, while lengths 25 and 40 test length extrapolation.
+in-domain checks, while lengths 25 and 40 test length extrapolation. When
+`eval_max_length` exceeds 400, length 400 remains an explicit checkpoint in
+addition to the configured maximum.
 
 ## Free-Generation Metrics
 

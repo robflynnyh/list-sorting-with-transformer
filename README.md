@@ -225,8 +225,47 @@ The computed positions remain much stronger than token retrieval: on the five
 fresh step-8,000 evaluations, both generated positions were exact for 92.30%
 of length-400 examples. Continued training therefore degrades the use of the
 computed address more than it degrades the address computation itself. The
-step-8,000 checkpoint is the current Stage-3 pipeline checkpoint. See the
+step-8,000 checkpoint is retained as the original Stage-3 baseline. See the
 [W&B run](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/c5rjitw1).
+
+The original moduli are all larger than the maximum training length, so each
+individual residue uniquely identifies one item in a training prompt. A
+smaller-base pipeline instead uses:
+
+```text
+(2, 3, 5, 7, 11, 13, 17, 19)
+```
+
+The eight learned residue embeddings occupy eight dimensions each, preserving
+the 64-dimensional address representation. Their product is `9,699,690`, which
+covers the full random-offset range, while every component wraps within a
+length-20 prompt. This forces token retrieval to combine components during
+training.
+
+Stages 1, 2, and 3 were retrained for 10,000, 20,000, and 20,000 updates,
+respectively, while retaining training lengths 2-20. Five fresh 1,024-example
+L400 evaluations gave:
+
+| Stage-3 addressing | L400 token | L400 complete trace | L400 positions |
+| --- | ---: | ---: | ---: |
+| Original bases, retained step 8,000 | 70.45% +/- 1.19% | 70.10% +/- 1.12% | 92.30% |
+| Smaller bases, fixed step 20,000 | **99.79% +/- 0.14%** | **99.61% +/- 0.18%** | **99.82%** |
+
+L2048 was an additional stress test rather than the primary target. The
+smaller-base fixed endpoint reached 87.11% token accuracy and 79.69% complete
+trace accuracy there. For comparison, retaining the original bases but
+increasing Stage-3 training lengths to 2-128 produced a step-6,000 checkpoint
+with 90.59% +/- 1.08% token accuracy across five fresh L2048 evaluations.
+Both L2048 runs were volatile after fitting the training domain, indicating
+that later pipeline stages should use a lower inherited-model learning rate or
+a frozen-backbone phase. See the W&B runs for
+[smaller bases](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/g76seaiy)
+and
+[training through length 128](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/os8ig7hy).
+
+The smaller-base step-20,000 checkpoint is the recommended Stage-3 pipeline
+checkpoint because it solves the primary L400 extrapolation target without
+increasing the 2-20 training domain.
 
 An alternative replaced successor isolation with an auxiliary cross-entropy
 loss that trained every attention head in every layer to select the preceding

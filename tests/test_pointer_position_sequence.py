@@ -9,6 +9,7 @@ from list_sorting_transformer.pointer_position_sequence import (
     PositionSequenceConfig,
     generated_metrics,
     gradient_noise_std,
+    selected_evaluation_lengths,
     sequence_loss_and_metrics,
 )
 from list_sorting_transformer.tokens import PointerNextVocabulary
@@ -168,6 +169,24 @@ def test_gradient_noise_std_uses_configured_decay() -> None:
 
     assert gradient_noise_std(config, 1) == pytest.approx(0.01)
     assert gradient_noise_std(config, 100) == pytest.approx(0.001)
+
+
+def test_selected_evaluation_lengths_keep_l400_below_larger_maximum() -> None:
+    config = PositionSequenceConfig(
+        train_min_length=2,
+        train_max_length=128,
+        eval_max_length=2048,
+    )
+
+    assert selected_evaluation_lengths(config) == [
+        2,
+        40,
+        65,
+        128,
+        133,
+        400,
+        2048,
+    ]
 
 
 def test_attention_supervision_replaces_successor_isolation() -> None:
