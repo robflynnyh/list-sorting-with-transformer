@@ -9,6 +9,7 @@ from list_sorting_transformer.pointer_position_probe import (
     PointerPositionProbe,
     gradient_noise_std,
     learning_rate_at_step,
+    modular_position_metrics,
     pointer_position_ce_metrics,
     pointer_position_metrics,
     sample_position_offsets,
@@ -32,6 +33,43 @@ def small_probe() -> PointerPositionProbe:
             position_pattern="none",
             rotate_values_with_rope=False,
         )
+    )
+
+
+def small_modular_probe() -> PointerPositionProbe:
+    vocabulary = PointerNextVocabulary("numbers", 10)
+    return PointerPositionProbe(
+        ModelConfig(
+            vocab_size=vocabulary.size,
+            representation="numbers",
+            symbol_count=10,
+            d_model=32,
+            n_layers=2,
+            n_heads=4,
+            ffn_multiplier=2.0,
+            position_pattern="none",
+            rotate_values_with_rope=False,
+        ),
+        position_moduli=(3, 5, 7, 11),
+    )
+
+
+def small_split_modular_probe() -> PointerPositionProbe:
+    vocabulary = PointerNextVocabulary("numbers", 10)
+    return PointerPositionProbe(
+        ModelConfig(
+            vocab_size=vocabulary.size,
+            representation="numbers",
+            symbol_count=10,
+            d_model=32,
+            n_layers=2,
+            n_heads=4,
+            ffn_multiplier=2.0,
+            position_pattern="none",
+            rotate_values_with_rope=False,
+        ),
+        position_moduli=(3, 5, 7, 11),
+        split_input=True,
     )
 
 
@@ -162,6 +200,89 @@ def test_pointer_position_probe_scores_candidate_pointer_slots() -> None:
     assert logits.shape == (2, 4)
     assert torch.isfinite(loss)
     assert any(parameter.grad is not None for parameter in model.parameters())
+
+
+def test_modular_pointer_probe_predicts_each_residue_category() -> None:
+    torch.manual_seed(11)
+    vocabulary = PointerNextVocabulary("numbers", 10)
+    model = small_modular_probe()
+    prompt = torch.tensor(
+        [
+            vocabulary.encode_prompt_with_pointer([3, 1, 4, 1, 5], 2),
+            vocabulary.encode_prompt_with_pointer([2, 7, 1, 8, 2], 0),
+        ]
+    )
+    offsets = torch.tensor([-12, 30])
+
+    logits = model.residue_logits(prompt, offsets=offsets)
+    targets = model.target_residues(torch.tensor([2, 0]), offsets)
+    loss = torch.stack(
+        [
+            F.cross_entropy(component_logits, target)
+            for component_logits, target in zip(logits, targets)
+        ]
+    ).mean()
+    loss.backward()
+
+    assert [component.shape for component in logits] == [
+        (2, 3),
+        (2, 5),
+        (2, 7),
+        (2, 11),
+    ]
+    assert torch.isfinite(loss)
+    assert any(parameter.grad is not None for parameter in model.parameters())
+
+
+def test_split_modular_probe_concatenates_content_and_position_channels() -> None:
+    torch.manual_seed(12)
+    vocabulary = PointerNextVocabulary("numbers", 10)
+    model = small_split_modular_probe()
+    prompt = torch.tensor(
+        [vocabulary.encode_prompt_with_pointer([3, 1, 4, 1, 5], 2)]
+    )
+    offsets = torch.tensor([100])
+
+    hidden = model.hidden_states(prompt, offsets=offsets)
+    logits = model.residue_logits(prompt, offsets=offsets)
+
+    assert model.encoder.content_dim == 16
+    assert model.encoder.position_dim == 16
+    assert model.position_embedding.dim == 16
+    assert hidden.shape == (1, prompt.shape[1], 32)
+    assert [component.shape for component in logits] == [
+        (1, 3),
+        (1, 5),
+        (1, 7),
+        (1, 11),
+    ]
+
+
+def test_modular_metrics_require_every_residue_for_exact_position() -> None:
+    model = small_modular_probe()
+    pointers = torch.tensor([0, 2])
+    offsets = torch.tensor([20, -10])
+    targets = model.target_residues(pointers, offsets)
+    logits = []
+    for modulus, target in zip((3, 5, 7, 11), targets):
+        component = torch.full((2, modulus), -10.0)
+        component.scatter_(1, target[:, None], 10.0)
+        logits.append(component)
+    logits[0][1].fill_(-10.0)
+    logits[0][1, (int(targets[0][1]) + 1) % 3] = 10.0
+
+    metrics = modular_position_metrics(
+        tuple(logits),
+        pointers,
+        model=model,
+        length=5,
+        offsets=offsets,
+        train_max_length=3,
+    )
+
+    assert metrics["exact_position_accuracy"] == 0.5
+    assert metrics["mean_residue_accuracy"] == 0.875
+    assert metrics["candidate_pointer_accuracy"] == 1.0
 
 
 def test_pointer_position_metrics_report_argmax_and_unseen_slices() -> None:

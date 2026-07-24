@@ -97,6 +97,11 @@ def main() -> None:
         trace_snapshot_mode=trace_snapshot_mode,
         window_tool_events=window_tool_events,
         train_max_length=int(train_config.get("train_max_length", max(lengths))),
+        input_position_encoding=str(
+            train_config.get("input_position_encoding", "none")
+        ),
+        position_offset_min=int(train_config.get("position_offset_min", -1_000_000)),
+        position_offset_max=int(train_config.get("position_offset_max", 1_000_000)),
     )
     train_min_length = int(train_config.get("train_min_length", min(lengths)))
     train_max_length = int(train_config.get("train_max_length", max(lengths)))
@@ -107,6 +112,13 @@ def main() -> None:
         "trace_snapshot_mode": trace_snapshot_mode,
         "window_tool_events": list(window_tool_events),
         "window_pair_encoding": window_pair_encoding,
+        "input_position_encoding": str(
+            train_config.get("input_position_encoding", "none")
+        ),
+        "position_offset_range": [
+            int(train_config.get("position_offset_min", -1_000_000)),
+            int(train_config.get("position_offset_max", 1_000_000)),
+        ],
         "model_config": config.as_dict(),
         "train_length_range": [train_min_length, train_max_length],
         "per_length": {str(length): metrics for length, metrics in per_length.items()},

@@ -122,8 +122,11 @@ class CausalSelfAttention(nn.Module):
         hidden: Tensor,
         *,
         cache: KeyValueCache | None = None,
+        attention_mask: Tensor | None = None,
     ) -> tuple[Tensor, KeyValueCache]:
         batch_size, sequence_length, model_dim = hidden.shape
+        if cache is not None and attention_mask is not None:
+            raise ValueError("custom attention masks are not supported with a cache")
         query, key, value = self.qkv(hidden).chunk(3, dim=-1)
         query = self._split_heads(query)
         key = self._split_heads(key)
@@ -141,12 +144,37 @@ class CausalSelfAttention(nn.Module):
                 )
             key = torch.cat((cache[0], key), dim=-2)
             value = torch.cat((cache[1], value), dim=-2)
+        combined_mask = None
+        if attention_mask is not None:
+            if attention_mask.dtype != torch.bool:
+                raise ValueError("attention_mask must be boolean")
+            if attention_mask.shape == (sequence_length, sequence_length):
+                combined_mask = attention_mask
+            elif attention_mask.shape == (
+                batch_size,
+                sequence_length,
+                sequence_length,
+            ):
+                combined_mask = attention_mask[:, None, :, :]
+            else:
+                raise ValueError(
+                    "attention_mask must have shape [time, time] or "
+                    "[batch, time, time]"
+                )
+            causal_mask = torch.ones(
+                sequence_length,
+                sequence_length,
+                device=hidden.device,
+                dtype=torch.bool,
+            ).tril()
+            combined_mask = combined_mask.to(device=hidden.device) & causal_mask
         attended = F.scaled_dot_product_attention(
             query,
             key,
             value,
+            attn_mask=combined_mask,
             dropout_p=self.dropout if self.training else 0.0,
-            is_causal=cache is None,
+            is_causal=cache is None and combined_mask is None,
         )
         attended = attended.transpose(1, 2).contiguous().view(
             batch_size,
@@ -155,8 +183,16 @@ class CausalSelfAttention(nn.Module):
         )
         return self.output(attended), (key, value)
 
-    def forward(self, hidden: Tensor) -> Tensor:
-        attended, _ = self.forward_with_cache(hidden)
+    def forward(
+        self,
+        hidden: Tensor,
+        *,
+        attention_mask: Tensor | None = None,
+    ) -> Tensor:
+        attended, _ = self.forward_with_cache(
+            hidden,
+            attention_mask=attention_mask,
+        )
         return attended
 
 
@@ -182,8 +218,18 @@ class TransformerBlock(nn.Module):
         self.ffn = SwiGLU(config)
         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(self, hidden: Tensor) -> Tensor:
-        hidden = hidden + self.dropout(self.attention(self.attention_norm(hidden)))
+    def forward(
+        self,
+        hidden: Tensor,
+        *,
+        attention_mask: Tensor | None = None,
+    ) -> Tensor:
+        hidden = hidden + self.dropout(
+            self.attention(
+                self.attention_norm(hidden),
+                attention_mask=attention_mask,
+            )
+        )
         hidden = hidden + self.dropout(self.ffn(self.ffn_norm(hidden)))
         return hidden
 
@@ -261,6 +307,7 @@ class DecoderTransformer(nn.Module):
         token_ids: Tensor,
         *,
         extra_input_embeddings: Tensor | None = None,
+        attention_mask: Tensor | None = None,
     ) -> Tensor:
         hidden = self.embed(token_ids)
         if extra_input_embeddings is not None:
@@ -281,11 +328,19 @@ class DecoderTransformer(nn.Module):
                 )
             hidden = hidden + extra_input_embeddings
         for block in self.blocks:
-            hidden = block(hidden)
+            hidden = block(hidden, attention_mask=attention_mask)
         return self.final_norm(hidden)
 
-    def forward(self, token_ids: Tensor) -> Tensor:
-        hidden = self.hidden_states(token_ids)
+    def forward(
+        self,
+        token_ids: Tensor,
+        *,
+        extra_input_embeddings: Tensor | None = None,
+    ) -> Tensor:
+        hidden = self.hidden_states(
+            token_ids,
+            extra_input_embeddings=extra_input_embeddings,
+        )
         return F.linear(hidden, self.token_embedding.weight)
 
     def forward_with_cache(
@@ -293,10 +348,28 @@ class DecoderTransformer(nn.Module):
         token_ids: Tensor,
         *,
         caches: tuple[KeyValueCache, ...] | None = None,
+        extra_input_embeddings: Tensor | None = None,
     ) -> tuple[Tensor, tuple[KeyValueCache, ...]]:
         if caches is not None and len(caches) != len(self.blocks):
             raise ValueError("one key/value cache is required per layer")
         hidden = self.embed(token_ids)
+        if extra_input_embeddings is not None:
+            if extra_input_embeddings.shape == hidden.shape[-2:]:
+                extra_input_embeddings = extra_input_embeddings.to(
+                    device=hidden.device,
+                    dtype=hidden.dtype,
+                )
+            elif extra_input_embeddings.shape == hidden.shape:
+                extra_input_embeddings = extra_input_embeddings.to(
+                    device=hidden.device,
+                    dtype=hidden.dtype,
+                )
+            else:
+                raise ValueError(
+                    "extra_input_embeddings must have shape [time, d_model] "
+                    "or [batch, time, d_model]"
+                )
+            hidden = hidden + extra_input_embeddings
         new_caches = []
         for layer_index, block in enumerate(self.blocks):
             cache = None if caches is None else caches[layer_index]
@@ -313,6 +386,7 @@ class DecoderTransformer(nn.Module):
         *,
         max_new_tokens: int,
         stop_token: int = EOS,
+        extra_input_embeddings: Tensor | None = None,
     ) -> Tensor:
         """Greedily decode and return only tokens generated after the prompt."""
 
@@ -321,7 +395,13 @@ class DecoderTransformer(nn.Module):
         if max_new_tokens < 1:
             raise ValueError("max_new_tokens must be positive")
         self.eval()
-        next_logits, caches = self.forward_with_cache(prompt_ids)
+        prompt_extra = None
+        if extra_input_embeddings is not None:
+            prompt_extra = extra_input_embeddings[:, : prompt_ids.shape[1]]
+        next_logits, caches = self.forward_with_cache(
+            prompt_ids,
+            extra_input_embeddings=prompt_extra,
+        )
         generated = []
         finished = torch.zeros(
             prompt_ids.shape[0],
@@ -339,8 +419,123 @@ class DecoderTransformer(nn.Module):
             finished = finished | next_token.eq(stop_token)
             if bool(finished.all()):
                 break
+            next_extra = None
+            if extra_input_embeddings is not None:
+                position_index = prompt_ids.shape[1] + len(generated) - 1
+                next_extra = extra_input_embeddings[
+                    :,
+                    position_index : position_index + 1,
+                ]
             next_logits, caches = self.forward_with_cache(
                 next_token[:, None],
                 caches=caches,
+                extra_input_embeddings=next_extra,
             )
         return torch.stack(generated, dim=1)
+
+
+class SplitInputDecoderTransformer(nn.Module):
+    """Decoder body with separate content and position input subspaces."""
+
+    architecture = "split_input_transformer"
+
+    def __init__(self, config: ModelConfig, *, content_dim: int) -> None:
+        super().__init__()
+        if not 1 <= content_dim < config.d_model:
+            raise ValueError("content_dim must be inside the model dimension")
+        self.config = config
+        self.content_dim = content_dim
+        self.position_dim = config.d_model - content_dim
+        self.token_embedding = nn.Embedding(config.vocab_size, content_dim)
+        self.number_projection = (
+            nn.Linear(1, content_dim, bias=False)
+            if config.representation == "numbers"
+            else None
+        )
+        self.blocks = nn.ModuleList(
+            TransformerBlock(config, use_rotary=config.uses_rotary(layer_index))
+            for layer_index in range(config.n_layers)
+        )
+        self.final_norm = nn.LayerNorm(config.d_model)
+        self.apply(DecoderTransformer._initialize)
+
+    @property
+    def layer_position_modes(self) -> tuple[str, ...]:
+        return tuple(
+            (
+                "rotary+value"
+                if block.attention.use_rotary
+                and block.attention.rotate_values_with_rope
+                else "rotary"
+                if block.attention.use_rotary
+                else "none"
+            )
+            for block in self.blocks
+        )
+
+    def embed(self, token_ids: Tensor) -> Tensor:
+        content = self.token_embedding(token_ids)
+        if self.number_projection is None:
+            return content
+        is_value = (token_ids >= VALUE_OFFSET) & (
+            token_ids < VALUE_OFFSET + self.config.symbol_count
+        )
+        values = token_ids.to(dtype=content.dtype) - VALUE_OFFSET
+        values = 2.0 * values / (self.config.symbol_count - 1) - 1.0
+        values = torch.where(is_value, values, torch.zeros_like(values))
+        return content + self.number_projection(values.unsqueeze(-1))
+
+    def hidden_states(
+        self,
+        token_ids: Tensor,
+        *,
+        extra_input_embeddings: Tensor | None = None,
+        attention_mask: Tensor | None = None,
+    ) -> Tensor:
+        if extra_input_embeddings is None:
+            raise ValueError("split inputs require position embeddings")
+        content = self.embed(token_ids)
+        if extra_input_embeddings.shape == (
+            token_ids.shape[-1],
+            self.position_dim,
+        ):
+            positions = extra_input_embeddings.to(
+                device=content.device,
+                dtype=content.dtype,
+            ).unsqueeze(0).expand(content.shape[0], -1, -1)
+        elif extra_input_embeddings.shape == (
+            *token_ids.shape,
+            self.position_dim,
+        ):
+            positions = extra_input_embeddings.to(
+                device=content.device,
+                dtype=content.dtype,
+            )
+        else:
+            raise ValueError(
+                "split position embeddings must have shape [time, position_dim] "
+                "or [batch, time, position_dim]"
+            )
+        return self.hidden_states_from_embeddings(
+            content,
+            positions,
+            attention_mask=attention_mask,
+        )
+
+    def hidden_states_from_embeddings(
+        self,
+        content_embeddings: Tensor,
+        position_embeddings: Tensor,
+        *,
+        attention_mask: Tensor | None = None,
+    ) -> Tensor:
+        if content_embeddings.shape[:-1] != position_embeddings.shape[:-1]:
+            raise ValueError("content and position sequence shapes must match")
+        if content_embeddings.shape[-1] != self.content_dim:
+            raise ValueError("content embedding dimension does not match")
+        if position_embeddings.shape[-1] != self.position_dim:
+            raise ValueError("position embedding dimension does not match")
+        hidden = torch.cat((content_embeddings, position_embeddings), dim=-1)
+        for block in self.blocks:
+            hidden = block(hidden, attention_mask=attention_mask)
+        return self.final_norm(hidden)

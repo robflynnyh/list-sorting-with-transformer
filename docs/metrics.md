@@ -17,7 +17,7 @@ so charts should use the project metric `step` as their x-axis.
 
 | Metric | Meaning |
 | --- | --- |
-| `train/loss` | Mean teacher-forced cross-entropy over predicted outputs for sequence tasks. For `sort-pointer-position-probe`, this is MSE between the emitted vector and the absolute sinusoidal vector added at `<PTR>`. Lower is better. |
+| `train/loss` | Mean teacher-forced cross-entropy over predicted outputs for sequence tasks. For the pointer-position probe this is MSE for `vector_mse`, pointer-slot CE for `pointer_ce`, or mean residue CE for `modular_ce`. Lower is better. |
 | `train/token_accuracy` | Teacher-forced next-token accuracy over the same included tokens. Correct preceding target tokens are supplied to the model. |
 | `train/argmax_accuracy` | For `sort-pointer-position-probe`, nearest-position accuracy after decoding the emitted vector against the valid `<PTR>` token offsets for the sampled list length. |
 | `train/argmax_token_mae` | For `sort-pointer-position-probe`, mean absolute difference between the predicted and true raw `<PTR>` token offset. A one-item pointer-index error is two token positions. |
@@ -27,6 +27,7 @@ so charts should use the project metric `step` as their x-axis.
 | `train/learning_rate` | Learning rate used by the optimizer update. |
 | `train/gradient_norm` | Global gradient norm returned before clipping. The default clipping threshold is `1.0`, so the logged value can exceed `1.0`. |
 | `train/elapsed_seconds` | Wall-clock training time since this process started. |
+| `train/successor_attention_isolation_fraction` | For the modular position sequence, the fraction of the current batch whose `p+1` query could attend only to the preceding `p` latent item. Evaluation always reports zero because isolation is disabled. |
 
 Older runs created before independent microbatch-length sampling may contain
 only `train/length`. In those runs, all accumulated microbatches used that same
@@ -66,6 +67,10 @@ executor assistance.
 | `seen_argmax_token_mae` | Pointer-position token-offset MAE on the same seen subset. |
 | `unseen_argmax_accuracy` | Pointer-position argmax accuracy restricted to pointer indices beyond the training maximum. |
 | `unseen_argmax_token_mae` | Pointer-position token-offset MAE on the same unseen subset. |
+| `pointer_position_accuracy` | For the modular position sequence, all residue heads exactly recover the generated first position `p`. |
+| `next_position_accuracy` | All residue heads exactly recover `p+1`. |
+| `both_positions_accuracy` | Both autoregressively generated modular positions are exact. |
+| `successor_consistency` | The second generated position is exactly one greater than the first in every modulus, even if the pair is not the target pair. |
 | `full_target_token_accuracy` | Positional accuracy over the complete generated target. It equals action accuracy for fully executor-assisted runs and includes every model-generated observation or window for partial- and no-tool runs. |
 | `execution_completed` | Offline or interactive executor reached `DONE` without an invalid action. |
 | `observation_token_accuracy` | Positional accuracy of observations assigned to the model. Missing observations after an early failure count as incorrect. |

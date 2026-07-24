@@ -36,6 +36,11 @@ from .metrics import masked_token_accuracy
 from .model import DecoderTransformer, ModelConfig
 from .local_window_sort import WINDOW_TOOL_EVENTS
 from .plots import plot_length_generalization, plot_training_history
+from .positions import (
+    SinusoidalPositionEmbedding,
+    input_position_embeddings,
+    sample_position_offsets,
+)
 from .quicksort import SNAPSHOT_MODES, SnapshotMode
 from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import (
@@ -85,6 +90,9 @@ class TrainConfig:
     checkpoint_interval: int = 1_000
     window_tool_events: tuple[str, ...] = WINDOW_TOOL_EVENTS
     window_pair_encoding: str = "separate"
+    input_position_encoding: str = "none"
+    position_offset_min: int = -1_000_000
+    position_offset_max: int = 1_000_000
 
     def __post_init__(self) -> None:
         if self.task not in {
@@ -170,6 +178,10 @@ class TrainConfig:
             raise ValueError(
                 f"window_pair_encoding must be one of: {allowed}"
             )
+        if self.input_position_encoding not in {"none", "sinusoidal"}:
+            raise ValueError("input_position_encoding must be 'none' or 'sinusoidal'")
+        if self.position_offset_min > self.position_offset_max:
+            raise ValueError("position_offset_min must be <= position_offset_max")
 
 
 def learning_rate_at_step(config: TrainConfig, step: int) -> float:
@@ -420,6 +432,21 @@ def train(
         else config.train_max_length
     )
     curriculum_streak = 0
+    if config.input_position_encoding != "none" and not isinstance(
+        model,
+        DecoderTransformer,
+    ):
+        raise ValueError("input position encoding requires transformer architecture")
+    position_embedding = (
+        SinusoidalPositionEmbedding(model.config.d_model, model.config.rotary_base).to(
+            device,
+        )
+        if (
+            config.input_position_encoding == "sinusoidal"
+            and isinstance(model, DecoderTransformer)
+        )
+        else None
+    )
     model.train()
     for step in range(start_step + 1, config.steps + 1):
         if config.curriculum and config.curriculum_mode == "linear":
@@ -555,8 +582,30 @@ def train(
                 )
             else:
                 raise ValueError(f"unsupported sorting task: {config.task}")
+            extra_input_embeddings = None
+            if position_embedding is not None:
+                offsets = sample_position_offsets(
+                    batch.model_inputs.shape[0],
+                    minimum=config.position_offset_min,
+                    maximum=config.position_offset_max,
+                    generator=generator,
+                    device=device,
+                )
+                extra_input_embeddings = input_position_embeddings(
+                    position_embedding,
+                    batch.model_inputs.shape[1],
+                    device=device,
+                    offsets=offsets,
+                )
             with autocast_context(device):
-                logits = model(batch.model_inputs)
+                if extra_input_embeddings is None:
+                    logits = model(batch.model_inputs)
+                else:
+                    assert isinstance(model, DecoderTransformer)
+                    logits = model(
+                        batch.model_inputs,
+                        extra_input_embeddings=extra_input_embeddings,
+                    )
                 loss = output_cross_entropy(logits, batch.labels)
             (loss / config.gradient_accumulation_steps).backward()
             accumulated_loss += float(loss.item())
@@ -641,6 +690,9 @@ def train(
                 trace_snapshot_mode=config.trace_snapshot_mode,
                 window_tool_events=config.window_tool_events,
                 train_max_length=config.train_max_length,
+                input_position_encoding=config.input_position_encoding,
+                position_offset_min=config.position_offset_min,
+                position_offset_max=config.position_offset_max,
             )
             evaluation_row = {
                 "step": step,
@@ -697,6 +749,9 @@ def train(
         trace_snapshot_mode=config.trace_snapshot_mode,
         window_tool_events=config.window_tool_events,
         train_max_length=config.train_max_length,
+        input_position_encoding=config.input_position_encoding,
+        position_offset_min=config.position_offset_min,
+        position_offset_max=config.position_offset_max,
     )
     results = {
         "architecture": model.architecture,
@@ -841,6 +896,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume-checkpoint", type=Path)
     parser.add_argument("--init-from-checkpoint", type=Path)
     parser.add_argument("--init-from-pointer-position-checkpoint", type=Path)
+    parser.add_argument(
+        "--input-position-encoding",
+        choices=("none", "sinusoidal"),
+        default="none",
+        help="add absolute input position embeddings to token embeddings",
+    )
+    parser.add_argument("--position-offset-min", type=int, default=-1_000_000)
+    parser.add_argument("--position-offset-max", type=int, default=1_000_000)
     parser.add_argument("--wandb-project")
     parser.add_argument("--wandb-entity")
     parser.add_argument("--wandb-run-name")
@@ -882,6 +945,9 @@ def main() -> None:
         checkpoint_interval=args.checkpoint_interval,
         window_tool_events=args.window_tool_events,
         window_pair_encoding=args.window_pair_encoding,
+        input_position_encoding=args.input_position_encoding,
+        position_offset_min=args.position_offset_min,
+        position_offset_max=args.position_offset_max,
     )
     vocabulary = make_vocabulary(
         train_config.task,
@@ -965,6 +1031,7 @@ def main() -> None:
     }
     if isinstance(model, DecoderTransformer):
         metadata["layer_position_modes"] = model.layer_position_modes
+        metadata["input_position_encoding"] = train_config.input_position_encoding
     else:
         metadata["recurrent_layers"] = model.config.n_layers
     if initialization_metadata is not None:

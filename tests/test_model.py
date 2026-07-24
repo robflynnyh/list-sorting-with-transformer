@@ -172,6 +172,33 @@ def test_transformer_cached_generation_matches_full_prefix_generation() -> None:
     torch.testing.assert_close(generated, reference)
 
 
+def test_transformer_cached_generation_uses_extra_input_embeddings() -> None:
+    torch.manual_seed(18)
+    model = DecoderTransformer(small_config()).eval()
+    prompt = torch.randint(0, model.config.vocab_size, (2, 7))
+    extra = torch.randn(2, 15, model.config.d_model)
+
+    generated = model.generate(
+        prompt,
+        max_new_tokens=8,
+        stop_token=-1,
+        extra_input_embeddings=extra,
+    )
+    full_sequence = prompt
+    reference_tokens = []
+    for _ in range(8):
+        current_extra = extra[:, : full_sequence.shape[1]]
+        next_token = model(
+            full_sequence,
+            extra_input_embeddings=current_extra,
+        )[:, -1].argmax(dim=-1)
+        reference_tokens.append(next_token)
+        full_sequence = torch.cat((full_sequence, next_token[:, None]), dim=1)
+    reference = torch.stack(reference_tokens, dim=1)
+
+    torch.testing.assert_close(generated, reference)
+
+
 def test_transformer_generation_accepts_a_task_specific_stop_token() -> None:
     torch.manual_seed(19)
     model = DecoderTransformer(small_config()).eval()

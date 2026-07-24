@@ -57,6 +57,11 @@ from .pointer_quicksort import (
     PointerQuicksortMachine,
     PointerQuicksortRollout,
 )
+from .positions import (
+    SinusoidalPositionEmbedding,
+    input_position_embeddings,
+    sample_position_offsets,
+)
 from .quicksort import SnapshotMode
 from .recurrent import LSTMConfig, LSTMSorter
 from .tokens import (
@@ -500,9 +505,29 @@ def evaluate_lengths(
     trace_snapshot_mode: SnapshotMode = "partition",
     window_tool_events: tuple[str, ...] = WINDOW_TOOL_EVENTS,
     train_max_length: int | None = None,
+    input_position_encoding: str = "none",
+    position_offset_min: int = -1_000_000,
+    position_offset_max: int = 1_000_000,
 ) -> dict[int, dict[str, float]]:
     if examples_per_length < 1 or batch_size < 1:
         raise ValueError("evaluation sizes must be positive")
+    if input_position_encoding not in {"none", "sinusoidal"}:
+        raise ValueError("input_position_encoding must be 'none' or 'sinusoidal'")
+    if input_position_encoding != "none" and not isinstance(
+        model,
+        DecoderTransformer,
+    ):
+        raise ValueError("input position encoding requires transformer architecture")
+    position_embedding = (
+        SinusoidalPositionEmbedding(model.config.d_model, model.config.rotary_base).to(
+            device,
+        )
+        if (
+            input_position_encoding == "sinusoidal"
+            and isinstance(model, DecoderTransformer)
+        )
+        else None
+    )
     was_training = model.training
     model.eval()
     results = {}
@@ -650,8 +675,38 @@ def evaluate_lengths(
                 max_new_tokens = 0
             else:
                 raise ValueError(f"unsupported sorting task: {task}")
+            extra_loss_embeddings = None
+            extra_generation_embeddings = None
+            if position_embedding is not None:
+                offsets = sample_position_offsets(
+                    batch.model_inputs.shape[0],
+                    minimum=position_offset_min,
+                    maximum=position_offset_max,
+                    generator=generator,
+                    device=device,
+                )
+                extra_loss_embeddings = input_position_embeddings(
+                    position_embedding,
+                    batch.model_inputs.shape[1],
+                    device=device,
+                    offsets=offsets,
+                )
+                generation_length = batch.prompt_ids.shape[1] + max(max_new_tokens, 1)
+                extra_generation_embeddings = input_position_embeddings(
+                    position_embedding,
+                    generation_length,
+                    device=device,
+                    offsets=offsets,
+                )
             with autocast_context(device, enabled=use_autocast):
-                logits = model(batch.model_inputs)
+                if extra_loss_embeddings is None:
+                    logits = model(batch.model_inputs)
+                else:
+                    assert isinstance(model, DecoderTransformer)
+                    logits = model(
+                        batch.model_inputs,
+                        extra_input_embeddings=extra_loss_embeddings,
+                    )
                 loss = output_cross_entropy(logits, batch.labels)
                 if task == "pointer_quicksort":
                     assert isinstance(batch, PointerQuicksortBatch)
@@ -663,11 +718,20 @@ def evaluate_lengths(
                     )
                 elif task == "pointer_quicksort_no_tool":
                     assert isinstance(vocabulary, PointerQuicksortVocabulary)
-                    generated = model.generate(
-                        batch.prompt_ids,
-                        max_new_tokens=max_new_tokens,
-                        stop_token=vocabulary.action_token("DONE"),
-                    )
+                    if extra_generation_embeddings is None:
+                        generated = model.generate(
+                            batch.prompt_ids,
+                            max_new_tokens=max_new_tokens,
+                            stop_token=vocabulary.action_token("DONE"),
+                        )
+                    else:
+                        assert isinstance(model, DecoderTransformer)
+                        generated = model.generate(
+                            batch.prompt_ids,
+                            max_new_tokens=max_new_tokens,
+                            stop_token=vocabulary.action_token("DONE"),
+                            extra_input_embeddings=extra_generation_embeddings,
+                        )
                 elif task == "adjacent_sort":
                     assert isinstance(batch, AdjacentSortBatch)
                     assert isinstance(vocabulary, AdjacentSortVocabulary)
@@ -678,11 +742,20 @@ def evaluate_lengths(
                     )
                 elif task == "adjacent_sort_no_tool":
                     assert isinstance(vocabulary, AdjacentSortVocabulary)
-                    generated = model.generate(
-                        batch.prompt_ids,
-                        max_new_tokens=max_new_tokens,
-                        stop_token=vocabulary.action_token("DONE"),
-                    )
+                    if extra_generation_embeddings is None:
+                        generated = model.generate(
+                            batch.prompt_ids,
+                            max_new_tokens=max_new_tokens,
+                            stop_token=vocabulary.action_token("DONE"),
+                        )
+                    else:
+                        assert isinstance(model, DecoderTransformer)
+                        generated = model.generate(
+                            batch.prompt_ids,
+                            max_new_tokens=max_new_tokens,
+                            stop_token=vocabulary.action_token("DONE"),
+                            extra_input_embeddings=extra_generation_embeddings,
+                        )
                 elif task == "adjacent_sort_auto_advance":
                     assert isinstance(batch, AdjacentSortBatch)
                     assert isinstance(vocabulary, AutoAdvanceSortVocabulary)
@@ -693,11 +766,20 @@ def evaluate_lengths(
                     )
                 elif task == "adjacent_sort_auto_advance_no_tool":
                     assert isinstance(vocabulary, AutoAdvanceSortVocabulary)
-                    generated = model.generate(
-                        batch.prompt_ids,
-                        max_new_tokens=max_new_tokens,
-                        stop_token=vocabulary.action_token("DONE"),
-                    )
+                    if extra_generation_embeddings is None:
+                        generated = model.generate(
+                            batch.prompt_ids,
+                            max_new_tokens=max_new_tokens,
+                            stop_token=vocabulary.action_token("DONE"),
+                        )
+                    else:
+                        assert isinstance(model, DecoderTransformer)
+                        generated = model.generate(
+                            batch.prompt_ids,
+                            max_new_tokens=max_new_tokens,
+                            stop_token=vocabulary.action_token("DONE"),
+                            extra_input_embeddings=extra_generation_embeddings,
+                        )
                 elif task == "adjacent_sort_local_window":
                     assert isinstance(batch, LocalWindowSortBatch)
                     assert isinstance(vocabulary, LocalWindowSortVocabulary)
@@ -708,10 +790,18 @@ def evaluate_lengths(
                         tool_events=window_tool_events,
                     )
                 else:
-                    generated = model.generate(
-                        batch.prompt_ids,
-                        max_new_tokens=max_new_tokens,
-                    )
+                    if extra_generation_embeddings is None:
+                        generated = model.generate(
+                            batch.prompt_ids,
+                            max_new_tokens=max_new_tokens,
+                        )
+                    else:
+                        assert isinstance(model, DecoderTransformer)
+                        generated = model.generate(
+                            batch.prompt_ids,
+                            max_new_tokens=max_new_tokens,
+                            extra_input_embeddings=extra_generation_embeddings,
+                        )
             if task == "direct":
                 metrics = generated_sorting_metrics(
                     batch.values.cpu(),

@@ -18,8 +18,9 @@ from torch import Tensor, nn
 from .data import make_pointer_next_batch, sample_length
 from .evaluate import resolve_device
 from .evaluation import autocast_context
-from .model import DecoderTransformer, ModelConfig
+from .model import DecoderTransformer, ModelConfig, SplitInputDecoderTransformer
 from .plots import plot_length_generalization, plot_training_history
+from .positions import ModularPositionEmbedding, SinusoidalPositionEmbedding
 from .tokens import PointerNextVocabulary
 
 
@@ -55,7 +56,9 @@ class PointerPositionConfig:
     ffn_multiplier: float = 4.0
     dropout: float = 0.0
     objective: str = "vector_mse"
+    input_layout: str = "additive"
     rotary_base: float = 10_000.0
+    position_moduli: tuple[int, ...] = (31, 37, 41, 47)
     position_offset_min: int = -1_000_000
     position_offset_max: int = 1_000_000
     checkpoint_interval: int = 1_000
@@ -107,53 +110,89 @@ class PointerPositionConfig:
             raise ValueError("curriculum_patience must be positive")
         if not 0.0 <= self.curriculum_review_probability <= 1.0:
             raise ValueError("curriculum_review_probability must be in [0, 1]")
-        if self.objective not in {"vector_mse", "pointer_ce"}:
+        if self.objective not in {"vector_mse", "pointer_ce", "modular_ce"}:
             raise ValueError(
-                "objective must be 'vector_mse' or 'pointer_ce'"
+                "objective must be 'vector_mse', 'pointer_ce', or 'modular_ce'"
             )
+        if self.input_layout not in {"additive", "split"}:
+            raise ValueError("input_layout must be 'additive' or 'split'")
+        if self.input_layout == "split" and self.objective != "modular_ce":
+            raise ValueError("split input layout currently requires modular_ce")
+        if self.input_layout == "split" and self.d_model % 2:
+            raise ValueError("split input layout requires an even d_model")
         if self.rotary_base <= 1.0:
             raise ValueError("rotary_base must be greater than one")
+        if not self.position_moduli or any(
+            modulus < 2 for modulus in self.position_moduli
+        ):
+            raise ValueError("position_moduli must all be at least two")
+        if len(set(self.position_moduli)) != len(self.position_moduli):
+            raise ValueError("position_moduli must be distinct")
+        if any(
+            math.gcd(left, right) != 1
+            for index, left in enumerate(self.position_moduli)
+            for right in self.position_moduli[index + 1 :]
+        ):
+            raise ValueError("position_moduli must be pairwise coprime")
+        position_dim = (
+            self.d_model // 2
+            if self.input_layout == "split"
+            else self.d_model
+        )
+        if position_dim % len(self.position_moduli):
+            raise ValueError(
+                "position dimension must be divisible by position moduli count"
+            )
         if self.position_offset_min > self.position_offset_max:
             raise ValueError("position_offset_min must be <= position_offset_max")
-
-
-class SinusoidalPositionEmbedding(nn.Module):
-    """Fixed absolute position embeddings with Transformer sinusoidal features."""
-
-    def __init__(self, dim: int, base: float) -> None:
-        super().__init__()
-        inverse_frequency = 1.0 / (
-            base ** (torch.arange(0, dim, 2, dtype=torch.float64) / dim)
+        represented_span = math.prod(self.position_moduli)
+        required_span = (
+            self.position_offset_max
+            - self.position_offset_min
+            + 2 * self.eval_max_length
+            + 1
         )
-        self.register_buffer("inverse_frequency", inverse_frequency, persistent=False)
-
-    def forward(self, positions: Tensor) -> Tensor:
-        angles = (
-            positions.to(dtype=self.inverse_frequency.dtype).unsqueeze(-1)
-            * self.inverse_frequency
-        )
-        embedding = torch.empty(
-            *positions.shape,
-            self.inverse_frequency.shape[0] * 2,
-            device=positions.device,
-            dtype=torch.float32,
-        )
-        embedding[..., 0::2] = angles.sin().to(dtype=torch.float32)
-        embedding[..., 1::2] = angles.cos().to(dtype=torch.float32)
-        return embedding
+        if self.objective == "modular_ce" and represented_span < required_span:
+            raise ValueError(
+                "position moduli product must cover the configured evaluation span"
+            )
 
 
 class PointerPositionProbe(nn.Module):
-    """Emit the absolute sinusoidal position vector added at ``<PTR>``."""
+    """Recover the absolute position representation added at ``<PTR>``."""
 
-    def __init__(self, model_config: ModelConfig) -> None:
+    def __init__(
+        self,
+        model_config: ModelConfig,
+        *,
+        position_moduli: tuple[int, ...] | None = None,
+        split_input: bool = False,
+    ) -> None:
         super().__init__()
-        self.encoder = DecoderTransformer(model_config)
-        self.query_projection = nn.Linear(model_config.d_model, model_config.d_model)
-        self.position_embedding = SinusoidalPositionEmbedding(
-            model_config.d_model,
-            model_config.rotary_base,
+        if split_input and position_moduli is None:
+            raise ValueError("split input requires modular positions")
+        self.encoder = (
+            SplitInputDecoderTransformer(
+                model_config,
+                content_dim=model_config.d_model // 2,
+            )
+            if split_input
+            else DecoderTransformer(model_config)
         )
+        position_dim = (
+            self.encoder.position_dim
+            if isinstance(self.encoder, SplitInputDecoderTransformer)
+            else model_config.d_model
+        )
+        self.position_embedding = (
+            ModularPositionEmbedding(position_dim, position_moduli)
+            if position_moduli is not None
+            else SinusoidalPositionEmbedding(
+                model_config.d_model,
+                model_config.rotary_base,
+            )
+        )
+        self.query_projection = nn.Linear(model_config.d_model, position_dim)
         nn.init.normal_(self.query_projection.weight, mean=0.0, std=0.02)
         nn.init.zeros_(self.query_projection.bias)
 
@@ -208,7 +247,20 @@ class PointerPositionProbe(nn.Module):
         pointers: Tensor,
         offsets: Tensor | None = None,
     ) -> Tensor:
+        if not isinstance(self.position_embedding, SinusoidalPositionEmbedding):
+            raise TypeError("target_embeddings requires sinusoidal positions")
         return self.position_embedding(self.target_positions(pointers, offsets))
+
+    def target_residues(
+        self,
+        pointers: Tensor,
+        offsets: Tensor | None = None,
+    ) -> tuple[Tensor, ...]:
+        if not isinstance(self.position_embedding, ModularPositionEmbedding):
+            raise TypeError("target_residues requires modular positions")
+        return self.position_embedding.residues(
+            self.target_positions(pointers, offsets)
+        )
 
     def forward(self, prompt_ids: Tensor, *, offsets: Tensor | None = None) -> Tensor:
         hidden = self.hidden_states(prompt_ids, offsets=offsets)
@@ -247,6 +299,38 @@ class PointerPositionProbe(nn.Module):
         return (candidate_states * query[:, None, :]).sum(dim=-1) / math.sqrt(
             query.shape[-1]
         )
+
+    def residue_logits(
+        self,
+        prompt_ids: Tensor,
+        *,
+        offsets: Tensor,
+    ) -> tuple[Tensor, ...]:
+        if not isinstance(self.position_embedding, ModularPositionEmbedding):
+            raise TypeError("residue_logits requires modular positions")
+        hidden = self.hidden_states(prompt_ids, offsets=offsets)
+        query = self.query_projection(hidden[:, -1])
+        return self.position_embedding.component_logits(query)
+
+    def modular_candidate_logits(
+        self,
+        residue_logits: tuple[Tensor, ...],
+        *,
+        length: int,
+        offsets: Tensor,
+    ) -> Tensor:
+        if not isinstance(self.position_embedding, ModularPositionEmbedding):
+            raise TypeError("modular candidate scoring requires modular positions")
+        candidate_positions = self.candidate_positions(
+            length,
+            device=offsets.device,
+            offsets=offsets,
+        )
+        candidate_residues = self.position_embedding.residues(candidate_positions)
+        scores = torch.zeros_like(candidate_positions, dtype=residue_logits[0].dtype)
+        for logits, residues in zip(residue_logits, candidate_residues):
+            scores = scores + logits.log_softmax(dim=-1).gather(1, residues)
+        return scores
 
     def logits_for_length(
         self,
@@ -438,6 +522,72 @@ def pointer_position_ce_metrics(
     }
 
 
+def modular_position_metrics(
+    residue_logits: tuple[Tensor, ...],
+    pointers: Tensor,
+    *,
+    model: PointerPositionProbe,
+    length: int,
+    offsets: Tensor,
+    train_max_length: int,
+) -> dict[str, float]:
+    targets = model.target_residues(pointers, offsets)
+    predictions = tuple(logits.argmax(dim=-1) for logits in residue_logits)
+    component_correct = tuple(
+        prediction.eq(target)
+        for prediction, target in zip(predictions, targets)
+    )
+    exact = torch.stack(component_correct, dim=-1).all(dim=-1)
+    candidate_logits = model.modular_candidate_logits(
+        residue_logits,
+        length=length,
+        offsets=offsets,
+    )
+    candidate_predictions = candidate_logits.argmax(dim=-1)
+    candidate_errors = (candidate_predictions - pointers).abs()
+    candidate_correct = candidate_predictions.eq(pointers)
+    unseen = pointers.gt(train_max_length - 2)
+    seen = ~unseen
+    losses = [
+        F.cross_entropy(logits, target)
+        for logits, target in zip(residue_logits, targets)
+    ]
+    metrics = {
+        "loss": float(torch.stack(losses).mean().item()),
+        "argmax_accuracy": float(exact.float().mean().item()),
+        "exact_position_accuracy": float(exact.float().mean().item()),
+        "mean_residue_accuracy": float(
+            torch.stack(component_correct, dim=-1).float().mean().item()
+        ),
+        "candidate_pointer_accuracy": float(
+            candidate_correct.float().mean().item()
+        ),
+        "candidate_pointer_mae": float(candidate_errors.float().mean().item()),
+        "seen_argmax_accuracy": float(exact[seen].float().mean().item())
+        if bool(seen.any())
+        else 0.0,
+        "unseen_argmax_accuracy": float(exact[unseen].float().mean().item())
+        if bool(unseen.any())
+        else 0.0,
+        "unseen_pointer_fraction": float(unseen.float().mean().item()),
+    }
+    modular_embedding = model.position_embedding
+    if not isinstance(modular_embedding, ModularPositionEmbedding):
+        raise TypeError("modular metrics require modular positions")
+    metrics.update(
+        {
+            f"residue_mod_{modulus}_accuracy": float(
+                correct.float().mean().item()
+            )
+            for modulus, correct in zip(
+                modular_embedding.moduli,
+                component_correct,
+            )
+        }
+    )
+    return metrics
+
+
 def batch_loss_and_metrics(
     model: PointerPositionProbe,
     batch_prompt_ids: Tensor,
@@ -447,6 +597,28 @@ def batch_loss_and_metrics(
     offsets: Tensor,
     config: PointerPositionConfig,
 ) -> tuple[Tensor, dict[str, float]]:
+    if config.objective == "modular_ce":
+        residue_logits = model.residue_logits(
+            batch_prompt_ids,
+            offsets=offsets,
+        )
+        targets = model.target_residues(pointers, offsets)
+        loss = torch.stack(
+            [
+                F.cross_entropy(logits, target)
+                for logits, target in zip(residue_logits, targets)
+            ]
+        ).mean()
+        metrics = modular_position_metrics(
+            tuple(logits.detach().float() for logits in residue_logits),
+            pointers,
+            model=model,
+            length=length,
+            offsets=offsets,
+            train_max_length=config.train_max_length,
+        )
+        return loss, metrics
+
     if config.objective == "pointer_ce":
         logits = model.pointer_logits(batch_prompt_ids, length=length, offsets=offsets)
         loss = F.cross_entropy(logits, pointers)
@@ -765,7 +937,11 @@ def train(
         step=config.steps,
         generator=generator,
     )
-    final_lengths = list(range(config.train_min_length, config.eval_max_length + 1))
+    final_lengths = (
+        selected_evaluation_lengths(config)
+        if config.objective == "modular_ce"
+        else list(range(config.train_min_length, config.eval_max_length + 1))
+    )
     final_per_length = evaluate_lengths(
         model,
         vocabulary,
@@ -846,11 +1022,25 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dropout", type=float, default=0.0)
     parser.add_argument(
         "--objective",
-        choices=("vector_mse", "pointer_ce"),
+        choices=("vector_mse", "pointer_ce", "modular_ce"),
         default="vector_mse",
-        help="train against the PTR position vector or classify the PTR slot",
+        help=(
+            "regress the PTR position vector, classify its list slot, or predict "
+            "its modular absolute-position key"
+        ),
+    )
+    parser.add_argument(
+        "--input-layout",
+        choices=("additive", "split"),
+        default="additive",
+        help="add content and position vectors or concatenate separate subspaces",
     )
     parser.add_argument("--rotary-base", type=float, default=10_000.0)
+    parser.add_argument(
+        "--position-moduli",
+        default="31,37,41,47",
+        help="comma-separated product-key moduli for modular_ce",
+    )
     parser.add_argument("--position-offset-min", type=int, default=-1_000_000)
     parser.add_argument("--position-offset-max", type=int, default=1_000_000)
     parser.add_argument("--device", default="auto")
@@ -863,6 +1053,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_argument_parser().parse_args()
+    position_moduli = tuple(
+        int(value.strip())
+        for value in args.position_moduli.split(",")
+        if value.strip()
+    )
     config = PointerPositionConfig(
         representation=args.representation,
         symbol_count=args.symbol_count,
@@ -894,7 +1089,9 @@ def main() -> None:
         ffn_multiplier=args.ffn_multiplier,
         dropout=args.dropout,
         objective=args.objective,
+        input_layout=args.input_layout,
         rotary_base=args.rotary_base,
+        position_moduli=position_moduli,
         position_offset_min=args.position_offset_min,
         position_offset_max=args.position_offset_max,
         checkpoint_interval=args.checkpoint_interval,
@@ -914,7 +1111,15 @@ def main() -> None:
         rotate_values_with_rope=False,
     )
     torch.manual_seed(config.seed)
-    model = PointerPositionProbe(model_config)
+    model = PointerPositionProbe(
+        model_config,
+        position_moduli=(
+            config.position_moduli
+            if config.objective == "modular_ce"
+            else None
+        ),
+        split_input=config.input_layout == "split",
+    )
     device = resolve_device(args.device)
     model.to(device)
     output_directory = args.output_directory

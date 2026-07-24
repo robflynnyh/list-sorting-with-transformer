@@ -129,6 +129,47 @@ remains causal because it only reads the prompt up to `=`. The random absolute
 offset prevents a fixed lookup table over seen pointer slots; the easiest
 solution is to retrieve the actual position vector attached to `<PTR>`.
 
+## Modular Position Pipeline
+
+The modular pipeline represents an absolute position using four categorical
+residues modulo `31`, `37`, `41`, and `47`. Their combined range covers all
+random offsets and sequence lengths used here. Each position is predicted by
+four parallel classification heads rather than one class per possible absolute
+position.
+
+The split-input Transformer reserves half of its 128 dimensions for content
+and half for position:
+
+```text
+prompt item:  [token content | modular stream position]
+latent item:  [modular address | modular stream position]
+```
+
+Stage 1 predicts the absolute position `p` of `<PTR>`. Stage 2 starts from that
+checkpoint, predicts `p`, inserts the predicted modular address as one
+autoregressive latent item, and predicts `p+1`. Stage 2 does not retrieve the
+list value at `p+1` yet.
+
+During the 50%-isolation stage-2 run, the final query can attend only to the
+inserted `p` item on half of the training examples. Other examples retain full
+causal attention, and evaluation always uses full causal attention. This
+encourages the model to learn the local `p -> p+1` transformation without
+changing its inference interface.
+
+With seed 7, 10,000 updates, training lengths 2-20, and 512 evaluation examples:
+
+| Stage-2 initialization/training | L40 | L400 | OOD average |
+| --- | ---: | ---: | ---: |
+| From scratch | 99.41% | 21.88% | 73.76% |
+| Stage-1 checkpoint | 100.00% | 73.05% | 91.02% |
+| Stage-1 checkpoint + 50% successor isolation | 100.00% | **87.70%** | **95.90%** |
+
+The corresponding W&B runs are
+[scratch](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/1pr8oal3),
+[stage-1 initialized](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/i0j9hfe9),
+and
+[50% successor isolation](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/edzj3h30).
+
 ## Quicksort Execution Traces
 
 The `quicksort_trace` task makes the model execute deterministic three-way
@@ -509,6 +550,26 @@ sort-pointer-position-probe \
   --wandb-project list-sorting-with-transformer \
   --wandb-run-name pointer-position-pointer-ce-curriculum-noise-constant-lr-seed7 \
   --output-directory artifacts/pointer_position_pointer_ce_curriculum_noise_constant_lr_seed7
+
+sort-pointer-position-probe \
+  --representation numbers \
+  --objective modular_ce \
+  --input-layout split \
+  --eval-max-length 400 \
+  --position-offset-min -1000000 \
+  --position-offset-max 1000000 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-position-modular-split-10k-seed7 \
+  --output-directory artifacts/pointer_position_modular_split_10k_seed7
+
+sort-pointer-position-sequence \
+  --stage-one-checkpoint artifacts/pointer_position_modular_split_10k_seed7/checkpoint.pt \
+  --input-layout split \
+  --eval-max-length 400 \
+  --successor-attention-isolation-probability 0.5 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-position-sequence-split-pretrained-isolate50-10k-seed7 \
+  --output-directory artifacts/pointer_position_sequence_split_pretrained_isolate50_10k_seed7
 
 sort-transformer-train \
   --task quicksort_trace \
