@@ -940,7 +940,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-layers", type=int, default=4)
     parser.add_argument("--n-heads", type=int, default=4)
     parser.add_argument("--ffn-multiplier", type=float, default=4.0)
-    parser.add_argument("--dropout", type=float, default=0.0)
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=None,
+        help="override checkpoint dropout; defaults to 0 for new models",
+    )
     parser.add_argument("--position-moduli", default="31,37,41,47")
     parser.add_argument("--position-offset-min", type=int, default=-1_000_000)
     parser.add_argument("--position-offset-max", type=int, default=1_000_000)
@@ -1005,6 +1010,9 @@ def main() -> None:
         checkpoint_model_config = checkpoint.get("model_config")
         if not isinstance(checkpoint_model_config, dict):
             raise ValueError("stage-one checkpoint is missing model_config")
+        checkpoint_model_config = dict(checkpoint_model_config)
+        if args.dropout is not None:
+            checkpoint_model_config["dropout"] = args.dropout
         checkpoint_train_config = checkpoint.get("train_config", {})
         checkpoint_layout = checkpoint_train_config.get(
             "input_layout",
@@ -1024,7 +1032,7 @@ def main() -> None:
             n_layers=args.n_layers,
             n_heads=args.n_heads,
             ffn_multiplier=args.ffn_multiplier,
-            dropout=args.dropout,
+            dropout=0.0 if args.dropout is None else args.dropout,
             position_pattern="none",
             rotate_values_with_rope=False,
         )
