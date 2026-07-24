@@ -25,6 +25,7 @@ sort-pointer-trace = "list_sorting_transformer.render_pointer_trace:main"
 sort-adjacent-trace = "list_sorting_transformer.render_adjacent_trace:main"
 sort-pointer-position-probe = "list_sorting_transformer.pointer_position_probe:main"
 sort-pointer-position-sequence = "list_sorting_transformer.pointer_position_sequence:main"
+sort-pointer-value-from-position = "list_sorting_transformer.pointer_value_from_position:main"
 
 [build-system]
 requires = ["setuptools>=68"]

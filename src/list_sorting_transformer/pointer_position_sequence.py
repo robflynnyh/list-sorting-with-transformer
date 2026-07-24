@@ -172,11 +172,11 @@ class ModularPositionSequenceModel(nn.Module):
     def history_embeddings(self, history: Tensor) -> Tensor:
         if (
             history.ndim != 3
-            or history.shape[1] >= self.output_steps
+            or history.shape[1] > self.output_steps
             or history.shape[2] != len(self.moduli)
         ):
             raise ValueError(
-                "history must be [batch, fewer than two positions, moduli]"
+                "history must be [batch, at most two positions, moduli]"
             )
         return torch.cat(
             [
