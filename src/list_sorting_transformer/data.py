@@ -255,6 +255,59 @@ def make_pointer_next_batch(
     )
 
 
+def make_pointer_value_batch(
+    batch_size: int,
+    length: int,
+    *,
+    generator: torch.Generator,
+    vocabulary: PointerNextVocabulary,
+    device: torch.device | str | None = None,
+) -> PointerNextBatch:
+    """Generate examples that ask for the value marked by a pointer."""
+
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    if length < 2:
+        raise ValueError("pointer-value length must be at least two")
+    values = torch.randint(
+        0,
+        vocabulary.symbol_count,
+        (batch_size, length),
+        generator=generator,
+    )
+    pointers = torch.randint(
+        0,
+        length,
+        (batch_size,),
+        generator=generator,
+    )
+    examples = tuple(
+        vocabulary.encode_value_example_with_pointer(row, int(pointer))
+        for row, pointer in zip(values.tolist(), pointers.tolist())
+    )
+    sequence_length = len(examples[0])
+    prompt_length = sequence_length - 2
+    token_ids = torch.empty(batch_size, sequence_length, dtype=torch.long)
+    for row_index, example in enumerate(examples):
+        token_ids[row_index] = torch.tensor(example)
+
+    labels = token_ids[:, 1:].clone()
+    labels[:, : prompt_length - 1] = IGNORE_INDEX
+    if device is not None:
+        token_ids = token_ids.to(device)
+        labels = labels.to(device)
+        values = values.to(device)
+        pointers = pointers.to(device)
+    return PointerNextBatch(
+        token_ids=token_ids,
+        labels=labels,
+        values=values,
+        pointers=pointers,
+        length=length,
+        prompt_length=prompt_length,
+    )
+
+
 def make_quicksort_trace_batch(
     batch_size: int,
     length: int,

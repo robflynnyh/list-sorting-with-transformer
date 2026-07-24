@@ -75,6 +75,13 @@ def plot_length_generalization(
             ("next_value_accuracy", "Next-value token", "#20854e"),
             ("target_token_accuracy", "Generated-token accuracy", "#b24726"),
         )
+    elif "value_accuracy" in first_metrics:
+        title = "Pointer-value performance by length"
+        series = (
+            ("exact_match", "Exact marked value", "#1f5f8b"),
+            ("value_accuracy", "Marked-value token", "#20854e"),
+            ("target_token_accuracy", "Generated-token accuracy", "#b24726"),
+        )
     elif "argmax_accuracy" in first_metrics:
         title = "Pointer-position performance by length"
         series = (

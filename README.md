@@ -30,6 +30,27 @@ Two representation settings use the same token IDs and architecture:
 This isolates the effect of exposing ordinal structure while keeping the
 sequence task unchanged.
 
+## Pointer-Value Probe
+
+The `pointer_value` task is the first autoregressive stage after the
+pointer-position diagnostic. The input is a random list with a pointer marker
+before one value, and the model must output that marked value:
+
+```text
+<bos>7,<PTR>4,2=4<eos>
+```
+
+This tests whether a model that can find the marker can retrieve the token at
+that location. The trainer can initialize this stage from a pointer-position
+checkpoint with `--init-from-pointer-position-checkpoint`, which copies the
+shared Transformer body and leaves optimizer state fresh.
+
+Current stage result: starting from the pointer-position checkpoint and training
+without curriculum or gradient noise for 10k optimizer steps reaches 100% exact
+match at all reported lengths, including length 400.
+
+![Pointer-value length generalization](artifacts/pointer_value_nocurr_gn0_10k_seed7/length_generalization.png)
+
 ## Pointer-Next Probe
 
 The `pointer_next` task isolates relative retrieval from the sorting
@@ -364,6 +385,26 @@ sort-transformer-train \
   --architecture lstm \
   --representation numbers \
   --output-directory artifacts/lstm_numbers_seed7
+
+sort-transformer-train \
+  --task pointer_value \
+  --representation numbers \
+  --position-pattern none \
+  --dropout 0.1 \
+  --init-from-pointer-position-checkpoint artifacts/pointer_position_pointer_ce_strict_slowcurr_100k_seed7/checkpoint.pt \
+  --lr-schedule constant \
+  --gradient-noise-scale 0 \
+  --train-min-length 2 \
+  --train-max-length 20 \
+  --eval-max-length 400 \
+  --steps 10000 \
+  --eval-examples 2048 \
+  --eval-batch-size 256 \
+  --eval-interval 5000 \
+  --checkpoint-interval 5000 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-value-nocurr-gn0-10k-seed7 \
+  --output-directory artifacts/pointer_value_nocurr_gn0_10k_seed7
 
 sort-transformer-train \
   --task pointer_next \

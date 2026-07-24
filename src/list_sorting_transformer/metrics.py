@@ -104,6 +104,50 @@ def generated_pointer_next_metrics(
 ) -> dict[str, float]:
     """Measure retrieval of the value immediately after the pointer marker."""
 
+    return generated_pointer_retrieval_metrics(
+        values,
+        pointers,
+        generated_tokens,
+        vocabulary,
+        target_offset=1,
+        value_metric_name="next_value_accuracy",
+        train_max_pointer_index=train_max_pointer_index,
+    )
+
+
+def generated_pointer_value_metrics(
+    values: Tensor,
+    pointers: Tensor,
+    generated_tokens: Tensor,
+    vocabulary: PointerNextVocabulary,
+    *,
+    train_max_pointer_index: int | None = None,
+) -> dict[str, float]:
+    """Measure retrieval of the value marked by the pointer."""
+
+    return generated_pointer_retrieval_metrics(
+        values,
+        pointers,
+        generated_tokens,
+        vocabulary,
+        target_offset=0,
+        value_metric_name="value_accuracy",
+        train_max_pointer_index=train_max_pointer_index,
+    )
+
+
+def generated_pointer_retrieval_metrics(
+    values: Tensor,
+    pointers: Tensor,
+    generated_tokens: Tensor,
+    vocabulary: PointerNextVocabulary,
+    *,
+    target_offset: int,
+    value_metric_name: str,
+    train_max_pointer_index: int | None = None,
+) -> dict[str, float]:
+    """Measure retrieval of one value at a fixed offset from the pointer."""
+
     if values.ndim != 2 or generated_tokens.ndim != 2 or pointers.ndim != 1:
         raise ValueError(
             "values/generated_tokens must be rank two and pointers rank one"
@@ -118,7 +162,7 @@ def generated_pointer_next_metrics(
 
     totals = {
         "valid_syntax": 0.0,
-        "next_value_accuracy": 0.0,
+        value_metric_name: 0.0,
         "eos_accuracy": 0.0,
         "exact_match": 0.0,
     }
@@ -134,8 +178,11 @@ def generated_pointer_next_metrics(
         pointers.tolist(),
         generated_tokens.tolist(),
     ):
+        target_index = int(pointer) + target_offset
+        if not 0 <= target_index < len(row):
+            raise ValueError("pointer target is outside the input row")
         expected = [
-            vocabulary.value_token(int(row[int(pointer) + 1])),
+            vocabulary.value_token(int(row[target_index])),
             EOS,
         ]
         for index, expected_token in enumerate(expected):
@@ -154,7 +201,7 @@ def generated_pointer_next_metrics(
             and len(generated_row) >= 2
             and generated_row[1] == EOS
         )
-        totals["next_value_accuracy"] += float(predicted_value_ok)
+        totals[value_metric_name] += float(predicted_value_ok)
         totals["eos_accuracy"] += float(eos_ok)
         totals["exact_match"] += float(exact)
         if train_max_pointer_index is not None:

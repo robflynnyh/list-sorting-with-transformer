@@ -769,11 +769,16 @@ class PointerNextVocabulary(SymbolVocabulary):
         self,
         values: Sequence[int],
         pointer_index: int,
+        *,
+        require_following: bool = True,
     ) -> list[int]:
         if len(values) < 2:
             raise ValueError("pointer-next examples require at least two values")
-        if not 0 <= pointer_index < len(values) - 1:
-            raise ValueError("pointer_index must have a following value")
+        upper_bound = len(values) - 1 if require_following else len(values)
+        if not 0 <= pointer_index < upper_bound:
+            if require_following:
+                raise ValueError("pointer_index must have a following value")
+            raise ValueError("pointer_index must be inside values")
 
         encoded = [BOS]
         for index, value in enumerate(values):
@@ -784,6 +789,21 @@ class PointerNextVocabulary(SymbolVocabulary):
             encoded.append(self.value_token(int(value)))
         encoded.append(SEP)
         return encoded
+
+    def encode_value_example_with_pointer(
+        self,
+        values: Sequence[int],
+        pointer_index: int,
+    ) -> list[int]:
+        return [
+            *self.encode_prompt_with_pointer(
+                values,
+                pointer_index,
+                require_following=False,
+            ),
+            self.value_token(int(values[pointer_index])),
+            EOS,
+        ]
 
     def encode_example_with_pointer(
         self,
@@ -851,6 +871,8 @@ def make_vocabulary(
             pair_encoding=window_pair_encoding,
         )
     if task == "pointer_next":
+        return PointerNextVocabulary(representation, symbol_count)
+    if task == "pointer_value":
         return PointerNextVocabulary(representation, symbol_count)
     raise ValueError(f"unsupported sorting task: {task}")
 

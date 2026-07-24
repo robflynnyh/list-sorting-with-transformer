@@ -18,6 +18,7 @@ from .data import (
     make_auto_advance_sort_batch,
     make_local_window_sort_batch,
     make_pointer_next_batch,
+    make_pointer_value_batch,
     make_pointer_quicksort_batch,
     make_quicksort_trace_batch,
     make_sorting_batch,
@@ -60,9 +61,19 @@ class TrainConfig:
     steps: int = 10_000
     batch_size: int = 256
     learning_rate: float = 3e-4
+    lr_schedule: str = "cosine"
     weight_decay: float = 0.01
     warmup_steps: int = 500
     gradient_clip: float = 1.0
+    gradient_noise_scale: float = 0.0
+    gradient_noise_decay: float = 0.25
+    curriculum: bool = False
+    curriculum_mode: str = "performance"
+    curriculum_start_length: int = 2
+    curriculum_linear_end_step: int = 0
+    curriculum_threshold: float = 0.99
+    curriculum_patience: int = 20
+    curriculum_review_probability: float = 0.2
     log_interval: int = 50
     eval_interval: int = 1_000
     eval_examples: int = 128
@@ -78,6 +89,7 @@ class TrainConfig:
         if self.task not in {
             "direct",
             "pointer_next",
+            "pointer_value",
             "quicksort_trace",
             "pointer_quicksort",
             "pointer_quicksort_no_tool",
@@ -96,8 +108,11 @@ class TrainConfig:
             raise ValueError("invalid training length range")
         if self.eval_max_length < self.train_max_length:
             raise ValueError("eval_max_length must include the training range")
-        if self.task == "pointer_next" and self.train_min_length < 2:
-            raise ValueError("pointer_next requires train_min_length >= 2")
+        if (
+            self.task in {"pointer_next", "pointer_value"}
+            and self.train_min_length < 2
+        ):
+            raise ValueError(f"{self.task} requires train_min_length >= 2")
         integer_fields = (
             self.steps,
             self.batch_size,
@@ -114,8 +129,35 @@ class TrainConfig:
             raise ValueError("warmup_steps must be between zero and steps")
         if self.learning_rate <= 0 or self.weight_decay < 0:
             raise ValueError("optimizer settings are invalid")
+        if self.lr_schedule not in {"cosine", "constant"}:
+            raise ValueError("lr_schedule must be 'cosine' or 'constant'")
         if self.gradient_clip <= 0:
             raise ValueError("gradient_clip must be positive")
+        if self.gradient_noise_scale < 0 or self.gradient_noise_decay < 0:
+            raise ValueError("gradient noise settings must be non-negative")
+        if not (
+            self.train_min_length
+            <= self.curriculum_start_length
+            <= self.train_max_length
+        ):
+            raise ValueError("curriculum_start_length must be in the training range")
+        if self.curriculum_mode not in {"performance", "linear"}:
+            raise ValueError("curriculum_mode must be 'performance' or 'linear'")
+        if self.curriculum_linear_end_step < 0:
+            raise ValueError("curriculum_linear_end_step must be non-negative")
+        if (
+            self.curriculum
+            and self.curriculum_mode == "linear"
+            and self.curriculum_linear_end_step not in {0, 1}
+            and self.curriculum_linear_end_step > self.steps
+        ):
+            raise ValueError("curriculum_linear_end_step cannot exceed steps")
+        if not 0.0 <= self.curriculum_threshold <= 1.0:
+            raise ValueError("curriculum_threshold must be in [0, 1]")
+        if self.curriculum_patience < 1:
+            raise ValueError("curriculum_patience must be positive")
+        if not 0.0 <= self.curriculum_review_probability <= 1.0:
+            raise ValueError("curriculum_review_probability must be in [0, 1]")
         if not set(self.window_tool_events) <= set(WINDOW_TOOL_EVENTS):
             allowed = ", ".join(WINDOW_TOOL_EVENTS)
             raise ValueError(
@@ -131,10 +173,75 @@ class TrainConfig:
 def learning_rate_at_step(config: TrainConfig, step: int) -> float:
     if config.warmup_steps and step <= config.warmup_steps:
         return config.learning_rate * step / config.warmup_steps
+    if config.lr_schedule == "constant":
+        return config.learning_rate
     decay_steps = max(config.steps - config.warmup_steps, 1)
     progress = min(max((step - config.warmup_steps) / decay_steps, 0.0), 1.0)
     cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
     return config.learning_rate * (0.1 + 0.9 * cosine)
+
+
+def gradient_noise_std(config: TrainConfig, step: int) -> float:
+    if config.gradient_noise_scale == 0:
+        return 0.0
+    return config.gradient_noise_scale / (step ** config.gradient_noise_decay)
+
+
+def add_gradient_noise(
+    model: DecoderTransformer | LSTMSorter,
+    *,
+    config: TrainConfig,
+    step: int,
+) -> float:
+    std = gradient_noise_std(config, step)
+    if std == 0.0:
+        return 0.0
+    with torch.no_grad():
+        for parameter in model.parameters():
+            if parameter.grad is not None:
+                parameter.grad.add_(torch.randn_like(parameter.grad) * std)
+    return std
+
+
+def sample_training_length(
+    config: TrainConfig,
+    *,
+    current_max_length: int,
+    generator: torch.Generator,
+) -> int:
+    if not config.curriculum:
+        return sample_length(
+            config.train_min_length,
+            config.train_max_length,
+            generator=generator,
+        )
+    review_draw = torch.rand((), generator=generator).item()
+    if review_draw < config.curriculum_review_probability:
+        return sample_length(
+            config.train_min_length,
+            config.train_max_length,
+            generator=generator,
+        )
+    return sample_length(
+        config.train_min_length,
+        current_max_length,
+        generator=generator,
+    )
+
+
+def curriculum_max_length_at_step(config: TrainConfig, step: int) -> int:
+    if not config.curriculum:
+        return config.train_max_length
+    if config.curriculum_mode != "linear":
+        return config.curriculum_start_length
+    span = config.train_max_length - config.curriculum_start_length
+    if span <= 0:
+        return config.train_max_length
+    end_step = config.curriculum_linear_end_step or config.steps
+    if end_step <= 1 or step >= end_step:
+        return config.train_max_length
+    cap_index = ((step - 1) * span) // (end_step - 1)
+    return min(config.train_max_length, config.curriculum_start_length + cap_index)
 
 
 def selected_evaluation_lengths(config: TrainConfig) -> list[int]:
@@ -190,6 +297,39 @@ def save_checkpoint(
     )
 
 
+def initialize_from_pointer_position_checkpoint(
+    model: DecoderTransformer,
+    checkpoint_path: Path,
+) -> dict[str, object]:
+    """Copy the solved pointer-position encoder into a decoder Transformer."""
+
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    state = checkpoint.get("model_state")
+    if not isinstance(state, dict):
+        raise ValueError("pointer-position checkpoint is missing model_state")
+    model_state = model.state_dict()
+    transferred = {}
+    skipped = []
+    for source_name, source_value in state.items():
+        if not source_name.startswith("encoder."):
+            continue
+        target_name = source_name.removeprefix("encoder.")
+        target_value = model_state.get(target_name)
+        if target_value is None or target_value.shape != source_value.shape:
+            skipped.append(source_name)
+            continue
+        transferred[target_name] = source_value
+    if not transferred:
+        raise ValueError("no compatible encoder weights found to transfer")
+    model_state.update(transferred)
+    model.load_state_dict(model_state)
+    return {
+        "initialized_from_pointer_position": str(checkpoint_path),
+        "transferred_tensors": len(transferred),
+        "skipped_tensors": skipped,
+    }
+
+
 def train(
     model: DecoderTransformer | LSTMSorter,
     config: TrainConfig,
@@ -242,8 +382,16 @@ def train(
     history = []
     evaluations = []
     started_at = time.monotonic()
+    current_max_length = (
+        curriculum_max_length_at_step(config, start_step + 1)
+        if config.curriculum
+        else config.train_max_length
+    )
+    curriculum_streak = 0
     model.train()
     for step in range(start_step + 1, config.steps + 1):
+        if config.curriculum and config.curriculum_mode == "linear":
+            current_max_length = curriculum_max_length_at_step(config, step)
         current_learning_rate = learning_rate_at_step(config, step)
         for parameter_group in optimizer.param_groups:
             parameter_group["lr"] = current_learning_rate
@@ -252,9 +400,9 @@ def train(
         accumulated_accuracy = 0.0
         microbatch_lengths = []
         for _ in range(config.gradient_accumulation_steps):
-            length = sample_length(
-                config.train_min_length,
-                config.train_max_length,
+            length = sample_training_length(
+                config,
+                current_max_length=current_max_length,
                 generator=generator,
             )
             microbatch_lengths.append(length)
@@ -270,6 +418,16 @@ def train(
                 if not isinstance(vocabulary, PointerNextVocabulary):
                     raise TypeError("pointer_next requires PointerNextVocabulary")
                 batch = make_pointer_next_batch(
+                    config.batch_size,
+                    length,
+                    generator=generator,
+                    vocabulary=vocabulary,
+                    device=device,
+                )
+            elif config.task == "pointer_value":
+                if not isinstance(vocabulary, PointerNextVocabulary):
+                    raise TypeError("pointer_value requires PointerNextVocabulary")
+                batch = make_pointer_value_batch(
                     config.batch_size,
                     length,
                     generator=generator,
@@ -361,10 +519,24 @@ def train(
             (loss / config.gradient_accumulation_steps).backward()
             accumulated_loss += float(loss.item())
             accumulated_accuracy += masked_token_accuracy(logits, batch.labels)
+        batch_accuracy = accumulated_accuracy / config.gradient_accumulation_steps
+        if (
+            config.curriculum
+            and config.curriculum_mode == "performance"
+            and current_max_length < config.train_max_length
+        ):
+            if batch_accuracy >= config.curriculum_threshold:
+                curriculum_streak += 1
+            else:
+                curriculum_streak = 0
+            if curriculum_streak >= config.curriculum_patience:
+                current_max_length += 1
+                curriculum_streak = 0
         gradient_norm = torch.nn.utils.clip_grad_norm_(
             model.parameters(),
             config.gradient_clip,
         )
+        gradient_noise = add_gradient_noise(model, config=config, step=step)
         optimizer.step()
 
         if step % config.checkpoint_interval == 0:
@@ -384,11 +556,11 @@ def train(
                 "minimum_length": float(min(microbatch_lengths)),
                 "maximum_length": float(max(microbatch_lengths)),
                 "loss": accumulated_loss / config.gradient_accumulation_steps,
-                "token_accuracy": (
-                    accumulated_accuracy / config.gradient_accumulation_steps
-                ),
+                "token_accuracy": batch_accuracy,
                 "learning_rate": current_learning_rate,
                 "gradient_norm": float(gradient_norm),
+                "gradient_noise_std": gradient_noise,
+                "curriculum_max_length": float(current_max_length),
                 "elapsed_seconds": time.monotonic() - started_at,
             }
             history.append(row)
@@ -526,6 +698,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=(
             "direct",
             "pointer_next",
+            "pointer_value",
             "quicksort_trace",
             "pointer_quicksort",
             "pointer_quicksort_no_tool",
@@ -549,9 +722,27 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--steps", type=int, default=10_000)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
+    parser.add_argument(
+        "--lr-schedule",
+        choices=("cosine", "constant"),
+        default="cosine",
+    )
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--warmup-steps", type=int, default=500)
     parser.add_argument("--gradient-clip", type=float, default=1.0)
+    parser.add_argument("--gradient-noise-scale", type=float, default=0.0)
+    parser.add_argument("--gradient-noise-decay", type=float, default=0.25)
+    parser.add_argument("--curriculum", action="store_true")
+    parser.add_argument(
+        "--curriculum-mode",
+        choices=("performance", "linear"),
+        default="performance",
+    )
+    parser.add_argument("--curriculum-start-length", type=int, default=2)
+    parser.add_argument("--curriculum-linear-end-step", type=int, default=0)
+    parser.add_argument("--curriculum-threshold", type=float, default=0.99)
+    parser.add_argument("--curriculum-patience", type=int, default=20)
+    parser.add_argument("--curriculum-review-probability", type=float, default=0.2)
     parser.add_argument("--log-interval", type=int, default=50)
     parser.add_argument("--eval-interval", type=int, default=1_000)
     parser.add_argument("--eval-examples", type=int, default=128)
@@ -605,6 +796,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--output-directory", type=Path)
     parser.add_argument("--resume-checkpoint", type=Path)
+    parser.add_argument("--init-from-pointer-position-checkpoint", type=Path)
     parser.add_argument("--wandb-project")
     parser.add_argument("--wandb-entity")
     parser.add_argument("--wandb-run-name")
@@ -623,9 +815,19 @@ def main() -> None:
         steps=args.steps,
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
+        lr_schedule=args.lr_schedule,
         weight_decay=args.weight_decay,
         warmup_steps=args.warmup_steps,
         gradient_clip=args.gradient_clip,
+        gradient_noise_scale=args.gradient_noise_scale,
+        gradient_noise_decay=args.gradient_noise_decay,
+        curriculum=args.curriculum,
+        curriculum_mode=args.curriculum_mode,
+        curriculum_start_length=args.curriculum_start_length,
+        curriculum_linear_end_step=args.curriculum_linear_end_step,
+        curriculum_threshold=args.curriculum_threshold,
+        curriculum_patience=args.curriculum_patience,
+        curriculum_review_probability=args.curriculum_review_probability,
         log_interval=args.log_interval,
         eval_interval=args.eval_interval,
         eval_examples=args.eval_examples,
@@ -672,6 +874,16 @@ def main() -> None:
         model = DecoderTransformer(model_config)
     else:
         model = LSTMSorter(model_config)
+    initialization_metadata = None
+    if args.init_from_pointer_position_checkpoint is not None:
+        if not isinstance(model, DecoderTransformer):
+            raise ValueError(
+                "pointer-position initialization requires transformer architecture"
+            )
+        initialization_metadata = initialize_from_pointer_position_checkpoint(
+            model,
+            args.init_from_pointer_position_checkpoint,
+        )
     device = resolve_device(args.device)
     model.to(device)
     output_directory = args.output_directory
@@ -698,6 +910,8 @@ def main() -> None:
         metadata["layer_position_modes"] = model.layer_position_modes
     else:
         metadata["recurrent_layers"] = model.config.n_layers
+    if initialization_metadata is not None:
+        metadata.update(initialization_metadata)
     print(json.dumps(metadata), flush=True)
     tracker = None
     if args.wandb_project is not None:
