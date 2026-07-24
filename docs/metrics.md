@@ -75,6 +75,10 @@ executor assistance.
 | `next_position_accuracy` | All residue heads exactly recover `p+1`. |
 | `both_positions_accuracy` | Both autoregressively generated modular positions are exact. |
 | `successor_consistency` | The second generated position is exactly one greater than the first in every modulus, even if the pair is not the target pair. |
+| `token_accuracy` | For Stage 3 of the modular position pipeline, the generated token equals the list token stored at the generated target address `p+1`. |
+| `complete_trace_accuracy` | For Stage 3, both generated modular positions and the retrieved token are exact. |
+| `token_accuracy_given_correct_positions` | Stage-3 token accuracy restricted to examples where both generated modular positions are exact. |
+| `correct_position_fraction` | For Stage 3, the fraction of examples where both generated modular positions are exact. |
 | `full_target_token_accuracy` | Positional accuracy over the complete generated target. It equals action accuracy for fully executor-assisted runs and includes every model-generated observation or window for partial- and no-tool runs. |
 | `execution_completed` | Offline or interactive executor reached `DONE` without an invalid action. |
 | `observation_token_accuracy` | Positional accuracy of observations assigned to the model. Missing observations after an early failure count as incorrect. |

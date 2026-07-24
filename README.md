@@ -147,8 +147,10 @@ latent item:  [modular address | modular stream position]
 
 Stage 1 predicts the absolute position `p` of `<PTR>`. Stage 2 starts from that
 checkpoint, predicts `p`, inserts the predicted modular address as one
-autoregressive latent item, and predicts `p+1`. Stage 2 does not retrieve the
-list value at `p+1` yet.
+autoregressive latent item, and predicts `p+1`. Stage 3 starts from the Stage-2
+checkpoint and retrieves the list token stored at the computed `p+1` address.
+For example, `<bos>7,<PTR>4,2=` produces the latent trace
+`[address(<PTR>)][address(4)][4]`.
 
 During the 50%-isolation stage-2 run, the final query can attend only to the
 inserted `p` item on half of the training examples. Other examples retain full
@@ -203,6 +205,28 @@ independent evaluation with less regularization. See the W&B runs for
 [dropout 0.02](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/3pwq68j6)
 and
 [dropout 0.05](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/rox8o6wi).
+
+Stage 3 retains the same position losses and adds token cross-entropy through a
+token head tied to the input embedding table. The token pass receives both
+generated position latents and uses unrestricted causal attention. Successor
+isolation remains active only while training the `p+1` position.
+
+The first 20,000-update Stage-3 run solved training lengths 2-20 and reached
+100% token accuracy at lengths 25 and 40. Extreme extrapolation to length 400
+was less stable:
+
+| Stage-3 checkpoint | L40 token | L400 token | L400 complete trace |
+| --- | ---: | ---: | ---: |
+| Step 8,000, training-time evaluation | 100.00% | 73.44% | 72.85% |
+| Step 8,000, five fresh 1,024-example evaluations | 100.00% | 70.45% +/- 1.19% | 70.10% +/- 1.12% |
+| Step 20,000, final independent evaluation | 100.00% | 47.66% | 46.88% |
+
+The computed positions remain much stronger than token retrieval: on the five
+fresh step-8,000 evaluations, both generated positions were exact for 92.30%
+of length-400 examples. Continued training therefore degrades the use of the
+computed address more than it degrades the address computation itself. The
+step-8,000 checkpoint is the current Stage-3 pipeline checkpoint. See the
+[W&B run](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/c5rjitw1).
 
 An alternative replaced successor isolation with an auxiliary cross-entropy
 loss that trained every attention head in every layer to select the preceding
@@ -617,6 +641,16 @@ sort-pointer-position-sequence \
   --wandb-project list-sorting-with-transformer \
   --wandb-run-name pointer-position-sequence-split-pretrained-isolate50-drop002-gn0-20k-seed7 \
   --output-directory artifacts/pointer_position_sequence_split_pretrained_isolate50_drop002_gn0_20k_seed7
+
+sort-pointer-value-from-position \
+  --stage-two-checkpoint artifacts/pointer_position_sequence_split_pretrained_isolate50_drop002_gn0_20k_seed7/checkpoint.pt \
+  --eval-max-length 400 \
+  --steps 20000 \
+  --successor-attention-isolation-probability 0.5 \
+  --gradient-noise-scale 0 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-value-from-position-stage3-drop002-mask50-20k-seed7 \
+  --output-directory artifacts/pointer_value_from_position_stage3_drop002_mask50_20k_seed7
 
 sort-transformer-train \
   --task quicksort_trace \
