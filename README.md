@@ -50,8 +50,8 @@ pointer positions.
 ## Pointer-Position Vector Probe
 
 The `sort-pointer-position-probe` experiment keeps the causal marked-list
-prompt but changes the target from a generated token to an absolute position
-vector. The decoder reads:
+prompt and tests whether position information can be recovered from the marker.
+The decoder reads:
 
 ```text
 <bos>7,<PTR>4,2=
@@ -59,11 +59,18 @@ vector. The decoder reads:
 
 Fixed sinusoidal position vectors are added to the token embeddings. Each
 example samples a fresh absolute offset, so the first prompt token can be
-embedded as position `-734291` in one example and `18204` in another. The final
-hidden state at `=` is projected to a vector and trained with MSE to reproduce
-the same sinusoidal vector that was added at the `<PTR>` token. With the
-repository's prompt format, `<bos>` is token offset 0 within the prompt and
-valid pointer offsets are:
+embedded as position `-734291` in one example and `18204` in another. With the
+default `--objective vector_mse`, the final hidden state at `=` is projected to
+a vector and trained with MSE to reproduce the same sinusoidal vector that was
+added at the `<PTR>` token. With `--objective pointer_ce`, the model instead
+scores each legal pointer slot using a dot product between the final query state
+and the hidden state at that candidate slot. This is a diagnostic for whether
+normal softmax attention can identify the marker position; it does not by
+itself prove that the model can fetch a value from that position. With the
+same script, `--curriculum`, `--dropout`, and `--gradient-noise-scale` expose
+portable Neural-GPU-style training tricks for length extrapolation experiments.
+In the repository's prompt format, `<bos>` is token offset 0 within the prompt
+and valid pointer offsets are:
 
 ```text
 pointer list index: 0  1  2  ...
@@ -369,12 +376,54 @@ sort-transformer-train \
 
 sort-pointer-position-probe \
   --representation numbers \
+  --objective vector_mse \
   --eval-max-length 400 \
   --position-offset-min -1000000 \
   --position-offset-max 1000000 \
   --wandb-project list-sorting-with-transformer \
   --wandb-run-name pointer-position-random-offset-mse-seed7 \
   --output-directory artifacts/pointer_position_random_offset_mse_seed7
+
+sort-pointer-position-probe \
+  --representation numbers \
+  --objective pointer_ce \
+  --eval-max-length 400 \
+  --position-offset-min -1000000 \
+  --position-offset-max 1000000 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-position-random-offset-pointer-ce-seed7 \
+  --output-directory artifacts/pointer_position_random_offset_pointer_ce_seed7
+
+sort-pointer-position-probe \
+  --representation numbers \
+  --objective pointer_ce \
+  --dropout 0.1 \
+  --curriculum \
+  --curriculum-threshold 0.99 \
+  --curriculum-patience 20 \
+  --gradient-noise-scale 0.001 \
+  --eval-max-length 400 \
+  --position-offset-min -1000000 \
+  --position-offset-max 1000000 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-position-pointer-ce-curriculum-noise-seed7 \
+  --output-directory artifacts/pointer_position_pointer_ce_curriculum_noise_seed7
+
+sort-pointer-position-probe \
+  --representation numbers \
+  --objective pointer_ce \
+  --dropout 0.1 \
+  --curriculum \
+  --curriculum-threshold 0.99 \
+  --curriculum-patience 20 \
+  --gradient-noise-scale 0.001 \
+  --lr-schedule constant \
+  --eval-max-length 400 \
+  --position-offset-min -1000000 \
+  --position-offset-max 1000000 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-position-pointer-ce-curriculum-noise-constant-lr-seed7 \
+  --output-directory artifacts/pointer_position_pointer_ce_curriculum_noise_constant_lr_seed7
 
 sort-transformer-train \
   --task quicksort_trace \
@@ -549,6 +598,22 @@ sort-transformer-compare \
   --output artifacts/representation_comparison.png \
   --dynamics-output artifacts/learning_dynamics.png
 ```
+
+## Pointer-Position Results
+
+The pointer-position diagnostic uses seed 7, 10,000 updates, batch size 256,
+random absolute position offsets in `[-1000000, 1000000]`, and evaluates every
+length from 2 to 400. Accuracy is exact pointer-offset recovery.
+
+| Method | L40 | L100 | L200 | L400 | OOD avg | L400 MAE |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pointer CE | 100.00% | 99.41% | 94.34% | 81.05% | 91.30% | 72.89 |
+| Pointer CE + curriculum/dropout/noise | 100.00% | 100.00% | 99.02% | 95.31% | 97.84% | 16.19 |
+| Pointer CE + curriculum/dropout/noise + constant LR | 100.00% | 99.80% | 99.61% | **98.05%** | **99.09%** | **8.09** |
+
+The remaining errors are sparse at the longest evaluated lengths, suggesting
+the basic marker-attention solution is learned and the next improvements should
+target margin at extreme offsets rather than the in-domain task.
 
 ## Pointer-Trace Results
 
