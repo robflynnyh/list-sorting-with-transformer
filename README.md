@@ -186,6 +186,24 @@ Stage-2 configuration therefore keeps gradient noise disabled. The W&B runs are
 and
 [gradient noise](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/ov2fpw50).
 
+Adding mild Stage-2 dropout to the 50%-isolation, no-noise setup substantially
+improved length generalization:
+
+| Stage-2 dropout | L400 | OOD average |
+| --- | ---: | ---: |
+| `0.00` | 89.45% | 96.48% |
+| `0.02` | **99.02%** | **99.67%** |
+| `0.05` | 98.63% | 99.54% |
+
+The improvement was stable rather than a single-checkpoint peak. From steps
+10,000 through 20,000, the regular L400 evaluations stayed between 96.68% and
+100% for dropout `0.02`, and between 97.07% and 99.61% for dropout `0.05`.
+Dropout `0.02` is the recommended setting because it had the strongest final
+independent evaluation with less regularization. See the W&B runs for
+[dropout 0.02](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/3pwq68j6)
+and
+[dropout 0.05](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/rox8o6wi).
+
 An alternative replaced successor isolation with an auxiliary cross-entropy
 loss that trained every attention head in every layer to select the preceding
 `p` latent while predicting `p+1`. Training-length routing accuracy reached
@@ -595,9 +613,10 @@ sort-pointer-position-sequence \
   --steps 20000 \
   --successor-attention-isolation-probability 0.5 \
   --gradient-noise-scale 0 \
+  --dropout 0.02 \
   --wandb-project list-sorting-with-transformer \
-  --wandb-run-name pointer-position-sequence-split-pretrained-isolate50-gn0-20k-seed7 \
-  --output-directory artifacts/pointer_position_sequence_split_pretrained_isolate50_gn0_20k_seed7
+  --wandb-run-name pointer-position-sequence-split-pretrained-isolate50-drop002-gn0-20k-seed7 \
+  --output-directory artifacts/pointer_position_sequence_split_pretrained_isolate50_drop002_gn0_20k_seed7
 
 sort-transformer-train \
   --task quicksort_trace \
