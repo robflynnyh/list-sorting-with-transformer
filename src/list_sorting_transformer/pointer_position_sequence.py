@@ -37,6 +37,8 @@ class PositionSequenceConfig:
     warmup_steps: int = 500
     weight_decay: float = 0.01
     gradient_clip: float = 1.0
+    gradient_noise_scale: float = 0.0
+    gradient_noise_decay: float = 0.25
     log_interval: int = 250
     eval_interval: int = 1_000
     eval_examples: int = 512
@@ -75,6 +77,8 @@ class PositionSequenceConfig:
             raise ValueError("optimizer settings are invalid")
         if self.gradient_clip <= 0:
             raise ValueError("gradient_clip must be positive")
+        if self.gradient_noise_scale < 0 or self.gradient_noise_decay < 0:
+            raise ValueError("gradient noise settings must be nonnegative")
         if not 0.0 <= self.successor_attention_isolation_probability <= 1.0:
             raise ValueError(
                 "successor_attention_isolation_probability must be in [0, 1]"
@@ -541,6 +545,28 @@ def learning_rate_at_step(config: PositionSequenceConfig, step: int) -> float:
     return config.learning_rate
 
 
+def gradient_noise_std(config: PositionSequenceConfig, step: int) -> float:
+    if config.gradient_noise_scale == 0:
+        return 0.0
+    return config.gradient_noise_scale / (step ** config.gradient_noise_decay)
+
+
+def add_gradient_noise(
+    model: nn.Module,
+    *,
+    config: PositionSequenceConfig,
+    step: int,
+) -> float:
+    std = gradient_noise_std(config, step)
+    if std == 0.0:
+        return 0.0
+    with torch.no_grad():
+        for parameter in model.parameters():
+            if parameter.grad is not None:
+                parameter.grad.add_(torch.randn_like(parameter.grad) * std)
+    return std
+
+
 def save_checkpoint(
     path: Path,
     *,
@@ -628,6 +654,7 @@ def train(
                 isolate_successor=isolate_successor,
             )
         loss.backward()
+        noise_std = add_gradient_noise(model, config=config, step=step)
         gradient_norm = torch.nn.utils.clip_grad_norm_(
             model.parameters(),
             config.gradient_clip,
@@ -638,6 +665,7 @@ def train(
                 "step": float(step),
                 "length": float(length),
                 "learning_rate": learning_rate,
+                "gradient_noise_std": noise_std,
                 "gradient_norm": float(gradient_norm),
                 "elapsed_seconds": time.monotonic() - started_at,
                 **metrics,
@@ -764,6 +792,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--warmup-steps", type=int, default=500)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--gradient-clip", type=float, default=1.0)
+    parser.add_argument("--gradient-noise-scale", type=float, default=0.0)
+    parser.add_argument("--gradient-noise-decay", type=float, default=0.25)
     parser.add_argument("--log-interval", type=int, default=250)
     parser.add_argument("--eval-interval", type=int, default=1_000)
     parser.add_argument("--eval-examples", type=int, default=512)
@@ -815,6 +845,8 @@ def main() -> None:
         warmup_steps=args.warmup_steps,
         weight_decay=args.weight_decay,
         gradient_clip=args.gradient_clip,
+        gradient_noise_scale=args.gradient_noise_scale,
+        gradient_noise_decay=args.gradient_noise_decay,
         log_interval=args.log_interval,
         eval_interval=args.eval_interval,
         eval_examples=args.eval_examples,

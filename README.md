@@ -170,6 +170,22 @@ The corresponding W&B runs are
 and
 [50% successor isolation](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/edzj3h30).
 
+A matched 20,000-update comparison used the same stage-1 checkpoint, seed, and
+50% successor isolation. The final independent evaluation used a separate
+generated sample from the regular training-time evaluations:
+
+| Stage-2 gradient noise | L400 | OOD average |
+| --- | ---: | ---: |
+| None | **89.45%** | **96.48%** |
+| Scale `1e-4`, decay `0.25` | 81.45% | 93.82% |
+
+The no-noise run also ended ahead on the regular step-20,000 evaluation
+(92.19% versus 86.13%) and was less volatile during training. The recommended
+Stage-2 configuration therefore keeps gradient noise disabled. The W&B runs are
+[no noise](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/gwpkkif2)
+and
+[gradient noise](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/ov2fpw50).
+
 ## Quicksort Execution Traces
 
 The `quicksort_trace` task makes the model execute deterministic three-way
@@ -566,10 +582,12 @@ sort-pointer-position-sequence \
   --stage-one-checkpoint artifacts/pointer_position_modular_split_10k_seed7/checkpoint.pt \
   --input-layout split \
   --eval-max-length 400 \
+  --steps 20000 \
   --successor-attention-isolation-probability 0.5 \
+  --gradient-noise-scale 0 \
   --wandb-project list-sorting-with-transformer \
-  --wandb-run-name pointer-position-sequence-split-pretrained-isolate50-10k-seed7 \
-  --output-directory artifacts/pointer_position_sequence_split_pretrained_isolate50_10k_seed7
+  --wandb-run-name pointer-position-sequence-split-pretrained-isolate50-gn0-20k-seed7 \
+  --output-directory artifacts/pointer_position_sequence_split_pretrained_isolate50_gn0_20k_seed7
 
 sort-transformer-train \
   --task quicksort_trace \

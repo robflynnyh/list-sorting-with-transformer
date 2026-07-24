@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import pytest
 import torch
 
 from list_sorting_transformer.model import ModelConfig
 from list_sorting_transformer.pointer_position_sequence import (
     ModularPositionSequenceModel,
+    PositionSequenceConfig,
     generated_metrics,
+    gradient_noise_std,
 )
 from list_sorting_transformer.tokens import PointerNextVocabulary
 
@@ -96,6 +99,16 @@ def test_successor_attention_isolation_only_changes_final_query_row() -> None:
     assert mask[0, :-1].all()
     assert mask[0, -1].tolist() == [False, False, False, False, False, True]
     assert mask[1].all()
+
+
+def test_gradient_noise_std_uses_configured_decay() -> None:
+    config = PositionSequenceConfig(
+        gradient_noise_scale=0.01,
+        gradient_noise_decay=0.5,
+    )
+
+    assert gradient_noise_std(config, 1) == pytest.approx(0.01)
+    assert gradient_noise_std(config, 100) == pytest.approx(0.001)
 
 
 def test_generated_metrics_separate_accuracy_from_successor_consistency() -> None:

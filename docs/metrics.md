@@ -25,6 +25,7 @@ so charts should use the project metric `step` as their x-axis.
 | `train/minimum_length` | Shortest accumulated microbatch length in this optimizer update. |
 | `train/maximum_length` | Longest accumulated microbatch length in this optimizer update. |
 | `train/learning_rate` | Learning rate used by the optimizer update. |
+| `train/gradient_noise_std` | Standard deviation of Gaussian noise added to each parameter gradient before clipping. It is `0.0` when gradient noise is disabled. |
 | `train/gradient_norm` | Global gradient norm returned before clipping. The default clipping threshold is `1.0`, so the logged value can exceed `1.0`. |
 | `train/elapsed_seconds` | Wall-clock training time since this process started. |
 | `train/successor_attention_isolation_fraction` | For the modular position sequence, the fraction of the current batch whose `p+1` query could attend only to the preceding `p` latent item. Evaluation always reports zero because isolation is disabled. |
