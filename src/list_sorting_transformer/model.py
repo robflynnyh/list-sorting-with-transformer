@@ -256,11 +256,28 @@ class DecoderTransformer(nn.Module):
         values = torch.where(is_value, values, torch.zeros_like(values))
         return hidden + self.number_projection(values.unsqueeze(-1))
 
-    def forward(self, token_ids: Tensor) -> Tensor:
+    def hidden_states(
+        self,
+        token_ids: Tensor,
+        *,
+        extra_input_embeddings: Tensor | None = None,
+    ) -> Tensor:
         hidden = self.embed(token_ids)
+        if extra_input_embeddings is not None:
+            if extra_input_embeddings.shape != hidden.shape[-2:]:
+                raise ValueError(
+                    "extra_input_embeddings must have shape [time, d_model]"
+                )
+            hidden = hidden + extra_input_embeddings.to(
+                device=hidden.device,
+                dtype=hidden.dtype,
+            )
         for block in self.blocks:
             hidden = block(hidden)
-        hidden = self.final_norm(hidden)
+        return self.final_norm(hidden)
+
+    def forward(self, token_ids: Tensor) -> Tensor:
+        hidden = self.hidden_states(token_ids)
         return F.linear(hidden, self.token_embedding.weight)
 
     def forward_with_cache(

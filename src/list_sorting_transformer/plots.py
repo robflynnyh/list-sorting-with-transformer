@@ -18,20 +18,30 @@ def plot_training_history(
     if not history:
         return
     steps = [row["step"] for row in history]
+    accuracy_key = (
+        "token_accuracy"
+        if "token_accuracy" in history[0]
+        else "argmax_accuracy"
+        if "argmax_accuracy" in history[0]
+        else None
+    )
     figure, axes = plt.subplots(1, 2, figsize=(10, 3.8))
     axes[0].plot(steps, [row["loss"] for row in history], color="#1f5f8b")
-    axes[0].set(title="Training loss", xlabel="Step", ylabel="Cross-entropy")
-    axes[1].plot(
-        steps,
-        [row["token_accuracy"] for row in history],
-        color="#b24726",
-    )
-    axes[1].set(
-        title="Teacher-forced training accuracy",
-        xlabel="Step",
-        ylabel="Token accuracy",
-        ylim=(0.0, 1.01),
-    )
+    axes[0].set(title="Training loss", xlabel="Step", ylabel="Loss")
+    if accuracy_key is not None:
+        axes[1].plot(
+            steps,
+            [row[accuracy_key] for row in history],
+            color="#b24726",
+        )
+        axes[1].set(
+            title="Training accuracy",
+            xlabel="Step",
+            ylabel=accuracy_key.replace("_", " ").title(),
+            ylim=(0.0, 1.01),
+        )
+    else:
+        axes[1].axis("off")
     for axis in axes:
         axis.grid(alpha=0.2)
     figure.tight_layout()
@@ -48,6 +58,7 @@ def plot_length_generalization(
     lengths = sorted(per_length)
     figure, axis = plt.subplots(figsize=(7.5, 4.2))
     first_metrics = per_length[lengths[0]]
+    title = "Sorting performance by length"
     if "execution_completed" in first_metrics:
         series = (
             ("exact_match", "Exact executed sort", "#1f5f8b"),
@@ -63,6 +74,13 @@ def plot_length_generalization(
             ("exact_match", "Exact next value", "#1f5f8b"),
             ("next_value_accuracy", "Next-value token", "#20854e"),
             ("target_token_accuracy", "Generated-token accuracy", "#b24726"),
+        )
+    elif "argmax_accuracy" in first_metrics:
+        title = "Pointer-position performance by length"
+        series = (
+            ("argmax_accuracy", "Pointer argmax accuracy", "#1f5f8b"),
+            ("seen_argmax_accuracy", "Seen pointer positions", "#20854e"),
+            ("unseen_argmax_accuracy", "Unseen pointer positions", "#b24726"),
         )
     else:
         series = (
@@ -91,7 +109,7 @@ def plot_length_generalization(
         xlabel="Input list length",
         ylabel="Fraction",
         ylim=(-0.02, 1.02),
-        title="Sorting performance by length",
+        title=title,
     )
     axis.grid(alpha=0.2)
     axis.legend(frameon=False)

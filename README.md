@@ -47,6 +47,32 @@ positions beyond the training maximum. With the default range, pointer index
 18 is the largest seen index, so length-40 examples include genuinely unseen
 pointer positions.
 
+## Pointer-Position Vector Probe
+
+The `sort-pointer-position-probe` experiment keeps the causal marked-list
+prompt but changes the target from a generated token to an absolute position
+vector. The decoder reads:
+
+```text
+<bos>7,<PTR>4,2=
+```
+
+Fixed sinusoidal position vectors are added to the token embeddings. The final
+hidden state at `=` is projected to a vector and trained with MSE to reproduce
+the same sinusoidal vector that was added at the `<PTR>` token. With the
+repository's prompt format, `<bos>` is token position 0 and valid pointer
+offsets are:
+
+```text
+pointer list index: 0  1  2  ...
+actual token offset: 1  3  5  ...
+```
+
+Evaluation decodes the emitted vector by nearest sinusoidal pointer-offset
+candidate and reports both exact `argmax_accuracy` and `argmax_token_mae`, the
+mean absolute error between the predicted and true token offsets. The model
+remains causal because it only reads the prompt up to `=`.
+
 ## Quicksort Execution Traces
 
 The `quicksort_trace` task makes the model execute deterministic three-way
@@ -336,6 +362,13 @@ sort-transformer-train \
   --wandb-project list-sorting-with-transformer \
   --wandb-run-name pointer-next-numbers-seed7 \
   --output-directory artifacts/pointer_next_numbers_seed7
+
+sort-pointer-position-probe \
+  --representation numbers \
+  --eval-max-length 400 \
+  --wandb-project list-sorting-with-transformer \
+  --wandb-run-name pointer-position-sinusoidal-mse-seed7 \
+  --output-directory artifacts/pointer_position_sinusoidal_mse_seed7
 
 sort-transformer-train \
   --task quicksort_trace \

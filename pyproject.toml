@@ -23,6 +23,7 @@ sort-transformer-eval = "list_sorting_transformer.evaluate:main"
 sort-transformer-compare = "list_sorting_transformer.compare:main"
 sort-pointer-trace = "list_sorting_transformer.render_pointer_trace:main"
 sort-adjacent-trace = "list_sorting_transformer.render_adjacent_trace:main"
+sort-pointer-position-probe = "list_sorting_transformer.pointer_position_probe:main"
 
 [build-system]
 requires = ["setuptools>=68"]

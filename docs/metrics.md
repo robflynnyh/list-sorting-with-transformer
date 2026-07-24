@@ -19,6 +19,8 @@ so charts should use the project metric `step` as their x-axis.
 | --- | --- |
 | `train/loss` | Mean teacher-forced cross-entropy over predicted outputs. Inputs and padding are excluded. Executor-supplied responses are excluded, while responses assigned to the model are included. Lower is better. |
 | `train/token_accuracy` | Teacher-forced next-token accuracy over the same included tokens. Correct preceding target tokens are supplied to the model. |
+| `train/argmax_accuracy` | For `sort-pointer-position-probe`, nearest-position accuracy after decoding the emitted vector against the valid `<PTR>` token offsets for the sampled list length. |
+| `train/argmax_token_mae` | For `sort-pointer-position-probe`, mean absolute difference between the predicted and true raw `<PTR>` token offset. A one-item pointer-index error is two token positions. |
 | `train/length` | Mean problem length across the accumulated microbatches in this optimizer update. |
 | `train/minimum_length` | Shortest accumulated microbatch length in this optimizer update. |
 | `train/maximum_length` | Longest accumulated microbatch length in this optimizer update. |
@@ -58,6 +60,12 @@ executor assistance.
 | `seen_pointer_exact_match` | For `pointer_next`, exact match on examples whose pointer index was reachable under the training length range. With default lengths 2-20, this means pointer index 0-18. |
 | `unseen_pointer_exact_match` | For `pointer_next`, exact match on examples whose pointer index is beyond the training maximum. This is meaningful only when `unseen_pointer_fraction` is nonzero. |
 | `unseen_pointer_fraction` | Fraction of `pointer_next` evaluation examples whose pointer index is beyond the training maximum. |
+| `argmax_accuracy` | For `sort-pointer-position-probe`, nearest-position accuracy after decoding the emitted vector against valid `<PTR>` token offsets. |
+| `argmax_token_mae` | For `sort-pointer-position-probe`, mean absolute error in raw token-position units between the decoded pointer offset and the true `<PTR>` offset. |
+| `seen_argmax_accuracy` | Pointer-position argmax accuracy restricted to pointer indices reachable under the training length range. |
+| `seen_argmax_token_mae` | Pointer-position token-offset MAE on the same seen subset. |
+| `unseen_argmax_accuracy` | Pointer-position argmax accuracy restricted to pointer indices beyond the training maximum. |
+| `unseen_argmax_token_mae` | Pointer-position token-offset MAE on the same unseen subset. |
 | `full_target_token_accuracy` | Positional accuracy over the complete generated target. It equals action accuracy for fully executor-assisted runs and includes every model-generated observation or window for partial- and no-tool runs. |
 | `execution_completed` | Offline or interactive executor reached `DONE` without an invalid action. |
 | `observation_token_accuracy` | Positional accuracy of observations assigned to the model. Missing observations after an early failure count as incorrect. |
