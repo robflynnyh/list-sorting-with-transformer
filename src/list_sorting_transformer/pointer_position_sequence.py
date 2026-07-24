@@ -47,7 +47,7 @@ class PositionSequenceConfig:
     checkpoint_interval: int = 1_000
     seed: int = 7
     input_layout: str = "split"
-    position_moduli: tuple[int, ...] = (31, 37, 41, 47)
+    position_moduli: tuple[int, ...] = (2, 3, 5, 7, 11, 13, 17, 19)
     position_offset_min: int = -1_000_000
     position_offset_max: int = 1_000_000
     successor_attention_isolation_probability: float = 0.0
@@ -947,7 +947,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=None,
         help="override checkpoint dropout; defaults to 0 for new models",
     )
-    parser.add_argument("--position-moduli", default="31,37,41,47")
+    parser.add_argument("--position-moduli", default="2,3,5,7,11,13,17,19")
     parser.add_argument("--position-offset-min", type=int, default=-1_000_000)
     parser.add_argument("--position-offset-max", type=int, default=1_000_000)
     parser.add_argument(

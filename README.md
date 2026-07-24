@@ -229,8 +229,8 @@ step-8,000 checkpoint is retained as the original Stage-3 baseline. See the
 [W&B run](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/c5rjitw1).
 
 The original moduli are all larger than the maximum training length, so each
-individual residue uniquely identifies one item in a training prompt. A
-smaller-base pipeline instead uses:
+individual residue uniquely identifies one item in a training prompt. The
+default pipeline now instead uses:
 
 ```text
 (2, 3, 5, 7, 11, 13, 17, 19)
@@ -265,7 +265,8 @@ and
 
 The smaller-base step-20,000 checkpoint is the recommended Stage-3 pipeline
 checkpoint because it solves the primary L400 extrapolation target without
-increasing the 2-20 training domain.
+increasing the 2-20 training domain. The train-to-128 experiment remains an
+ablation and is not part of the default pipeline.
 
 An alternative replaced successor isolation with an auxiliary cross-entropy
 loss that trained every attention head in every layer to select the preceding
@@ -662,34 +663,36 @@ sort-pointer-position-probe \
   --representation numbers \
   --objective modular_ce \
   --input-layout split \
+  --position-moduli 2,3,5,7,11,13,17,19 \
   --eval-max-length 400 \
   --position-offset-min -1000000 \
   --position-offset-max 1000000 \
   --wandb-project list-sorting-with-transformer \
-  --wandb-run-name pointer-position-modular-split-10k-seed7 \
-  --output-directory artifacts/pointer_position_modular_split_10k_seed7
+  --wandb-run-name pointer-position-smallbases-stage1-10k-seed7 \
+  --output-directory artifacts/pointer_position_smallbases_stage1_10k_seed7
 
 sort-pointer-position-sequence \
-  --stage-one-checkpoint artifacts/pointer_position_modular_split_10k_seed7/checkpoint.pt \
+  --stage-one-checkpoint artifacts/pointer_position_smallbases_stage1_10k_seed7/checkpoint.pt \
   --input-layout split \
+  --position-moduli 2,3,5,7,11,13,17,19 \
   --eval-max-length 400 \
   --steps 20000 \
   --successor-attention-isolation-probability 0.5 \
   --gradient-noise-scale 0 \
   --dropout 0.02 \
   --wandb-project list-sorting-with-transformer \
-  --wandb-run-name pointer-position-sequence-split-pretrained-isolate50-drop002-gn0-20k-seed7 \
-  --output-directory artifacts/pointer_position_sequence_split_pretrained_isolate50_drop002_gn0_20k_seed7
+  --wandb-run-name pointer-position-smallbases-stage2-isolate50-drop002-20k-seed7 \
+  --output-directory artifacts/pointer_position_smallbases_stage2_20k_seed7
 
 sort-pointer-value-from-position \
-  --stage-two-checkpoint artifacts/pointer_position_sequence_split_pretrained_isolate50_drop002_gn0_20k_seed7/checkpoint.pt \
+  --stage-two-checkpoint artifacts/pointer_position_smallbases_stage2_20k_seed7/checkpoint.pt \
   --eval-max-length 400 \
   --steps 20000 \
   --successor-attention-isolation-probability 0.5 \
   --gradient-noise-scale 0 \
   --wandb-project list-sorting-with-transformer \
-  --wandb-run-name pointer-value-from-position-stage3-drop002-mask50-20k-seed7 \
-  --output-directory artifacts/pointer_value_from_position_stage3_drop002_mask50_20k_seed7
+  --wandb-run-name pointer-value-smallbases-stage3-20k-seed7 \
+  --output-directory artifacts/pointer_value_smallbases_stage3_20k_seed7
 
 sort-transformer-train \
   --task quicksort_trace \

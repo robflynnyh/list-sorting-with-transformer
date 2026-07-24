@@ -7,12 +7,23 @@ from list_sorting_transformer.model import ModelConfig
 from list_sorting_transformer.pointer_position_sequence import (
     ModularPositionSequenceModel,
     PositionSequenceConfig,
+    build_argument_parser,
     generated_metrics,
     gradient_noise_std,
     selected_evaluation_lengths,
     sequence_loss_and_metrics,
 )
 from list_sorting_transformer.tokens import PointerNextVocabulary
+
+
+def test_small_modular_bases_are_the_configuration_and_cli_defaults() -> None:
+    expected = (2, 3, 5, 7, 11, 13, 17, 19)
+
+    assert PositionSequenceConfig().position_moduli == expected
+    args = build_argument_parser().parse_args(
+        ["--output-directory", "artifacts/test-defaults"]
+    )
+    assert tuple(int(value) for value in args.position_moduli.split(",")) == expected
 
 
 def small_model() -> ModularPositionSequenceModel:

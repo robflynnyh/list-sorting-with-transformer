@@ -58,7 +58,7 @@ class PointerPositionConfig:
     objective: str = "vector_mse"
     input_layout: str = "additive"
     rotary_base: float = 10_000.0
-    position_moduli: tuple[int, ...] = (31, 37, 41, 47)
+    position_moduli: tuple[int, ...] = (2, 3, 5, 7, 11, 13, 17, 19)
     position_offset_min: int = -1_000_000
     position_offset_max: int = 1_000_000
     checkpoint_interval: int = 1_000
@@ -1038,7 +1038,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rotary-base", type=float, default=10_000.0)
     parser.add_argument(
         "--position-moduli",
-        default="31,37,41,47",
+        default="2,3,5,7,11,13,17,19",
         help="comma-separated product-key moduli for modular_ce",
     )
     parser.add_argument("--position-offset-min", type=int, default=-1_000_000)
