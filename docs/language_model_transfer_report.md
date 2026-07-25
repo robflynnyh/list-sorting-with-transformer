@@ -39,6 +39,11 @@ This is a useful boundary on the positive transfer observed in the
 that reuse locate-and-retrieve operations, but it is not a generally superior
 language-model initialization in this setup.
 
+Evaluation without further training at 512, 1,024, and 2,048 bytes also finds
+no length-generalization advantage. Both models degrade beyond the 256-byte
+training context, and random initialization has better mean loss and accuracy
+at every tested length.
+
 ![Validation learning curves](assets/language_model_transfer_learning_curves.png)
 
 ## Experimental question
@@ -86,7 +91,8 @@ The resulting immutable inputs are:
 
 Raw UTF-8 bytes are the tokens, giving a fixed vocabulary of 256 and avoiding
 tokenizer training, external downloads, or vocabulary mismatches between
-runs. Validation contains complete documents disjoint from training.
+runs. Validation bytes are sourced from documents disjoint from training;
+each bounded stream may truncate its final document at the byte budget.
 
 ## Model and initialization
 
@@ -196,6 +202,45 @@ compiled-middle averages 0.789M bytes/s at the endpoint, a 1.5% difference.
 The result is therefore not explained by one condition receiving materially
 more optimizer updates or data.
 
+### Length generalization
+
+The final checkpoints are evaluated without additional training at context
+lengths 256, 512, 1,024, and 2,048. Training used only 256-byte contexts.
+Evaluation batch size is reduced as context grows:
+
+| Context | Batch size | Evaluated target bytes |
+| ---: | ---: | ---: |
+| 256 | 64 | 327,680 |
+| 512 | 32 | 327,680 |
+| 1,024 | 16 | 327,680 |
+| 2,048 | 8 | 327,680 |
+
+This holds evaluation-token count constant instead of giving longer contexts
+more validation data.
+
+| Context | Random BPC | Compiled BPC | Compiled - random | Random accuracy | Compiled accuracy |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 256 | **3.026 +/- 0.127** | 3.095 +/- 0.125 | +0.068 | **41.28% +/- 2.37** | 40.33% +/- 2.32 |
+| 512 | **3.218 +/- 0.086** | 3.361 +/- 0.116 | +0.143 | **37.97% +/- 1.66** | 35.83% +/- 1.65 |
+| 1,024 | **3.445 +/- 0.070** | 3.589 +/- 0.115 | +0.144 | **34.37% +/- 1.22** | 31.92% +/- 1.91 |
+| 2,048 | **3.658 +/- 0.046** | 3.759 +/- 0.129 | +0.101 | **30.90% +/- 1.12** | 28.80% +/- 1.97 |
+
+Both models fail to preserve their in-domain performance. From 256 to 2,048
+bytes, random degrades by 0.631 BPC and 10.38 accuracy points; compiled-middle
+degrades by 0.664 BPC and 11.54 points. The compiled model is worse in 11 of
+the 12 seed-length pairs. The exception is seed 29 at length 2,048, where
+compiled is better by 0.048 BPC, but this does not reverse the aggregate.
+
+The compiled disadvantage grows from 0.068 BPC at the training length to
+0.143-0.144 at lengths 512-1,024, then narrows to 0.101 at 2,048. There is no
+evidence that the source circuit confers greater length extrapolation.
+
+![Length generalization](assets/language_model_transfer_length_generalization.png)
+
+The rerun needed to create checkpoints exactly reproduces the original
+length-256 aggregate metrics for both initializations. This provides a direct
+reproducibility check before interpreting the new longer-context evaluations.
+
 ## Why transfer did not help
 
 The evidence supports two related explanations, but does not distinguish their
@@ -250,6 +295,9 @@ blocks**, not to every possible algorithm-informed initialization.
    to unrelated language modelling.
 4. Exact sparse compilation is a poor fine-tuning substrate when it zeroes
    both sides of otherwise useful residual branches.
+5. The compiled circuit does not improve length generalization: both models
+   degrade beyond 256 bytes, with random initialization better on average at
+   every tested context length.
 
 ## Limitations and next experiment
 
@@ -261,6 +309,9 @@ blocks**, not to every possible algorithm-informed initialization.
   subword-token language modelling.
 - The experiment deliberately copies whole exact blocks, so task mismatch and
   dead capacity are confounded.
+- Longer-context scores average all positions in the sequence. They therefore
+  mix positions within the 256-byte training range with increasingly many
+  unseen positions rather than isolating each position band.
 
 The cleanest follow-up is a three-way ablation:
 
@@ -287,6 +338,16 @@ PYTHONPATH=src python -m list_sorting_transformer.language_model_transfer \
   summarize \
   --input-root artifacts/language_model_transfer \
   --output-directory experiments/language_model_transfer/results
+```
+
+Re-evaluate one saved checkpoint without training:
+
+```bash
+PYTHONPATH=src python -m list_sorting_transformer.language_model_transfer \
+  evaluate-checkpoint \
+  --checkpoint artifacts/language_model_transfer/random_seed7/checkpoint.pt \
+  --lengths 256,512,1024,2048 \
+  --output artifacts/language_model_transfer/random_seed7/length_eval.json
 ```
 
 The committed aggregate is

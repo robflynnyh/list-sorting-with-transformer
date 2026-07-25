@@ -28,6 +28,7 @@ from .positions import ModularPositionEmbedding
 
 INITIALIZATIONS = ("random", "compiled_middle")
 DEFAULT_DATA_PATH = Path("/store/store4/data/thepile/00.jsonl")
+LENGTH_GENERALIZATION_CONTEXTS = (256, 512, 1_024, 2_048)
 DEFAULT_EVALUATION_STEPS = (
     0,
     10,
@@ -288,6 +289,22 @@ def sample_byte_batch(
     return windows[:, :-1], windows[:, 1:]
 
 
+def evaluation_batch_size(
+    config: LanguageModelTransferConfig,
+    sequence_length: int,
+) -> int:
+    """Keep the number of evaluated bytes per batch constant across lengths."""
+
+    if sequence_length < 1:
+        raise ValueError("sequence_length must be positive")
+    reference_bytes = config.batch_size * config.sequence_length
+    if reference_bytes % sequence_length:
+        raise ValueError(
+            "evaluation length must divide the reference bytes per batch"
+        )
+    return max(1, reference_bytes // sequence_length)
+
+
 def learning_rate_at_step(
     step: int,
     config: LanguageModelTransferConfig,
@@ -356,8 +373,11 @@ def evaluate_language_model(
     config: LanguageModelTransferConfig,
     *,
     device: torch.device,
+    sequence_length: int | None = None,
 ) -> dict[str, float]:
     model.eval()
+    resolved_length = sequence_length or config.sequence_length
+    resolved_batch_size = evaluation_batch_size(config, resolved_length)
     generator = torch.Generator().manual_seed(config.seed + 1_000_003)
     total_loss = 0.0
     total_correct = 0
@@ -370,8 +390,8 @@ def evaluate_language_model(
     for _ in range(config.evaluation_batches):
         inputs, targets = sample_byte_batch(
             validation_tokens,
-            batch_size=config.batch_size,
-            sequence_length=config.sequence_length,
+            batch_size=resolved_batch_size,
+            sequence_length=resolved_length,
             generator=generator,
             device=device,
         )
@@ -391,11 +411,33 @@ def evaluate_language_model(
         total_tokens += targets.numel()
     cross_entropy = total_loss / total_tokens
     return {
+        "sequence_length": resolved_length,
+        "batch_size": resolved_batch_size,
         "cross_entropy_nats_per_byte": cross_entropy,
         "bits_per_byte": cross_entropy / math.log(2),
         "byte_perplexity": math.exp(cross_entropy),
         "next_byte_accuracy": total_correct / total_tokens,
         "evaluated_bytes": total_tokens,
+    }
+
+
+def evaluate_length_generalization(
+    model: ByteLanguageModel,
+    validation_tokens: Tensor,
+    config: LanguageModelTransferConfig,
+    *,
+    device: torch.device,
+    lengths: tuple[int, ...] = LENGTH_GENERALIZATION_CONTEXTS,
+) -> dict[str, dict[str, float]]:
+    return {
+        str(length): evaluate_language_model(
+            model,
+            validation_tokens,
+            config,
+            device=device,
+            sequence_length=length,
+        )
+        for length in lengths
     }
 
 
@@ -530,6 +572,24 @@ def run_experiment(
             record(step)
             model.train()
 
+    length_generalization = evaluate_length_generalization(
+        model,
+        validation_tokens,
+        config,
+        device=device,
+    )
+    checkpoint_path = output_directory / "checkpoint.pt"
+    output_directory.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "config": asdict(config),
+            "model_state_dict": {
+                name: parameter.detach().cpu()
+                for name, parameter in model.state_dict().items()
+            },
+        },
+        checkpoint_path,
+    )
     result: dict[str, Any] = {
         "config": asdict(config),
         "dataset": corpus.metadata,
@@ -549,11 +609,53 @@ def run_experiment(
         "initial_middle_parameter_norm": initial_middle_norm,
         "history": history,
         "final": history[-1],
+        "length_generalization": length_generalization,
+        "checkpoint": str(checkpoint_path.resolve()),
     }
-    output_directory.mkdir(parents=True, exist_ok=True)
     output_path = output_directory / "metrics.json"
     output_path.write_text(json.dumps(result, indent=2) + "\n")
     return result
+
+
+def evaluate_saved_checkpoint(
+    checkpoint_path: Path,
+    *,
+    device_name: str,
+    lengths: tuple[int, ...] = LENGTH_GENERALIZATION_CONTEXTS,
+) -> dict[str, Any]:
+    device = resolve_device(device_name)
+    payload = torch.load(
+        checkpoint_path,
+        map_location="cpu",
+        weights_only=False,
+    )
+    config_values = dict(payload["config"])
+    config_values["position_moduli"] = tuple(
+        config_values["position_moduli"]
+    )
+    config = LanguageModelTransferConfig(**config_values)
+    corpus = load_byte_corpus(
+        Path(config.data_path),
+        train_bytes=config.train_bytes,
+        validation_bytes=config.validation_bytes,
+        validation_document_stride=config.validation_document_stride,
+    )
+    model = build_language_model(config)
+    model.load_state_dict(payload["model_state_dict"])
+    model.to(device)
+    validation_tokens = corpus.validation.to(device)
+    return {
+        "checkpoint": str(checkpoint_path.resolve()),
+        "config": asdict(config),
+        "dataset": corpus.metadata,
+        "length_generalization": evaluate_length_generalization(
+            model,
+            validation_tokens,
+            config,
+            device=device,
+            lengths=lengths,
+        ),
+    }
 
 
 def _mean_and_std(values: list[float]) -> tuple[float, float]:
@@ -616,6 +718,50 @@ def summarize_results(input_root: Path) -> dict[str, Any]:
             ),
             "by_step": by_step,
         }
+        if all("length_generalization" in result for result in matching):
+            by_length: dict[str, dict[str, dict[str, float]]] = {}
+            lengths = sorted(
+                set.intersection(
+                    *[
+                        set(result["length_generalization"])
+                        for result in matching
+                    ]
+                ),
+                key=int,
+            )
+            for length in lengths:
+                metrics: dict[str, dict[str, float]] = {}
+                for metric in (
+                    "cross_entropy_nats_per_byte",
+                    "bits_per_byte",
+                    "byte_perplexity",
+                    "next_byte_accuracy",
+                ):
+                    mean, std = _mean_and_std(
+                        [
+                            float(
+                                result["length_generalization"][length][
+                                    metric
+                                ]
+                            )
+                            for result in matching
+                        ]
+                    )
+                    metrics[metric] = {"mean": mean, "std": std}
+                metrics["evaluation"] = {
+                    "batch_size": int(
+                        matching[0]["length_generalization"][length][
+                            "batch_size"
+                        ]
+                    ),
+                    "evaluated_bytes": int(
+                        matching[0]["length_generalization"][length][
+                            "evaluated_bytes"
+                        ]
+                    ),
+                }
+                by_length[length] = metrics
+            summary[initialization]["by_length"] = by_length
     by_initialization_and_seed = {
         (
             result["config"]["initialization"],
@@ -817,6 +963,53 @@ def render_plots(summary: dict[str, Any], output_directory: Path) -> None:
     )
     plt.close(figure)
 
+    if not all(
+        "by_length" in summary["initializations"].get(initialization, {})
+        for initialization in INITIALIZATIONS
+    ):
+        return
+    figure, axes = plt.subplots(1, 2, figsize=(11.5, 4.3))
+    for initialization in INITIALIZATIONS:
+        result = summary["initializations"][initialization]["by_length"]
+        lengths = sorted(map(int, result))
+        for axis, metric, ylabel in (
+            (axes[0], "bits_per_byte", "Validation bits per byte"),
+            (axes[1], "next_byte_accuracy", "Validation next-byte accuracy"),
+        ):
+            means = [result[str(length)][metric]["mean"] for length in lengths]
+            stds = [result[str(length)][metric]["std"] for length in lengths]
+            axis.plot(
+                lengths,
+                means,
+                marker="o",
+                color=colors[initialization],
+                label=labels[initialization],
+                linewidth=2,
+            )
+            axis.fill_between(
+                lengths,
+                [mean - std for mean, std in zip(means, stds)],
+                [mean + std for mean, std in zip(means, stds)],
+                color=colors[initialization],
+                alpha=0.16,
+            )
+            axis.set_xscale("log", base=2)
+            axis.set_xticks(lengths, [str(length) for length in lengths])
+            axis.set_xlabel("Evaluation context length (bytes)")
+            axis.set_ylabel(ylabel)
+            axis.grid(alpha=0.25)
+    axes[0].legend(frameon=False)
+    figure.suptitle(
+        "Length generalization after training on 256-byte contexts"
+    )
+    figure.tight_layout()
+    figure.savefig(
+        output_directory / "language_model_transfer_length_generalization.png",
+        dpi=180,
+        bbox_inches="tight",
+    )
+    plt.close(figure)
+
 
 def _run_command(args: argparse.Namespace) -> None:
     config = LanguageModelTransferConfig(
@@ -850,6 +1043,22 @@ def _summarize_command(args: argparse.Namespace) -> None:
         json.dumps(summary, indent=2) + "\n"
     )
     render_plots(summary, output_directory)
+
+
+def _evaluate_checkpoint_command(args: argparse.Namespace) -> None:
+    lengths = tuple(
+        int(value.strip())
+        for value in args.lengths.split(",")
+        if value.strip()
+    )
+    result = evaluate_saved_checkpoint(
+        Path(args.checkpoint),
+        device_name=args.device,
+        lengths=lengths,
+    )
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(result, indent=2) + "\n")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -889,6 +1098,19 @@ def build_parser() -> argparse.ArgumentParser:
     summarize.add_argument("--input-root", required=True)
     summarize.add_argument("--output-directory", required=True)
     summarize.set_defaults(handler=_summarize_command)
+
+    evaluate_checkpoint = subparsers.add_parser(
+        "evaluate-checkpoint",
+        help="evaluate a saved final state at one or more context lengths",
+    )
+    evaluate_checkpoint.add_argument("--checkpoint", required=True)
+    evaluate_checkpoint.add_argument(
+        "--lengths",
+        default=",".join(map(str, LENGTH_GENERALIZATION_CONTEXTS)),
+    )
+    evaluate_checkpoint.add_argument("--device", default="auto")
+    evaluate_checkpoint.add_argument("--output", required=True)
+    evaluate_checkpoint.set_defaults(handler=_evaluate_checkpoint_command)
     return parser
 
 

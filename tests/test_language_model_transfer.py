@@ -8,6 +8,7 @@ import torch
 from list_sorting_transformer.language_model_transfer import (
     LanguageModelTransferConfig,
     build_language_model,
+    evaluation_batch_size,
     learning_rate_at_step,
     load_byte_corpus,
     sample_byte_batch,
@@ -117,3 +118,15 @@ def test_learning_rate_warms_up_and_decays() -> None:
     assert learning_rate_at_step(config.steps, config) == (
         config.minimum_learning_rate
     )
+
+
+def test_length_evaluation_keeps_target_byte_count_constant() -> None:
+    config = LanguageModelTransferConfig(
+        initialization="random",
+        seed=7,
+    )
+
+    assert [
+        evaluation_batch_size(config, length)
+        for length in (256, 512, 1_024, 2_048)
+    ] == [64, 32, 16, 8]

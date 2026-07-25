@@ -47,7 +47,8 @@ A second controlled benchmark places the two useful compiled routing blocks in
 the middle of a six-layer byte language model and compares them with matched
 random initialization on an immutable slice of The Pile. Unlike the aligned
 puzzle tasks, the compiled circuit does not improve language modelling and
-introduces dead feed-forward capacity. The
+introduces dead feed-forward capacity. Evaluation through 2,048-byte contexts
+also finds no length-generalization advantage. The
 [language-model transfer report](docs/language_model_transfer_report.md)
 contains the multi-seed results, plots, initialization audit, and reproduction
 commands.

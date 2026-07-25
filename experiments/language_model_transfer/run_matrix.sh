@@ -16,7 +16,8 @@ for seed in ${SEEDS}; do
   for initialization in random compiled_middle; do
     run_name="${initialization}_seed${seed}"
     output_directory="${ARTIFACT_ROOT}/${run_name}"
-    if [[ -s "${output_directory}/metrics.json" ]]; then
+    if [[ -s "${output_directory}/metrics.json" ]] \
+      && [[ -s "${output_directory}/checkpoint.pt" ]]; then
       echo "Skipping completed ${run_name}"
       continue
     fi
