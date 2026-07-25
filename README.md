@@ -153,7 +153,20 @@ Stage 4 starts from Stage 3 and predicts the position of the following list
 value. Because the comma is a token, this address is `p+3`, not `p+2`. For
 example, `<bos>7,<PTR>4,2=` produces the Stage-4 trace
 `[address(<PTR>)][address(4)][4][address(2)]`. Retrieving `2` itself is left for
-the next pipeline stage. On half of Stage-4 training examples, the final
+Stage 5, which appends that address to the autoregressive history and predicts
+the token stored there:
+
+```text
+[address(<PTR>)][address(4)][4][address(2)][2]
+```
+
+Stage 5 uses pair batches whose pointer is never placed on the final list item,
+so every computed `p+3` address has a real following value. It starts from the
+Stage-4 checkpoint and uses a frozen copy of that checkpoint to distil all
+three inherited addresses and the marked-value token while learning the new
+retrieval target.
+
+On half of Stage-4 training examples, the final
 query's attention is restricted to `address(4)`. This encourages the new
 address to be computed as a local modular shift instead of recovered from the
 original prompt. During consistency training, the same batch also receives an

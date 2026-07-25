@@ -43,6 +43,10 @@ so charts should use the project metric `step` as their x-axis.
 | `train/teacher_forced_next_value_position_residue_accuracy` | Accuracy over individual Stage-4 address residue predictions with the gold Stage-3 history supplied. |
 | `train/teacher_branch_next_value_position_accuracy` | Exact Stage-4 address accuracy from the branch containing sampled isolated examples. |
 | `train/teacher_branch_next_value_position_residue_accuracy` | Residue accuracy from the branch containing sampled isolated examples. |
+| `train/stage_four_loss` | For Stage 5, the retained Stage-4 objective over the first three addresses and marked-value retrieval. |
+| `train/next_value_token_loss` | For Stage 5, cross-entropy for the list token stored at the generated Stage-4 target address. |
+| `train/stage_four_distillation_loss` | Mean centered, teacher-scale-normalized logit MSE against the frozen incoming Stage-4 checkpoint over every inherited address and marked-token output. |
+| `train/teacher_forced_next_value_token_accuracy` | Stage-5 next-value accuracy with all preceding addresses and the marked token supplied correctly. |
 
 Older runs created before independent microbatch-length sampling may contain
 only `train/length`. In those runs, all accumulated microbatches used that same
@@ -98,6 +102,9 @@ executor assistance.
 | `next_value_position_consistency` | Whether the generated Stage-4 address is exactly two token positions after the generated marked-value address, independently of whether either address is correct. |
 | `all_positions_accuracy` | Whether all three generated modular addresses are correct. |
 | `next_value_position_accuracy_given_stage_three_correct` | Stage-4 address accuracy restricted to examples with a fully correct generated Stage-3 prefix. |
+| `stage_four_complete_trace_accuracy` | For Stage 5, whether all inherited Stage-4 addresses and the marked-value token were generated correctly. |
+| `next_value_token_accuracy` | For Stage 5, whether the token retrieved from the final computed address equals the value following `<PTR>`. |
+| `next_value_token_accuracy_given_correct_position` | Stage-5 token retrieval accuracy restricted to examples whose final modular address is correct. |
 | `full_target_token_accuracy` | Positional accuracy over the complete generated target. It equals action accuracy for fully executor-assisted runs and includes every model-generated observation or window for partial- and no-tool runs. |
 | `execution_completed` | Offline or interactive executor reached `DONE` without an invalid action. |
 | `observation_token_accuracy` | Positional accuracy of observations assigned to the model. Missing observations after an early failure count as incorrect. |

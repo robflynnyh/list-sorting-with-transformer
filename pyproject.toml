@@ -27,6 +27,7 @@ sort-pointer-position-probe = "list_sorting_transformer.pointer_position_probe:m
 sort-pointer-position-sequence = "list_sorting_transformer.pointer_position_sequence:main"
 sort-pointer-value-from-position = "list_sorting_transformer.pointer_value_from_position:main"
 sort-pointer-next-value-position = "list_sorting_transformer.pointer_next_value_position:main"
+sort-pointer-next-value-from-position = "list_sorting_transformer.pointer_next_value_from_position:main"
 
 [build-system]
 requires = ["setuptools>=68"]
