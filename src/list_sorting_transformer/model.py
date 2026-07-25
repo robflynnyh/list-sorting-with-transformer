@@ -107,6 +107,63 @@ class CausalSelfAttention(nn.Module):
             if use_rotary
             else None
         )
+        self.top_k: int | None = None
+        self.top_k_straight_through = False
+
+    def configure_top_k(
+        self,
+        top_k: int | None,
+        *,
+        straight_through: bool = False,
+    ) -> None:
+        if top_k is not None and top_k < 1:
+            raise ValueError("top_k must be positive")
+        if straight_through and top_k is None:
+            raise ValueError("straight-through attention requires top_k")
+        self.top_k = top_k
+        self.top_k_straight_through = straight_through
+
+    def _top_k_attention(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        *,
+        attention_mask: Tensor | None,
+        is_causal: bool,
+    ) -> Tensor:
+        scores = query @ key.transpose(-2, -1) / self.head_dim**0.5
+        query_length = query.shape[-2]
+        key_length = key.shape[-2]
+        if is_causal:
+            causal_mask = torch.ones(
+                query_length,
+                key_length,
+                dtype=torch.bool,
+                device=query.device,
+            ).tril(diagonal=key_length - query_length)
+            scores = scores.masked_fill(~causal_mask, float("-inf"))
+        if attention_mask is not None:
+            scores = scores.masked_fill(~attention_mask, float("-inf"))
+
+        soft_weights = scores.softmax(dim=-1)
+        selected = scores.topk(
+            min(self.top_k or key_length, key_length),
+            dim=-1,
+        ).indices
+        hard_scores = torch.full_like(scores, float("-inf"))
+        hard_scores.scatter_(-1, selected, scores.gather(-1, selected))
+        hard_weights = hard_scores.softmax(dim=-1)
+        if self.top_k_straight_through and self.training:
+            weights = soft_weights + (hard_weights - soft_weights).detach()
+        else:
+            weights = hard_weights
+        weights = F.dropout(
+            weights,
+            p=self.dropout,
+            training=self.training,
+        )
+        return weights @ value
 
     def _split_heads(self, tensor: Tensor) -> Tensor:
         batch_size, sequence_length, model_dim = tensor.shape
@@ -199,14 +256,23 @@ class CausalSelfAttention(nn.Module):
                 dtype=torch.bool,
             ).tril()
             combined_mask = combined_mask.to(device=hidden.device) & causal_mask
-        attended = F.scaled_dot_product_attention(
-            query,
-            key,
-            value,
-            attn_mask=combined_mask,
-            dropout_p=self.dropout if self.training else 0.0,
-            is_causal=cache is None and combined_mask is None,
-        )
+        if self.top_k is None:
+            attended = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=combined_mask,
+                dropout_p=self.dropout if self.training else 0.0,
+                is_causal=cache is None and combined_mask is None,
+            )
+        else:
+            attended = self._top_k_attention(
+                query,
+                key,
+                value,
+                attention_mask=combined_mask,
+                is_causal=cache is None and combined_mask is None,
+            )
         attended = attended.transpose(1, 2).contiguous().view(
             batch_size,
             sequence_length,

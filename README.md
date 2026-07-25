@@ -30,6 +30,17 @@ Two representation settings use the same token IDs and architecture:
 This isolates the effect of exposing ordinal structure while keeping the
 sequence task unchanged.
 
+## RASP Transfer Benchmark
+
+Does an exactly compiled algorithm provide a better initialization than random
+weights on a new task? A controlled 36-run benchmark compares random
+initialization, a compiled two-layer routing prefix, and the full compiled
+backbone on pointer retrieval, comparison, associative recall, and Dyck-2.
+The compiled prefix substantially improves the three retrieval-aligned tasks
+but not the unrelated stack-like task. See the
+[full report](docs/rasp_transfer_report.md) for multi-seed tables, learning
+curves, mechanistic route diagnostics, limitations, and reproduction commands.
+
 ## Pointer-Value Probe
 
 The `pointer_value` task is the first autoregressive stage after the
