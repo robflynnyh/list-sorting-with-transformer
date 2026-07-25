@@ -170,6 +170,16 @@ Raw and EMA models are evaluated on the same examples and saved separately,
 which allows endpoint stability to be measured without selecting a favorable
 intermediate checkpoint.
 
+The initial constant-learning-rate Stage-5 run reached 96.09% complete
+length-400 accuracy at its best recurring evaluation, but its independent
+step-20,000 endpoint fell to 90.82%. A predetermined 10,000-step run instead
+used cosine decay from `3e-4` at step 1,000 to `1e-5`, together with EMA decay
+`0.9995`. Its last three recurring raw evaluations increased from 95.12% to
+95.51%, and its independent endpoint reached **96.68%** raw and **96.29%**
+EMA complete accuracy at length 400. Both endpoints remained 100% through
+length 40. See the stabilized [W&B
+run](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/vmryceek).
+
 On half of Stage-4 training examples, the final
 query's attention is restricted to `address(4)`. This encourages the new
 address to be computed as a local modular shift instead of recovered from the
