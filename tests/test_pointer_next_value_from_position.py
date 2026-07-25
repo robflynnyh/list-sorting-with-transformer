@@ -238,6 +238,30 @@ def test_cosine_decay_reaches_the_configured_final_rate() -> None:
     )
 
 
+def test_cosine_decay_can_hold_the_minimum_rate_after_ending() -> None:
+    config = NextValueFromPositionConfig(
+        steps=20_000,
+        warmup_steps=500,
+        learning_rate=3e-4,
+        learning_rate_decay_start=1_000,
+        learning_rate_decay_end=10_000,
+        minimum_learning_rate=1e-5,
+    )
+
+    assert stage_five_learning_rate_at_step(config, 5_500) == pytest.approx(
+        1.55e-4
+    )
+    assert stage_five_learning_rate_at_step(config, 10_000) == pytest.approx(
+        1e-5
+    )
+    assert stage_five_learning_rate_at_step(config, 15_000) == pytest.approx(
+        1e-5
+    )
+    assert stage_five_learning_rate_at_step(config, 20_000) == pytest.approx(
+        1e-5
+    )
+
+
 def test_ema_initializes_exactly_then_averages_parameters() -> None:
     torch.manual_seed(8)
     model = small_model()
@@ -264,13 +288,20 @@ def test_ema_initializes_exactly_then_averages_parameters() -> None:
 
 
 def test_decay_and_ema_settings_are_validated() -> None:
-    with pytest.raises(ValueError, match="between warmup"):
+    with pytest.raises(ValueError, match="start after warmup"):
         NextValueFromPositionConfig(
             steps=100,
             warmup_steps=20,
             learning_rate_decay_start=10,
         )
-    with pytest.raises(ValueError, match="requires learning-rate decay"):
+    with pytest.raises(ValueError, match="require learning-rate decay"):
         NextValueFromPositionConfig(minimum_learning_rate=1e-5)
+    with pytest.raises(ValueError, match="end no later"):
+        NextValueFromPositionConfig(
+            steps=100,
+            warmup_steps=20,
+            learning_rate_decay_start=50,
+            learning_rate_decay_end=101,
+        )
     with pytest.raises(ValueError, match="EMA requires"):
         NextValueFromPositionConfig(ema_decay=1.0, ema_start_step=1)

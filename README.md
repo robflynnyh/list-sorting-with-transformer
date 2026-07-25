@@ -165,7 +165,8 @@ so every computed `p+3` address has a real following value. It starts from the
 Stage-4 checkpoint and uses a frozen copy of that checkpoint to distil all
 three inherited addresses and the marked-value token while learning the new
 retrieval target. Stage-5 training optionally supports cosine learning-rate
-decay and a predetermined exponential moving average (EMA) of model weights.
+decay, a fixed minimum-LR phase after the decay ends, and a predetermined
+exponential moving average (EMA) of model weights.
 Raw and EMA models are evaluated on the same examples and saved separately,
 which allows endpoint stability to be measured without selecting a favorable
 intermediate checkpoint.

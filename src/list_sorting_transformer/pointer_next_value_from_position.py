@@ -43,6 +43,7 @@ class NextValueFromPositionConfig(NextValuePositionConfig):
     next_value_token_loss_weight: float = 1.0
     stage_four_distillation_weight: float = 1.0
     learning_rate_decay_start: int | None = None
+    learning_rate_decay_end: int | None = None
     minimum_learning_rate: float = 0.0
     ema_decay: float = 0.0
     ema_start_step: int = 0
@@ -56,24 +57,27 @@ class NextValueFromPositionConfig(NextValuePositionConfig):
                 "stage_four_distillation_weight must be nonnegative"
             )
         if self.learning_rate_decay_start is not None:
+            decay_end = self.learning_rate_decay_end or self.steps
             if not (
                 self.warmup_steps
                 <= self.learning_rate_decay_start
-                < self.steps
+                < decay_end
+                <= self.steps
             ):
                 raise ValueError(
-                    "learning_rate_decay_start must be between warmup and "
-                    "the final step"
+                    "learning-rate decay must start after warmup and end no "
+                    "later than the final step"
                 )
             if not 0 <= self.minimum_learning_rate <= self.learning_rate:
                 raise ValueError(
                     "minimum_learning_rate must be between zero and "
                     "learning_rate"
                 )
-        elif self.minimum_learning_rate != 0:
-            raise ValueError(
-                "minimum_learning_rate requires learning-rate decay"
-            )
+        elif (
+            self.learning_rate_decay_end is not None
+            or self.minimum_learning_rate != 0
+        ):
+            raise ValueError("decay settings require learning-rate decay")
         if self.ema_decay == 0:
             if self.ema_start_step != 0:
                 raise ValueError("ema_start_step requires EMA")
@@ -211,7 +215,10 @@ def stage_five_learning_rate_at_step(
     decay_start = config.learning_rate_decay_start
     if decay_start is None or step <= decay_start:
         return warmup_rate
-    progress = (step - decay_start) / (config.steps - decay_start)
+    decay_end = config.learning_rate_decay_end or config.steps
+    if step >= decay_end:
+        return config.minimum_learning_rate
+    progress = (step - decay_start) / (decay_end - decay_start)
     cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
     return config.minimum_learning_rate + (
         config.learning_rate - config.minimum_learning_rate
@@ -877,6 +884,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--warmup-steps", type=int, default=500)
     parser.add_argument("--learning-rate-decay-start", type=int)
+    parser.add_argument("--learning-rate-decay-end", type=int)
     parser.add_argument("--minimum-learning-rate", type=float, default=0.0)
     parser.add_argument("--ema-decay", type=float, default=0.0)
     parser.add_argument("--ema-start-step", type=int, default=0)
@@ -955,6 +963,7 @@ def main() -> None:
         learning_rate=args.learning_rate,
         warmup_steps=args.warmup_steps,
         learning_rate_decay_start=args.learning_rate_decay_start,
+        learning_rate_decay_end=args.learning_rate_decay_end,
         minimum_learning_rate=args.minimum_learning_rate,
         ema_decay=args.ema_decay,
         ema_start_step=args.ema_start_step,
