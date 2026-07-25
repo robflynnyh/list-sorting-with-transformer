@@ -11,7 +11,9 @@ from list_sorting_transformer.pointer_next_value_from_position import (
     generated_stage_five_metrics,
     load_stage_four_checkpoint,
     next_value_token_loss_and_metrics,
+    stage_five_learning_rate_at_step,
     target_next_value_token_ids,
+    update_ema_model,
 )
 from list_sorting_transformer.pointer_next_value_position import (
     ModularNextValuePositionModel,
@@ -211,3 +213,64 @@ def test_complete_trace_includes_retrieved_next_value() -> None:
     assert metrics["next_value_token_accuracy"] == 0.5
     assert metrics["next_value_token_accuracy_given_correct_position"] == 0.5
     assert metrics["complete_trace_accuracy"] == 0.5
+
+
+def test_cosine_decay_reaches_the_configured_final_rate() -> None:
+    config = NextValueFromPositionConfig(
+        steps=10_000,
+        warmup_steps=500,
+        learning_rate=3e-4,
+        learning_rate_decay_start=1_000,
+        minimum_learning_rate=1e-5,
+    )
+
+    assert stage_five_learning_rate_at_step(config, 250) == pytest.approx(
+        1.5e-4
+    )
+    assert stage_five_learning_rate_at_step(config, 1_000) == pytest.approx(
+        3e-4
+    )
+    assert stage_five_learning_rate_at_step(config, 5_500) == pytest.approx(
+        1.55e-4
+    )
+    assert stage_five_learning_rate_at_step(config, 10_000) == pytest.approx(
+        1e-5
+    )
+
+
+def test_ema_initializes_exactly_then_averages_parameters() -> None:
+    torch.manual_seed(8)
+    model = small_model()
+    ema_model = small_model()
+
+    update_ema_model(
+        ema_model,
+        model,
+        decay=0.5,
+        initialize=True,
+    )
+    original = model.token_query_projection.weight.detach().clone()
+    with torch.no_grad():
+        model.token_query_projection.weight.add_(2.0)
+    update_ema_model(ema_model, model, decay=0.5)
+
+    torch.testing.assert_close(
+        ema_model.token_query_projection.weight,
+        original + 1.0,
+    )
+    assert all(
+        parameter.grad is None for parameter in ema_model.parameters()
+    )
+
+
+def test_decay_and_ema_settings_are_validated() -> None:
+    with pytest.raises(ValueError, match="between warmup"):
+        NextValueFromPositionConfig(
+            steps=100,
+            warmup_steps=20,
+            learning_rate_decay_start=10,
+        )
+    with pytest.raises(ValueError, match="requires learning-rate decay"):
+        NextValueFromPositionConfig(minimum_learning_rate=1e-5)
+    with pytest.raises(ValueError, match="EMA requires"):
+        NextValueFromPositionConfig(ema_decay=1.0, ema_start_step=1)

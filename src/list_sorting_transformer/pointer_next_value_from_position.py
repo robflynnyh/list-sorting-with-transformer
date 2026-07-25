@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import time
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -40,6 +42,10 @@ from .tokens import VALUE_OFFSET, PointerNextVocabulary
 class NextValueFromPositionConfig(NextValuePositionConfig):
     next_value_token_loss_weight: float = 1.0
     stage_four_distillation_weight: float = 1.0
+    learning_rate_decay_start: int | None = None
+    minimum_learning_rate: float = 0.0
+    ema_decay: float = 0.0
+    ema_start_step: int = 0
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -48,6 +54,35 @@ class NextValueFromPositionConfig(NextValuePositionConfig):
         if self.stage_four_distillation_weight < 0:
             raise ValueError(
                 "stage_four_distillation_weight must be nonnegative"
+            )
+        if self.learning_rate_decay_start is not None:
+            if not (
+                self.warmup_steps
+                <= self.learning_rate_decay_start
+                < self.steps
+            ):
+                raise ValueError(
+                    "learning_rate_decay_start must be between warmup and "
+                    "the final step"
+                )
+            if not 0 <= self.minimum_learning_rate <= self.learning_rate:
+                raise ValueError(
+                    "minimum_learning_rate must be between zero and "
+                    "learning_rate"
+                )
+        elif self.minimum_learning_rate != 0:
+            raise ValueError(
+                "minimum_learning_rate requires learning-rate decay"
+            )
+        if self.ema_decay == 0:
+            if self.ema_start_step != 0:
+                raise ValueError("ema_start_step requires EMA")
+        elif not (
+            0 < self.ema_decay < 1
+            and 1 <= self.ema_start_step <= self.steps
+        ):
+            raise ValueError(
+                "EMA requires decay in (0, 1) and a valid start step"
             )
 
 
@@ -164,6 +199,53 @@ def target_next_value_token_ids(batch: PointerNextBatch) -> Tensor:
         device=batch.values.device,
     )
     return batch.values[row_indices, batch.pointers + 1] + VALUE_OFFSET
+
+
+def stage_five_learning_rate_at_step(
+    config: NextValueFromPositionConfig,
+    step: int,
+) -> float:
+    """Apply inherited warmup followed by optional cosine decay."""
+
+    warmup_rate = learning_rate_at_step(config, step)
+    decay_start = config.learning_rate_decay_start
+    if decay_start is None or step <= decay_start:
+        return warmup_rate
+    progress = (step - decay_start) / (config.steps - decay_start)
+    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return config.minimum_learning_rate + (
+        config.learning_rate - config.minimum_learning_rate
+    ) * cosine
+
+
+@torch.no_grad()
+def update_ema_model(
+    ema_model: ModularNextValueFromPositionModel,
+    model: ModularNextValueFromPositionModel,
+    *,
+    decay: float,
+    initialize: bool = False,
+) -> None:
+    """Update a detached parameter-average model in place."""
+
+    if initialize:
+        ema_model.load_state_dict(model.state_dict())
+        return
+    ema_parameters = dict(ema_model.named_parameters())
+    model_parameters = dict(model.named_parameters())
+    if ema_parameters.keys() != model_parameters.keys():
+        raise ValueError("EMA and training models do not match")
+    for name, ema_parameter in ema_parameters.items():
+        ema_parameter.lerp_(
+            model_parameters[name].detach(),
+            1.0 - decay,
+        )
+    ema_buffers = dict(ema_model.named_buffers())
+    model_buffers = dict(model.named_buffers())
+    if ema_buffers.keys() != model_buffers.keys():
+        raise ValueError("EMA and training model buffers do not match")
+    for name, ema_buffer in ema_buffers.items():
+        ema_buffer.copy_(model_buffers[name])
 
 
 def load_stage_four_checkpoint(
@@ -465,19 +547,20 @@ def save_checkpoint(
     config: NextValueFromPositionConfig,
     step: int,
     generator: torch.Generator,
+    averaging: dict[str, float | int] | None = None,
 ) -> None:
-    torch.save(
-        {
-            "probe": "pointer_next_value_from_position",
-            "model_config": model.encoder.config.as_dict(),
-            "train_config": asdict(config),
-            "model_state": model.state_dict(),
-            "optimizer_state": optimizer.state_dict(),
-            "generator_state": generator.get_state(),
-            "step": step,
-        },
-        path,
-    )
+    payload = {
+        "probe": "pointer_next_value_from_position",
+        "model_config": model.encoder.config.as_dict(),
+        "train_config": asdict(config),
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "generator_state": generator.get_state(),
+        "step": step,
+    }
+    if averaging is not None:
+        payload["averaging"] = averaging
+    torch.save(payload, path)
 
 
 def train(
@@ -507,12 +590,18 @@ def train(
         weight_decay=config.weight_decay,
         betas=(0.9, 0.95),
     )
+    ema_model = None
+    ema_initialized = False
+    if config.ema_decay:
+        ema_model = deepcopy(model)
+        ema_model.requires_grad_(False)
+        ema_model.eval()
     history = []
     evaluations = []
     started_at = time.monotonic()
     model.train()
     for step in range(1, config.steps + 1):
-        learning_rate = learning_rate_at_step(config, step)
+        learning_rate = stage_five_learning_rate_at_step(config, step)
         for group in optimizer.param_groups:
             group["lr"] = learning_rate
         length = sample_length(
@@ -563,6 +652,14 @@ def train(
             config.gradient_clip,
         )
         optimizer.step()
+        if ema_model is not None and step >= config.ema_start_step:
+            update_ema_model(
+                ema_model,
+                model,
+                decay=config.ema_decay,
+                initialize=not ema_initialized,
+            )
+            ema_initialized = True
         if step == 1 or step % config.log_interval == 0:
             row = {
                 "step": float(step),
@@ -595,6 +692,19 @@ def train(
                 step=step,
                 generator=generator,
             )
+            if ema_model is not None and ema_initialized:
+                save_checkpoint(
+                    output_directory / "checkpoint_ema.pt",
+                    model=ema_model,
+                    optimizer=optimizer,
+                    config=config,
+                    step=step,
+                    generator=generator,
+                    averaging={
+                        "decay": config.ema_decay,
+                        "start_step": config.ema_start_step,
+                    },
+                )
         if step % config.eval_interval == 0 or step == config.steps:
             per_length = evaluate_lengths(
                 model,
@@ -604,15 +714,29 @@ def train(
                 seed=config.seed + 20_000,
                 device=device,
             )
-            evaluations.append(
-                {
-                    "step": step,
-                    "per_length": {
-                        str(length): metrics
-                        for length, metrics in per_length.items()
-                    },
+            ema_per_length = None
+            if ema_model is not None and ema_initialized:
+                ema_per_length = evaluate_lengths(
+                    ema_model,
+                    vocabulary,
+                    selected_evaluation_lengths(config),
+                    config=config,
+                    seed=config.seed + 20_000,
+                    device=device,
+                )
+            evaluation = {
+                "step": step,
+                "per_length": {
+                    str(length): metrics
+                    for length, metrics in per_length.items()
+                },
+            }
+            if ema_per_length is not None:
+                evaluation["ema_per_length"] = {
+                    str(length): metrics
+                    for length, metrics in ema_per_length.items()
                 }
-            )
+            evaluations.append(evaluation)
             print(
                 json.dumps(
                     {
@@ -625,21 +749,48 @@ def train(
                             str(length): metrics["next_value_token_accuracy"]
                             for length, metrics in per_length.items()
                         },
+                        "ema_evaluation_complete_trace_accuracy": (
+                            {
+                                str(length): metrics[
+                                    "complete_trace_accuracy"
+                                ]
+                                for length, metrics in ema_per_length.items()
+                            }
+                            if ema_per_length is not None
+                            else None
+                        ),
+                        "ema_evaluation_next_value_token_accuracy": (
+                            {
+                                str(length): metrics[
+                                    "next_value_token_accuracy"
+                                ]
+                                for length, metrics in ema_per_length.items()
+                            }
+                            if ema_per_length is not None
+                            else None
+                        ),
                     }
                 ),
                 flush=True,
             )
             if tracker is not None:
-                tracker.log(
-                    {
-                        "step": step,
-                        **{
-                            f"eval/length_{length}/{name}": value
-                            for length, metrics in per_length.items()
+                tracking_metrics = {
+                    "step": step,
+                    **{
+                        f"eval/length_{length}/{name}": value
+                        for length, metrics in per_length.items()
+                        for name, value in metrics.items()
+                    },
+                }
+                if ema_per_length is not None:
+                    tracking_metrics.update(
+                        {
+                            f"eval_ema/length_{length}/{name}": value
+                            for length, metrics in ema_per_length.items()
                             for name, value in metrics.items()
-                        },
-                    }
-                )
+                        }
+                    )
+                tracker.log(tracking_metrics)
             model.train()
     save_checkpoint(
         output_directory / "checkpoint.pt",
@@ -649,6 +800,19 @@ def train(
         step=config.steps,
         generator=generator,
     )
+    if ema_model is not None and ema_initialized:
+        save_checkpoint(
+            output_directory / "checkpoint_ema.pt",
+            model=ema_model,
+            optimizer=optimizer,
+            config=config,
+            step=config.steps,
+            generator=generator,
+            averaging={
+                "decay": config.ema_decay,
+                "start_step": config.ema_start_step,
+            },
+        )
     final_per_length = evaluate_lengths(
         model,
         vocabulary,
@@ -657,6 +821,16 @@ def train(
         seed=config.seed + 30_000,
         device=device,
     )
+    final_ema_per_length = None
+    if ema_model is not None and ema_initialized:
+        final_ema_per_length = evaluate_lengths(
+            ema_model,
+            vocabulary,
+            selected_evaluation_lengths(config),
+            config=config,
+            seed=config.seed + 30_000,
+            device=device,
+        )
     results = {
         "probe": "pointer_next_value_from_position",
         "model_config": model.encoder.config.as_dict(),
@@ -676,6 +850,16 @@ def train(
             train_max_length=config.train_max_length,
         ),
     }
+    if final_ema_per_length is not None:
+        results["final_ema_per_length"] = {
+            str(length): metrics
+            for length, metrics in final_ema_per_length.items()
+        }
+        results["final_ema_aggregate"] = aggregate_length_ranges(
+            final_ema_per_length,
+            train_min_length=config.train_min_length,
+            train_max_length=config.train_max_length,
+        )
     (output_directory / "metrics.json").write_text(
         json.dumps(results, indent=2, sort_keys=True) + "\n"
     )
@@ -692,6 +876,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--warmup-steps", type=int, default=500)
+    parser.add_argument("--learning-rate-decay-start", type=int)
+    parser.add_argument("--minimum-learning-rate", type=float, default=0.0)
+    parser.add_argument("--ema-decay", type=float, default=0.0)
+    parser.add_argument("--ema-start-step", type=int, default=0)
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--gradient-clip", type=float, default=1.0)
     parser.add_argument("--gradient-noise-scale", type=float, default=0.0)
@@ -766,6 +954,10 @@ def main() -> None:
         batch_size=args.batch_size,
         learning_rate=args.learning_rate,
         warmup_steps=args.warmup_steps,
+        learning_rate_decay_start=args.learning_rate_decay_start,
+        minimum_learning_rate=args.minimum_learning_rate,
+        ema_decay=args.ema_decay,
+        ema_start_step=args.ema_start_step,
         weight_decay=args.weight_decay,
         gradient_clip=args.gradient_clip,
         gradient_noise_scale=args.gradient_noise_scale,
@@ -877,6 +1069,7 @@ def main() -> None:
                 "completed": True,
                 "output_directory": str(args.output_directory),
                 "aggregate": results["final_aggregate"],
+                "ema_aggregate": results.get("final_ema_aggregate"),
             }
         ),
         flush=True,

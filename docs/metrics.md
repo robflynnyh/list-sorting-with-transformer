@@ -60,6 +60,11 @@ in-domain checks, while lengths 25 and 40 test length extrapolation. When
 `eval_max_length` exceeds 400, length 400 remains an explicit checkpoint in
 addition to the configured maximum.
 
+Stage-5 runs with EMA enabled also log the same metrics under
+`eval_ema/length_N/`. These use the predetermined moving-average model on the
+exact same examples as `eval/length_N/`; they are not selected from prior
+checkpoints using evaluation performance.
+
 ## Free-Generation Metrics
 
 These metrics evaluate autoregressive rollouts under the task's configured

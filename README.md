@@ -164,7 +164,11 @@ Stage 5 uses pair batches whose pointer is never placed on the final list item,
 so every computed `p+3` address has a real following value. It starts from the
 Stage-4 checkpoint and uses a frozen copy of that checkpoint to distil all
 three inherited addresses and the marked-value token while learning the new
-retrieval target.
+retrieval target. Stage-5 training optionally supports cosine learning-rate
+decay and a predetermined exponential moving average (EMA) of model weights.
+Raw and EMA models are evaluated on the same examples and saved separately,
+which allows endpoint stability to be measured without selecting a favorable
+intermediate checkpoint.
 
 On half of Stage-4 training examples, the final
 query's attention is restricted to `address(4)`. This encourages the new
