@@ -11,6 +11,7 @@ from list_sorting_transformer.pointer_compare_values import (
     generated_stage_six_metrics,
     load_stage_five_checkpoint,
     pointer_compare_loss_and_metrics,
+    stage_five_parameter_anchor_loss,
     target_action_classes,
 )
 from list_sorting_transformer.pointer_next_value_from_position import (
@@ -211,6 +212,35 @@ def test_stage_six_loss_trains_actions_and_keeps_teacher_frozen() -> None:
         > 0
     )
     assert all(parameter.grad is None for parameter in teacher.parameters())
+
+
+def test_parameter_anchor_excludes_only_new_action_rows() -> None:
+    torch.manual_seed(7)
+    vocabulary = PointerCompareVocabulary("numbers", 10)
+    model = stage_six_model()
+    teacher = ModularNextValueFromPositionModel(
+        model_config(vocabulary.action_token_offset),
+        MODULI,
+    )
+    target_state = model.state_dict()
+    for name, source in teacher.state_dict().items():
+        if name == "encoder.token_embedding.weight":
+            target_state[name][: source.shape[0]].copy_(source)
+        else:
+            target_state[name].copy_(source)
+    model.load_state_dict(target_state)
+
+    assert stage_five_parameter_anchor_loss(model, teacher).item() == 0
+    with torch.no_grad():
+        model.encoder.token_embedding.weight[
+            vocabulary.action_token_offset :
+        ].add_(1.0)
+    assert stage_five_parameter_anchor_loss(model, teacher).item() == 0
+    with torch.no_grad():
+        model.token_query_projection.weight[0, 0].add_(0.25)
+    assert stage_five_parameter_anchor_loss(model, teacher).item() == (
+        pytest.approx(0.25**2)
+    )
 
 
 def test_complete_trace_requires_the_comparison_action() -> None:

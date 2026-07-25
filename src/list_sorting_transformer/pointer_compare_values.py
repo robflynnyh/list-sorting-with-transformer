@@ -46,6 +46,7 @@ class PointerCompareConfig(NextValueFromPositionConfig):
     action_attention_isolation_probability: float = 0.5
     action_consistency_weight: float = 1.0
     stage_five_distillation_weight: float = 1.0
+    stage_five_parameter_anchor_weight: float = 0.0
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -56,6 +57,10 @@ class PointerCompareConfig(NextValueFromPositionConfig):
         if self.stage_five_distillation_weight < 0:
             raise ValueError(
                 "stage_five_distillation_weight must be nonnegative"
+            )
+        if self.stage_five_parameter_anchor_weight < 0:
+            raise ValueError(
+                "stage_five_parameter_anchor_weight must be nonnegative"
             )
         if not 0 <= self.action_attention_isolation_probability <= 1:
             raise ValueError(
@@ -439,6 +444,33 @@ def stage_five_distillation_loss(
     return torch.stack(losses).mean()
 
 
+def stage_five_parameter_anchor_loss(
+    model: ModularPointerCompareModel,
+    teacher: ModularNextValueFromPositionModel,
+) -> Tensor:
+    """Squared L2 distance from all inherited Stage-5 parameters."""
+
+    teacher_parameters = dict(teacher.named_parameters())
+    loss = next(model.parameters()).new_zeros(())
+    embedding_name = "encoder.token_embedding.weight"
+    for name, parameter in model.named_parameters():
+        source = teacher_parameters.get(name)
+        if source is None:
+            raise ValueError(f"Stage-5 teacher is missing parameter: {name}")
+        if name == embedding_name:
+            inherited = parameter[: source.shape[0]]
+            if inherited.shape != source.shape:
+                raise ValueError("Stage-5 token embedding shape mismatch")
+        else:
+            inherited = parameter
+            if inherited.shape != source.shape:
+                raise ValueError(
+                    f"Stage-5 parameter shape mismatch: {name}"
+                )
+        loss = loss + (inherited - source.detach()).square().sum()
+    return loss
+
+
 def pointer_compare_loss_and_metrics(
     model: ModularPointerCompareModel,
     batch: PointerNextBatch,
@@ -498,11 +530,19 @@ def pointer_compare_loss_and_metrics(
             batch,
             offsets,
         )
+    parameter_anchor_loss = student_query.new_zeros(())
+    if stage_five_teacher is not None:
+        parameter_anchor_loss = stage_five_parameter_anchor_loss(
+            model,
+            stage_five_teacher,
+        )
     total_loss = (
         inherited_loss
         + config.action_loss_weight * action_loss
         + config.action_consistency_weight * consistency_loss
         + config.stage_five_distillation_weight * distillation_loss
+        + config.stage_five_parameter_anchor_weight
+        * parameter_anchor_loss
     )
     return total_loss, {
         **metrics,
@@ -514,6 +554,9 @@ def pointer_compare_loss_and_metrics(
         "action_consistency_loss": float(consistency_loss.detach().item()),
         "stage_five_distillation_loss": float(
             distillation_loss.detach().item()
+        ),
+        "stage_five_parameter_anchor_loss": float(
+            parameter_anchor_loss.detach().item()
         ),
         "action_attention_isolation_fraction": (
             float(isolate_action.float().mean().item())
@@ -960,6 +1003,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
     )
+    parser.add_argument(
+        "--stage-five-parameter-anchor-weight",
+        type=float,
+        default=0.0,
+    )
     parser.add_argument("--log-interval", type=int, default=250)
     parser.add_argument("--eval-interval", type=int, default=1_000)
     parser.add_argument("--eval-examples", type=int, default=512)
@@ -1051,6 +1099,9 @@ def main() -> None:
         action_consistency_weight=args.action_consistency_weight,
         stage_five_distillation_weight=(
             args.stage_five_distillation_weight
+        ),
+        stage_five_parameter_anchor_weight=(
+            args.stage_five_parameter_anchor_weight
         ),
     )
     torch.manual_seed(config.seed)
