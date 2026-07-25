@@ -8,6 +8,7 @@ from list_sorting_transformer.model import ModelConfig
 from list_sorting_transformer.pointer_compare_values import (
     ModularPointerCompareModel,
     PointerCompareConfig,
+    action_logit_distillation_scale_at_step,
     generated_stage_six_metrics,
     load_stage_five_checkpoint,
     pointer_compare_loss_and_metrics,
@@ -243,6 +244,22 @@ def test_parameter_anchor_excludes_only_new_action_rows() -> None:
     assert stage_five_parameter_anchor_loss(model, teacher).item() == (
         pytest.approx(0.25**2)
     )
+
+
+def test_action_logit_distillation_has_a_predetermined_ramp() -> None:
+    config = PointerCompareConfig(
+        eval_max_length=40,
+        position_moduli=MODULI,
+        position_offset_min=-50,
+        position_offset_max=50,
+        action_logit_distillation_start_step=2_000,
+        action_logit_distillation_ramp_steps=1_000,
+    )
+
+    assert action_logit_distillation_scale_at_step(config, 2_000) == 0
+    assert action_logit_distillation_scale_at_step(config, 2_500) == 0.5
+    assert action_logit_distillation_scale_at_step(config, 3_000) == 1
+    assert action_logit_distillation_scale_at_step(config, 8_000) == 1
 
 
 def test_complete_trace_requires_the_comparison_action() -> None:

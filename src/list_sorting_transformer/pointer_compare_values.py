@@ -46,6 +46,8 @@ class PointerCompareConfig(NextValueFromPositionConfig):
     action_attention_isolation_probability: float = 0.5
     action_consistency_weight: float = 1.0
     action_logit_distillation_weight: float = 0.0
+    action_logit_distillation_start_step: int = 0
+    action_logit_distillation_ramp_steps: int = 0
     stage_five_distillation_weight: float = 1.0
     stage_five_parameter_anchor_weight: float = 0.0
 
@@ -58,6 +60,14 @@ class PointerCompareConfig(NextValueFromPositionConfig):
         if self.action_logit_distillation_weight < 0:
             raise ValueError(
                 "action_logit_distillation_weight must be nonnegative"
+            )
+        if self.action_logit_distillation_start_step < 0:
+            raise ValueError(
+                "action_logit_distillation_start_step must be nonnegative"
+            )
+        if self.action_logit_distillation_ramp_steps < 0:
+            raise ValueError(
+                "action_logit_distillation_ramp_steps must be nonnegative"
             )
         if self.stage_five_distillation_weight < 0:
             raise ValueError(
@@ -476,6 +486,21 @@ def stage_five_parameter_anchor_loss(
     return loss
 
 
+def action_logit_distillation_scale_at_step(
+    config: PointerCompareConfig,
+    step: int,
+) -> float:
+    if step <= config.action_logit_distillation_start_step:
+        return 0.0
+    if config.action_logit_distillation_ramp_steps == 0:
+        return 1.0
+    return min(
+        1.0,
+        (step - config.action_logit_distillation_start_step)
+        / config.action_logit_distillation_ramp_steps,
+    )
+
+
 def pointer_compare_loss_and_metrics(
     model: ModularPointerCompareModel,
     batch: PointerNextBatch,
@@ -486,7 +511,12 @@ def pointer_compare_loss_and_metrics(
     isolate_next_value_position: Tensor | None = None,
     isolate_action: Tensor | None = None,
     stage_five_teacher: ModularNextValueFromPositionModel | None = None,
+    action_logit_distillation_scale: float = 1.0,
 ) -> tuple[Tensor, dict[str, float]]:
+    if not 0 <= action_logit_distillation_scale <= 1:
+        raise ValueError(
+            "action_logit_distillation_scale must be in [0, 1]"
+        )
     inherited_loss, metrics = next_value_token_loss_and_metrics(
         model,
         batch,
@@ -528,9 +558,16 @@ def pointer_compare_loss_and_metrics(
                 masked_target / masked_rms,
             )
             action_logit_distillation_loss = (
-                relative_logit_distillation_loss(
-                    student_logits[isolate_action],
-                    masked_logits[isolate_action],
+                F.kl_div(
+                    F.log_softmax(
+                        student_logits[isolate_action],
+                        dim=-1,
+                    ),
+                    F.softmax(
+                        masked_logits[isolate_action].detach(),
+                        dim=-1,
+                    ),
+                    reduction="batchmean",
                 )
             )
     action_loss = 0.5 * (student_loss + masked_loss)
@@ -553,6 +590,7 @@ def pointer_compare_loss_and_metrics(
         + config.action_loss_weight * action_loss
         + config.action_consistency_weight * consistency_loss
         + config.action_logit_distillation_weight
+        * action_logit_distillation_scale
         * action_logit_distillation_loss
         + config.stage_five_distillation_weight * distillation_loss
         + config.stage_five_parameter_anchor_weight
@@ -568,6 +606,9 @@ def pointer_compare_loss_and_metrics(
         "action_consistency_loss": float(consistency_loss.detach().item()),
         "action_logit_distillation_loss": float(
             action_logit_distillation_loss.detach().item()
+        ),
+        "action_logit_distillation_scale": (
+            action_logit_distillation_scale
         ),
         "stage_five_distillation_loss": float(
             distillation_loss.detach().item()
@@ -838,6 +879,9 @@ def train(
                 isolate_next_value_position=isolate_next_value_position,
                 isolate_action=isolate_action,
                 stage_five_teacher=stage_five_teacher,
+                action_logit_distillation_scale=(
+                    action_logit_distillation_scale_at_step(config, step)
+                ),
             )
         loss.backward()
         noise_std = add_gradient_noise(model, config=config, step=step)
@@ -1021,6 +1065,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=0.0,
     )
     parser.add_argument(
+        "--action-logit-distillation-start-step",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
+        "--action-logit-distillation-ramp-steps",
+        type=int,
+        default=0,
+    )
+    parser.add_argument(
         "--stage-five-distillation-weight",
         type=float,
         default=1.0,
@@ -1121,6 +1175,12 @@ def main() -> None:
         action_consistency_weight=args.action_consistency_weight,
         action_logit_distillation_weight=(
             args.action_logit_distillation_weight
+        ),
+        action_logit_distillation_start_step=(
+            args.action_logit_distillation_start_step
+        ),
+        action_logit_distillation_ramp_steps=(
+            args.action_logit_distillation_ramp_steps
         ),
         stage_five_distillation_weight=(
             args.stage_five_distillation_weight

@@ -52,7 +52,8 @@ so charts should use the project metric `step` as their x-axis.
 | `train/unrestricted_action_loss` | `KEEP`/`SWAP` cross-entropy from the branch used at evaluation. |
 | `train/masked_action_loss` | `KEEP`/`SWAP` cross-entropy when sampled final queries can use only the two retrieved values. |
 | `train/action_consistency_loss` | Relative query MSE that trains the unrestricted action branch to match the detached masked branch on isolated examples. |
-| `train/action_logit_distillation_loss` | Centered, scale-normalized MSE that trains unrestricted `KEEP`/`SWAP` logits to match the detached masked branch on isolated examples. |
+| `train/action_logit_distillation_loss` | KL divergence that trains unrestricted `KEEP`/`SWAP` probabilities to match the detached masked branch on isolated examples. |
+| `train/action_logit_distillation_scale` | Predetermined ramp multiplier applied to action-logit distillation after its configured start step. |
 | `train/stage_five_distillation_loss` | Mean centered, teacher-scale-normalized logit MSE against the frozen Stage-5 checkpoint over all inherited addresses and retrieved-token outputs. |
 | `train/stage_five_parameter_anchor_loss` | Sum of squared parameter displacement from the incoming Stage-5 checkpoint. The new `KEEP`/`SWAP` embedding rows are excluded. |
 | `train/action_attention_isolation_fraction` | Fraction of the Stage-6 batch whose masked action query can use only the marked and following value items. |
