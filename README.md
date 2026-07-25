@@ -41,6 +41,17 @@ but not the unrelated stack-like task. See the
 [full report](docs/rasp_transfer_report.md) for multi-seed tables, learning
 curves, mechanistic route diagnostics, limitations, and reproduction commands.
 
+## Language-Model Transfer
+
+A second controlled benchmark places the two useful compiled routing blocks in
+the middle of a six-layer byte language model and compares them with matched
+random initialization on an immutable slice of The Pile. Unlike the aligned
+puzzle tasks, the compiled circuit does not improve language modelling and
+introduces dead feed-forward capacity. The
+[language-model transfer report](docs/language_model_transfer_report.md)
+contains the multi-seed results, plots, initialization audit, and reproduction
+commands.
+
 ## Pointer-Value Probe
 
 The `pointer_value` task is the first autoregressive stage after the

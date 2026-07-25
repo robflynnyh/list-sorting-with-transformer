@@ -1,0 +1,658 @@
+{
+  "data": {
+    "source_path": "/store/store4/data/thepile/00.jsonl",
+    "source_size_bytes": 45654792897,
+    "source_mtime_ns": 0,
+    "split_rule": "document_index % 20 == 0 is validation",
+    "documents_read": 16281,
+    "train_documents": 4954,
+    "validation_documents": 815,
+    "train_bytes": 32000000,
+    "validation_bytes": 4000000,
+    "train_sha256": "b51c1b120938a38f6e323dc63a7a87c51d2d9ed88e1b517844ecde97d308f264",
+    "validation_sha256": "35a765a9bbdb53c142bcdb0dc5a8bb1e71ae64cff3a0d495df274d7df154f199",
+    "tokenization": "raw UTF-8 bytes, vocabulary size 256"
+  },
+  "shared_config": {
+    "data_path": "/store/store4/data/thepile/00.jsonl",
+    "steps": 5000,
+    "batch_size": 64,
+    "sequence_length": 256,
+    "train_bytes": 32000000,
+    "validation_bytes": 4000000,
+    "validation_document_stride": 20,
+    "evaluation_batches": 20,
+    "learning_rate": 0.0003,
+    "minimum_learning_rate": 3e-05,
+    "warmup_steps": 100,
+    "weight_decay": 0.01,
+    "gradient_clip": 1.0,
+    "precision": "bf16",
+    "d_model": 128,
+    "n_layers": 6,
+    "n_heads": 4,
+    "ffn_multiplier": 4.0,
+    "position_moduli": [
+      2,
+      3,
+      5,
+      7,
+      11,
+      13,
+      17,
+      19
+    ]
+  },
+  "initializations": {
+    "random": {
+      "seeds": [
+        7,
+        17,
+        29
+      ],
+      "by_step": {
+        "0": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 5.579016081492106,
+            "std": 0.018794558300012625
+          },
+          "bits_per_byte": {
+            "mean": 8.048818833808438,
+            "std": 0.027114816055126147
+          },
+          "byte_perplexity": {
+            "mean": 264.8420176942944,
+            "std": 4.956107750992612
+          },
+          "next_byte_accuracy": {
+            "mean": 0.00283203125,
+            "std": 0.000991088596554919
+          },
+          "middle_parameter_norm": {
+            "mean": 26.870637359667032,
+            "std": 0.0054117963632116135
+          },
+          "middle_relative_drift": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "training_bytes_per_second": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        },
+        "10": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 5.564418443044026,
+            "std": 0.01954652594745325
+          },
+          "bits_per_byte": {
+            "mean": 8.027758893210704,
+            "std": 0.028199676050998164
+          },
+          "byte_perplexity": {
+            "mean": 261.00652806649333,
+            "std": 5.078898064686885
+          },
+          "next_byte_accuracy": {
+            "mean": 0.0036102294921875,
+            "std": 0.0015164104422305457
+          },
+          "middle_parameter_norm": {
+            "mean": 26.87100758695108,
+            "std": 0.0050222433512712794
+          },
+          "middle_relative_drift": {
+            "mean": 0.0037233443930229115,
+            "std": 2.7271067722347157e-05
+          },
+          "training_bytes_per_second": {
+            "mean": 155498.5664367693,
+            "std": 5554.4601104909625
+          }
+        },
+        "50": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 4.4675501982371015,
+            "std": 0.03624915873045732
+          },
+          "bits_per_byte": {
+            "mean": 6.445312515919171,
+            "std": 0.05229648153682767
+          },
+          "byte_perplexity": {
+            "mean": 87.18097763120626,
+            "std": 3.1381118073420007
+          },
+          "next_byte_accuracy": {
+            "mean": 0.16436360677083334,
+            "std": 0.00021610094469901224
+          },
+          "middle_parameter_norm": {
+            "mean": 27.083447779624482,
+            "std": 0.0014816269929534814
+          },
+          "middle_relative_drift": {
+            "mean": 0.09059895576505357,
+            "std": 0.0006321990554154295
+          },
+          "training_bytes_per_second": {
+            "mean": 419145.06280410726,
+            "std": 9841.058112225743
+          }
+        },
+        "100": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 3.5033361196517947,
+            "std": 0.012637543540420727
+          },
+          "bits_per_byte": {
+            "mean": 5.054245646388828,
+            "std": 0.01823212139478325
+          },
+          "byte_perplexity": {
+            "mean": 33.22788511906777,
+            "std": 0.420877619850496
+          },
+          "next_byte_accuracy": {
+            "mean": 0.16436360677083334,
+            "std": 0.00021610094469901224
+          },
+          "middle_parameter_norm": {
+            "mean": 27.43401484945808,
+            "std": 0.00417707035885989
+          },
+          "middle_relative_drift": {
+            "mean": 0.161153567739259,
+            "std": 0.0012458171728111957
+          },
+          "training_bytes_per_second": {
+            "mean": 533448.6224196797,
+            "std": 12356.655062518425
+          }
+        },
+        "250": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 3.45009319782257,
+            "std": 0.012058362111433888
+          },
+          "bits_per_byte": {
+            "mean": 4.977432347103369,
+            "std": 0.017396539219409195
+          },
+          "byte_perplexity": {
+            "mean": 31.504858097349555,
+            "std": 0.38099344393647266
+          },
+          "next_byte_accuracy": {
+            "mean": 0.16436360677083334,
+            "std": 0.00021610094469901224
+          },
+          "middle_parameter_norm": {
+            "mean": 27.465179505884393,
+            "std": 0.008053262491865715
+          },
+          "middle_relative_drift": {
+            "mean": 0.16959571096547835,
+            "std": 0.0012503053113748473
+          },
+          "training_bytes_per_second": {
+            "mean": 664324.013372538,
+            "std": 24336.295186501826
+          }
+        },
+        "500": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 2.891615227858226,
+            "std": 0.030833439359661992
+          },
+          "bits_per_byte": {
+            "mean": 4.171718949390072,
+            "std": 0.04448325005773505
+          },
+          "byte_perplexity": {
+            "mean": 18.02809631612383,
+            "std": 0.5540746415274229
+          },
+          "next_byte_accuracy": {
+            "mean": 0.24068400065104165,
+            "std": 0.004879468090386367
+          },
+          "middle_parameter_norm": {
+            "mean": 28.583198439527067,
+            "std": 0.17757943400357398
+          },
+          "middle_relative_drift": {
+            "mean": 0.32471724050201095,
+            "std": 0.018490487419765087
+          },
+          "training_bytes_per_second": {
+            "mean": 727173.717379503,
+            "std": 28603.743562275897
+          }
+        },
+        "1000": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 2.6988846580187484,
+            "std": 0.03714846884993068
+          },
+          "bits_per_byte": {
+            "mean": 3.8936675120549538,
+            "std": 0.05359391178641315
+          },
+          "byte_perplexity": {
+            "mean": 14.869945299960085,
+            "std": 0.5477325804476676
+          },
+          "next_byte_accuracy": {
+            "mean": 0.260760498046875,
+            "std": 0.007947765822101972
+          },
+          "middle_parameter_norm": {
+            "mean": 29.107858452188868,
+            "std": 0.3599019382787635
+          },
+          "middle_relative_drift": {
+            "mean": 0.38068925291423267,
+            "std": 0.03225182122279746
+          },
+          "training_bytes_per_second": {
+            "mean": 770335.0649325218,
+            "std": 14538.50909631313
+          }
+        },
+        "2000": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 2.3552596966425576,
+            "std": 0.0734213121185727
+          },
+          "bits_per_byte": {
+            "mean": 3.3979214843518624,
+            "std": 0.10592456288902571
+          },
+          "byte_perplexity": {
+            "mean": 10.55969447445247,
+            "std": 0.767352628533441
+          },
+          "next_byte_accuracy": {
+            "mean": 0.34928995768229165,
+            "std": 0.019919662804665447
+          },
+          "middle_parameter_norm": {
+            "mean": 29.8354126038473,
+            "std": 0.5846921527459755
+          },
+          "middle_relative_drift": {
+            "mean": 0.44791039669327826,
+            "std": 0.047547112886752646
+          },
+          "training_bytes_per_second": {
+            "mean": 787200.4477522363,
+            "std": 22610.631156930292
+          }
+        },
+        "5000": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 2.097782729069392,
+            "std": 0.08792219169169899
+          },
+          "bits_per_byte": {
+            "mean": 3.0264607400909274,
+            "std": 0.12684490993770287
+          },
+          "byte_perplexity": {
+            "mean": 8.16942015036098,
+            "std": 0.7341250075926422
+          },
+          "next_byte_accuracy": {
+            "mean": 0.41276448567708335,
+            "std": 0.023668053521038443
+          },
+          "middle_parameter_norm": {
+            "mean": 30.431466410647705,
+            "std": 0.6999020893268879
+          },
+          "middle_relative_drift": {
+            "mean": 0.4988359670901814,
+            "std": 0.0515598637589734
+          },
+          "training_bytes_per_second": {
+            "mean": 800611.1347288244,
+            "std": 29385.389739411577
+          }
+        }
+      }
+    },
+    "compiled_middle": {
+      "seeds": [
+        7,
+        17,
+        29
+      ],
+      "by_step": {
+        "0": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 5.582326634724935,
+            "std": 0.016174867809072773
+          },
+          "bits_per_byte": {
+            "mean": 8.05359495254004,
+            "std": 0.0233354015751843
+          },
+          "byte_perplexity": {
+            "mean": 265.7121938732733,
+            "std": 4.290579481694559
+          },
+          "next_byte_accuracy": {
+            "mean": 0.0031463623046875003,
+            "std": 0.0008431526913206369
+          },
+          "middle_parameter_norm": {
+            "mean": 31.089452828064335,
+            "std": 0.0
+          },
+          "middle_relative_drift": {
+            "mean": 0.0,
+            "std": 0.0
+          },
+          "training_bytes_per_second": {
+            "mean": 0.0,
+            "std": 0.0
+          }
+        },
+        "10": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 5.56848119099935,
+            "std": 0.01911801774882393
+          },
+          "bits_per_byte": {
+            "mean": 8.033620199538229,
+            "std": 0.02758146939785475
+          },
+          "byte_perplexity": {
+            "mean": 262.06768165520936,
+            "std": 4.996222608224303
+          },
+          "next_byte_accuracy": {
+            "mean": 0.0034830729166666664,
+            "std": 0.0011601189522789904
+          },
+          "middle_parameter_norm": {
+            "mean": 31.08988077816554,
+            "std": 3.9171342142826455e-05
+          },
+          "middle_relative_drift": {
+            "mean": 0.0006694911739259995,
+            "std": 2.9228392911782857e-05
+          },
+          "training_bytes_per_second": {
+            "mean": 160874.24974222697,
+            "std": 7054.502660531824
+          }
+        },
+        "50": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 4.6996692816416425,
+            "std": 0.03206240636101602
+          },
+          "bits_per_byte": {
+            "mean": 6.780189566442594,
+            "std": 0.04625627465600445
+          },
+          "byte_perplexity": {
+            "mean": 109.94871294233337,
+            "std": 3.5569092295720237
+          },
+          "next_byte_accuracy": {
+            "mean": 0.1641143798828125,
+            "std": 0.0005184486553746429
+          },
+          "middle_parameter_norm": {
+            "mean": 31.113574714680055,
+            "std": 0.002055027232086634
+          },
+          "middle_relative_drift": {
+            "mean": 0.013654462818258767,
+            "std": 0.0006378511961565063
+          },
+          "training_bytes_per_second": {
+            "mean": 427192.33967738337,
+            "std": 14929.015243912374
+          }
+        },
+        "100": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 3.4957402308781944,
+            "std": 0.011500518801516445
+          },
+          "bits_per_byte": {
+            "mean": 5.04328709532401,
+            "std": 0.016591741442598125
+          },
+          "byte_perplexity": {
+            "mean": 32.97614443792603,
+            "std": 0.38035130776176235
+          },
+          "next_byte_accuracy": {
+            "mean": 0.16436360677083334,
+            "std": 0.00021610094469901224
+          },
+          "middle_parameter_norm": {
+            "mean": 31.12616113569578,
+            "std": 0.007775090973334432
+          },
+          "middle_relative_drift": {
+            "mean": 0.023872589830321103,
+            "std": 0.00024568220817332086
+          },
+          "training_bytes_per_second": {
+            "mean": 540582.310199791,
+            "std": 20566.055524195603
+          }
+        },
+        "250": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 3.448836326599121,
+            "std": 0.01074856036734492
+          },
+          "bits_per_byte": {
+            "mean": 4.975619065222261,
+            "std": 0.015506894738663913
+          },
+          "byte_perplexity": {
+            "mean": 31.464970953073628,
+            "std": 0.3389493673225165
+          },
+          "next_byte_accuracy": {
+            "mean": 0.16436360677083334,
+            "std": 0.00021610094469901224
+          },
+          "middle_parameter_norm": {
+            "mean": 31.11538430345486,
+            "std": 0.011595794432057206
+          },
+          "middle_relative_drift": {
+            "mean": 0.024755822458615784,
+            "std": 0.0003654892807513618
+          },
+          "training_bytes_per_second": {
+            "mean": 662441.997784272,
+            "std": 553.8270219701203
+          }
+        },
+        "500": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 2.943846821784973,
+            "std": 0.03574183699923714
+          },
+          "bits_per_byte": {
+            "mean": 4.247073210925917,
+            "std": 0.051564570991060925
+          },
+          "byte_perplexity": {
+            "mean": 18.996826746753023,
+            "std": 0.6773149747032383
+          },
+          "next_byte_accuracy": {
+            "mean": 0.2352752685546875,
+            "std": 0.006532081399366243
+          },
+          "middle_parameter_norm": {
+            "mean": 31.12471469769679,
+            "std": 0.011554358398684192
+          },
+          "middle_relative_drift": {
+            "mean": 0.05498429260400909,
+            "std": 0.008399580413152434
+          },
+          "training_bytes_per_second": {
+            "mean": 736883.2375046709,
+            "std": 2694.320932602323
+          }
+        },
+        "1000": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 2.732684401671092,
+            "std": 0.018568438172006704
+          },
+          "bits_per_byte": {
+            "mean": 3.9424302346055082,
+            "std": 0.026788593667807475
+          },
+          "byte_perplexity": {
+            "mean": 15.375866342099611,
+            "std": 0.2848676971723302
+          },
+          "next_byte_accuracy": {
+            "mean": 0.25490620930989577,
+            "std": 0.0025054956421431377
+          },
+          "middle_parameter_norm": {
+            "mean": 31.102884829104777,
+            "std": 0.06556739532734644
+          },
+          "middle_relative_drift": {
+            "mean": 0.07777114430493458,
+            "std": 0.008871993333968117
+          },
+          "training_bytes_per_second": {
+            "mean": 756467.4379740362,
+            "std": 6278.986031399831
+          }
+        },
+        "2000": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 2.41793399254481,
+            "std": 0.08909130082421444
+          },
+          "bits_per_byte": {
+            "mean": 3.4883413802412497,
+            "std": 0.1285315778854409
+          },
+          "byte_perplexity": {
+            "mean": 11.2524374290103,
+            "std": 1.0053337777403633
+          },
+          "next_byte_accuracy": {
+            "mean": 0.3371978759765624,
+            "std": 0.021563896267022663
+          },
+          "middle_parameter_norm": {
+            "mean": 31.216355967752083,
+            "std": 0.11500783683623753
+          },
+          "middle_relative_drift": {
+            "mean": 0.11537237237057918,
+            "std": 0.01655333836129612
+          },
+          "training_bytes_per_second": {
+            "mean": 774804.8620103094,
+            "std": 13991.541851381011
+          }
+        },
+        "5000": {
+          "cross_entropy_nats_per_byte": {
+            "mean": 2.144947562615077,
+            "std": 0.08637924735359079
+          },
+          "bits_per_byte": {
+            "mean": 3.0945052115516405,
+            "std": 0.12461891179274662
+          },
+          "byte_perplexity": {
+            "mean": 8.56259565643398,
+            "std": 0.7255620500113663
+          },
+          "next_byte_accuracy": {
+            "mean": 0.40333251953125,
+            "std": 0.023168457918497334
+          },
+          "middle_parameter_norm": {
+            "mean": 31.205033109229074,
+            "std": 0.05963102882027365
+          },
+          "middle_relative_drift": {
+            "mean": 0.13663050515603342,
+            "std": 0.013215562663703039
+          },
+          "training_bytes_per_second": {
+            "mean": 788715.2430699962,
+            "std": 16006.733521426057
+          }
+        }
+      }
+    }
+  },
+  "paired_final": {
+    "seeds": [
+      7,
+      17,
+      29
+    ],
+    "compiled_minus_random_bits_per_byte": {
+      "by_seed": {
+        "7": 0.02393265853917681,
+        "17": 0.018222499164362027,
+        "29": 0.1619782566786001
+      },
+      "mean": 0.06804447146071298,
+      "std": 0.08139913073271458
+    },
+    "compiled_minus_random_next_byte_accuracy": {
+      "by_seed": {
+        "7": -0.001361083984375011,
+        "17": -0.0001983642578125,
+        "29": -0.02673645019531251
+      },
+      "mean": -0.00943196614583334,
+      "std": 0.014997394955612914
+    }
+  },
+  "initialization_diagnostics": {
+    "random": {
+      "middle_attention": {
+        "parameters": 131072,
+        "nonzero_at_initialization": 131072,
+        "nonzero_fraction": 1.0
+      },
+      "middle_ffn": {
+        "parameters": 393216,
+        "nonzero_at_initialization": 393216,
+        "nonzero_fraction": 1.0
+      }
+    },
+    "compiled_middle": {
+      "middle_attention": {
+        "parameters": 131072,
+        "nonzero_at_initialization": 336,
+        "nonzero_fraction": 0.0025634765625
+      },
+      "middle_ffn": {
+        "parameters": 393216,
+        "nonzero_at_initialization": 0,
+        "nonzero_fraction": 0.0
+      }
+    }
+  },
+  "run_count": 6
+}

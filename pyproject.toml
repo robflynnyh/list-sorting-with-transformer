@@ -32,6 +32,7 @@ sort-pointer-compare-values = "list_sorting_transformer.pointer_compare_values:m
 sort-compiled-pointer-compare = "list_sorting_transformer.compiled_pointer_compare:main"
 sort-residual-pointer-compare = "list_sorting_transformer.residual_pointer_compare:main"
 sort-rasp-transfer = "list_sorting_transformer.rasp_transfer:main"
+sort-language-model-transfer = "list_sorting_transformer.language_model_transfer:main"
 
 [build-system]
 requires = ["setuptools>=68"]
