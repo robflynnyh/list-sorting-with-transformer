@@ -63,6 +63,7 @@ def stage_six_config() -> PointerCompareConfig:
         stage_four_distillation_weight=0.0,
         action_attention_isolation_probability=0.5,
         action_consistency_weight=1.0,
+        action_logit_distillation_weight=1.0,
         stage_five_distillation_weight=1.0,
     )
 
@@ -197,6 +198,7 @@ def test_stage_six_loss_trains_actions_and_keeps_teacher_frozen() -> None:
     loss.backward()
 
     assert metrics["action_loss"] > 0
+    assert metrics["action_logit_distillation_loss"] > 0
     assert metrics["action_attention_isolation_fraction"] == pytest.approx(
         0.5
     )

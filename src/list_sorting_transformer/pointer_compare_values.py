@@ -45,6 +45,7 @@ class PointerCompareConfig(NextValueFromPositionConfig):
     action_loss_weight: float = 1.0
     action_attention_isolation_probability: float = 0.5
     action_consistency_weight: float = 1.0
+    action_logit_distillation_weight: float = 0.0
     stage_five_distillation_weight: float = 1.0
     stage_five_parameter_anchor_weight: float = 0.0
 
@@ -54,6 +55,10 @@ class PointerCompareConfig(NextValueFromPositionConfig):
             raise ValueError("action_loss_weight must be positive")
         if self.action_consistency_weight < 0:
             raise ValueError("action_consistency_weight must be nonnegative")
+        if self.action_logit_distillation_weight < 0:
+            raise ValueError(
+                "action_logit_distillation_weight must be nonnegative"
+            )
         if self.stage_five_distillation_weight < 0:
             raise ValueError(
                 "stage_five_distillation_weight must be nonnegative"
@@ -499,6 +504,7 @@ def pointer_compare_loss_and_metrics(
     masked_loss = student_loss
     masked_predictions = student_predictions
     consistency_loss = student_query.new_zeros(())
+    action_logit_distillation_loss = student_query.new_zeros(())
     if isolate_action is not None:
         masked_query = model.teacher_forced_action_query(
             batch,
@@ -521,6 +527,12 @@ def pointer_compare_loss_and_metrics(
                 student_target / masked_rms,
                 masked_target / masked_rms,
             )
+            action_logit_distillation_loss = (
+                relative_logit_distillation_loss(
+                    student_logits[isolate_action],
+                    masked_logits[isolate_action],
+                )
+            )
     action_loss = 0.5 * (student_loss + masked_loss)
     distillation_loss = student_query.new_zeros(())
     if stage_five_teacher is not None:
@@ -540,6 +552,8 @@ def pointer_compare_loss_and_metrics(
         inherited_loss
         + config.action_loss_weight * action_loss
         + config.action_consistency_weight * consistency_loss
+        + config.action_logit_distillation_weight
+        * action_logit_distillation_loss
         + config.stage_five_distillation_weight * distillation_loss
         + config.stage_five_parameter_anchor_weight
         * parameter_anchor_loss
@@ -552,6 +566,9 @@ def pointer_compare_loss_and_metrics(
         "unrestricted_action_loss": float(student_loss.detach().item()),
         "masked_action_loss": float(masked_loss.detach().item()),
         "action_consistency_loss": float(consistency_loss.detach().item()),
+        "action_logit_distillation_loss": float(
+            action_logit_distillation_loss.detach().item()
+        ),
         "stage_five_distillation_loss": float(
             distillation_loss.detach().item()
         ),
@@ -999,6 +1016,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=1.0,
     )
     parser.add_argument(
+        "--action-logit-distillation-weight",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
         "--stage-five-distillation-weight",
         type=float,
         default=1.0,
@@ -1097,6 +1119,9 @@ def main() -> None:
             args.action_attention_isolation_probability
         ),
         action_consistency_weight=args.action_consistency_weight,
+        action_logit_distillation_weight=(
+            args.action_logit_distillation_weight
+        ),
         stage_five_distillation_weight=(
             args.stage_five_distillation_weight
         ),
