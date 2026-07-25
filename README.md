@@ -181,6 +181,20 @@ EMA complete accuracy at length 400. Both endpoints remained 100% through
 length 40. See the stabilized [W&B
 run](https://wandb.ai/wobrob101/list-sorting-with-transformer/runs/vmryceek).
 
+Two 20,000-step schedule follow-ups did not materially improve this endpoint:
+
+| Stage-5 schedule | L400 next token | L400 complete |
+| --- | ---: | ---: |
+| Constant `3e-4` | 90.82% | 90.82% |
+| Decay to `1e-5` at step 10,000 | **97.07%** | **96.88%** |
+| Decay to `1e-5` at step 20,000 | 96.88% | **96.88%** |
+| 10,000-step decay endpoint | 96.88% | 96.68% |
+
+The extra low-rate updates therefore changed the endpoint by less than one
+512-example evaluation item. The important intervention was decaying the
+learning rate; extending training beyond 10,000 updates provided no meaningful
+complete-trace gain.
+
 On half of Stage-4 training examples, the final
 query's attention is restricted to `address(4)`. This encourages the new
 address to be computed as a local modular shift instead of recovered from the
