@@ -132,6 +132,10 @@ LOCAL_WINDOW_PAIR_ENCODINGS = (
 POINTER_NEXT_MARKERS = (
     "PTR",
 )
+POINTER_COMPARE_ACTIONS = (
+    "KEEP",
+    "SWAP",
+)
 _POINTER_ACTION_INDEX = {
     name: index for index, name in enumerate(POINTER_QUICKSORT_ACTIONS)
 }
@@ -158,6 +162,9 @@ _LOCAL_WINDOW_MARKER_INDEX = {
 }
 _POINTER_NEXT_MARKER_INDEX = {
     name: index for index, name in enumerate(POINTER_NEXT_MARKERS)
+}
+_POINTER_COMPARE_ACTION_INDEX = {
+    name: index for index, name in enumerate(POINTER_COMPARE_ACTIONS)
 }
 
 
@@ -848,6 +855,71 @@ class PointerNextVocabulary(SymbolVocabulary):
             elif self.marker_token_offset <= token < self.size:
                 rendered.append(
                     f"<{POINTER_NEXT_MARKERS[token - self.marker_token_offset]}>"
+                )
+            else:
+                rendered.append(f"<?>[{token}]")
+        return "".join(rendered)
+
+
+@dataclass(frozen=True)
+class PointerCompareVocabulary(PointerNextVocabulary):
+    """Extend pointer retrieval with local comparison actions."""
+
+    @property
+    def action_token_offset(self) -> int:
+        return super().size
+
+    @property
+    def size(self) -> int:
+        return self.action_token_offset + len(POINTER_COMPARE_ACTIONS)
+
+    @property
+    def action_tokens(self) -> tuple[int, ...]:
+        return tuple(
+            self.action_token_offset + index
+            for index in range(len(POINTER_COMPARE_ACTIONS))
+        )
+
+    def action_token(self, name: str) -> int:
+        try:
+            index = _POINTER_COMPARE_ACTION_INDEX[name]
+        except KeyError as error:
+            raise ValueError(
+                f"unknown pointer comparison action: {name}"
+            ) from error
+        return self.action_token_offset + index
+
+    def action_name(self, token: int) -> str:
+        index = int(token) - self.action_token_offset
+        if not 0 <= index < len(POINTER_COMPARE_ACTIONS):
+            raise ValueError(
+                f"token {token} is not a pointer comparison action"
+            )
+        return POINTER_COMPARE_ACTIONS[index]
+
+    def render_tokens(self, tokens: Sequence[int]) -> str:
+        rendered = []
+        for token_value in tokens:
+            token = int(token_value)
+            if token == PAD:
+                rendered.append("<pad>")
+            elif token == BOS:
+                rendered.append("<bos>")
+            elif token == SEP:
+                rendered.append("=")
+            elif token == EOS:
+                rendered.append("<eos>")
+            elif token == COMMA:
+                rendered.append(",")
+            elif VALUE_OFFSET <= token < VALUE_OFFSET + self.symbol_count:
+                rendered.append(self.render_value(self.token_value(token)))
+            elif self.marker_token_offset <= token < self.action_token_offset:
+                rendered.append(
+                    f"<{POINTER_NEXT_MARKERS[token - self.marker_token_offset]}>"
+                )
+            elif self.action_token_offset <= token < self.size:
+                rendered.append(
+                    f"<{POINTER_COMPARE_ACTIONS[token - self.action_token_offset]}>"
                 )
             else:
                 rendered.append(f"<?>[{token}]")

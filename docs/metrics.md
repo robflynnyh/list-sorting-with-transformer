@@ -47,6 +47,15 @@ so charts should use the project metric `step` as their x-axis.
 | `train/next_value_token_loss` | For Stage 5, cross-entropy for the list token stored at the generated Stage-4 target address. |
 | `train/stage_four_distillation_loss` | Mean centered, teacher-scale-normalized logit MSE against the frozen incoming Stage-4 checkpoint over every inherited address and marked-token output. |
 | `train/teacher_forced_next_value_token_accuracy` | Stage-5 next-value accuracy with all preceding addresses and the marked token supplied correctly. |
+| `train/stage_five_loss` | For Stage 6, the retained Stage-5 objective over all three addresses and both retrieved values. |
+| `train/action_loss` | Mean of the unrestricted and masked `KEEP`/`SWAP` cross-entropies. |
+| `train/unrestricted_action_loss` | `KEEP`/`SWAP` cross-entropy from the branch used at evaluation. |
+| `train/masked_action_loss` | `KEEP`/`SWAP` cross-entropy when sampled final queries can use only the two retrieved values. |
+| `train/action_consistency_loss` | Relative query MSE that trains the unrestricted action branch to match the detached masked branch on isolated examples. |
+| `train/stage_five_distillation_loss` | Mean centered, teacher-scale-normalized logit MSE against the frozen Stage-5 checkpoint over all inherited addresses and retrieved-token outputs. |
+| `train/action_attention_isolation_fraction` | Fraction of the Stage-6 batch whose masked action query can use only the marked and following value items. |
+| `train/teacher_forced_action_accuracy` | `KEEP`/`SWAP` accuracy from the unrestricted branch with the gold Stage-5 history supplied. |
+| `train/masked_action_accuracy` | `KEEP`/`SWAP` accuracy from the branch containing sampled isolated examples. |
 
 Older runs created before independent microbatch-length sampling may contain
 only `train/length`. In those runs, all accumulated microbatches used that same
@@ -110,6 +119,9 @@ executor assistance.
 | `stage_four_complete_trace_accuracy` | For Stage 5, whether all inherited Stage-4 addresses and the marked-value token were generated correctly. |
 | `next_value_token_accuracy` | For Stage 5, whether the token retrieved from the final computed address equals the value following `<PTR>`. |
 | `next_value_token_accuracy_given_correct_position` | Stage-5 token retrieval accuracy restricted to examples whose final modular address is correct. |
+| `stage_five_complete_trace_accuracy` | For Stage 6, whether all inherited addresses and both retrieved values were generated correctly before the action. |
+| `action_accuracy` | For Stage 6, whether the freely generated `KEEP` or `SWAP` action is correct. |
+| `action_accuracy_given_stage_five_correct` | Stage-6 action accuracy restricted to examples with a fully correct generated Stage-5 prefix. |
 | `full_target_token_accuracy` | Positional accuracy over the complete generated target. It equals action accuracy for fully executor-assisted runs and includes every model-generated observation or window for partial- and no-tool runs. |
 | `execution_completed` | Offline or interactive executor reached `DONE` without an invalid action. |
 | `observation_token_accuracy` | Positional accuracy of observations assigned to the model. Missing observations after an early failure count as incorrect. |

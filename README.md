@@ -171,6 +171,22 @@ Raw and EMA models are evaluated on the same examples and saved separately,
 which allows endpoint stability to be measured without selecting a favorable
 intermediate checkpoint.
 
+Stage 6 starts from the best fixed Stage-5 endpoint and appends a comparison
+action:
+
+```text
+[address(<PTR>)][address(4)][4][address(2)][2][SWAP]
+```
+
+The target is `KEEP` when the marked value is less than or equal to the
+following value, and `SWAP` otherwise. On half of the training examples, the
+action query can use only the two retrieved value items, `4` and `2` above.
+The same examples also receive an unrestricted pass, and a query-level
+distillation loss trains that inference-time pass to match the detached masked
+branch. A frozen Stage-5 teacher distils every inherited address and value
+prediction, so learning the comparison does not silently replace the preceding
+pipeline. Evaluation is fully unrestricted.
+
 The initial constant-learning-rate Stage-5 run reached 96.09% complete
 length-400 accuracy at its best recurring evaluation, but its independent
 step-20,000 endpoint fell to 90.82%. A predetermined 10,000-step run instead
