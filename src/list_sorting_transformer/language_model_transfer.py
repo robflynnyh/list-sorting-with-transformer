@@ -26,7 +26,11 @@ from .model import ModelConfig, SplitInputDecoderTransformer
 from .positions import ModularPositionEmbedding
 
 
-INITIALIZATIONS = ("random", "compiled_middle")
+INITIALIZATIONS = (
+    "random",
+    "compiled_middle",
+    "compiled_middle_frozen",
+)
 DEFAULT_DATA_PATH = Path("/store/store4/data/thepile/00.jsonl")
 LENGTH_GENERALIZATION_CONTEXTS = (256, 512, 1_024, 2_048)
 DEFAULT_EVALUATION_STEPS = (
@@ -252,7 +256,10 @@ def build_language_model(
         model_config,
         position_moduli=config.position_moduli,
     )
-    if config.initialization == "compiled_middle":
+    if config.initialization in {
+        "compiled_middle",
+        "compiled_middle_frozen",
+    }:
         compiled = CompiledPointerCompareTransformer(
             CompiledPointerCompareConfig(
                 pointer_selection_logit=20.0,
@@ -264,6 +271,9 @@ def build_language_model(
             model.encoder.blocks[target_index].load_state_dict(
                 compiled.encoder.blocks[source_index].state_dict()
             )
+        if config.initialization == "compiled_middle_frozen":
+            for target_index in (2, 3):
+                model.encoder.blocks[target_index].requires_grad_(False)
     return model
 
 
@@ -602,8 +612,14 @@ def run_experiment(
             if parameter.requires_grad
         ),
         "compiled_source_blocks": (
-            {"source": [1, 2], "target": [3, 4]}
-            if config.initialization == "compiled_middle"
+            {
+                "source": [1, 2],
+                "target": [3, 4],
+                "frozen": config.initialization
+                == "compiled_middle_frozen",
+            }
+            if config.initialization
+            in {"compiled_middle", "compiled_middle_frozen"}
             else None
         ),
         "initial_middle_parameter_norm": initial_middle_norm,
@@ -769,40 +785,48 @@ def summarize_results(input_root: Path) -> dict[str, Any]:
         ): result
         for result in results
     }
-    paired_seeds = sorted(
-        set(
-            seed
-            for initialization, seed in by_initialization_and_seed
-            if initialization == "random"
+    random_seeds = {
+        seed
+        for initialization, seed in by_initialization_and_seed
+        if initialization == "random"
+    }
+    paired_final: dict[str, Any] = {}
+    for initialization in INITIALIZATIONS[1:]:
+        paired_seeds = sorted(
+            random_seeds
+            & {
+                seed
+                for candidate, seed in by_initialization_and_seed
+                if candidate == initialization
+            }
         )
-        & set(
-            seed
-            for initialization, seed in by_initialization_and_seed
-            if initialization == "compiled_middle"
-        )
-    )
-    paired_final: dict[str, Any] = {"seeds": paired_seeds}
-    for metric in ("bits_per_byte", "next_byte_accuracy"):
-        deltas = [
-            float(
-                by_initialization_and_seed[
-                    ("compiled_middle", seed)
-                ]["final"][metric]
-            )
-            - float(
-                by_initialization_and_seed[("random", seed)]["final"][metric]
-            )
-            for seed in paired_seeds
-        ]
-        mean, std = _mean_and_std(deltas)
-        paired_final[f"compiled_minus_random_{metric}"] = {
-            "by_seed": {
-                str(seed): delta
-                for seed, delta in zip(paired_seeds, deltas)
-            },
-            "mean": mean,
-            "std": std,
-        }
+        if not paired_seeds:
+            continue
+        comparison: dict[str, Any] = {"seeds": paired_seeds}
+        for metric in ("bits_per_byte", "next_byte_accuracy"):
+            deltas = [
+                float(
+                    by_initialization_and_seed[
+                        (initialization, seed)
+                    ]["final"][metric]
+                )
+                - float(
+                    by_initialization_and_seed[
+                        ("random", seed)
+                    ]["final"][metric]
+                )
+                for seed in paired_seeds
+            ]
+            mean, std = _mean_and_std(deltas)
+            comparison[f"candidate_minus_random_{metric}"] = {
+                "by_seed": {
+                    str(seed): delta
+                    for seed, delta in zip(paired_seeds, deltas)
+                },
+                "mean": mean,
+                "std": std,
+            }
+        paired_final[initialization] = comparison
 
     initialization_diagnostics: dict[str, Any] = {}
     for initialization in INITIALIZATIONS:
@@ -843,6 +867,11 @@ def summarize_results(input_root: Path) -> dict[str, Any]:
             )
             diagnostics[module_name] = {
                 "parameters": parameter_count,
+                "trainable_parameters": sum(
+                    parameter.numel()
+                    for parameter in parameters
+                    if parameter.requires_grad
+                ),
                 "nonzero_at_initialization": nonzero_count,
                 "nonzero_fraction": nonzero_count / parameter_count,
             }
@@ -869,10 +898,12 @@ def render_plots(summary: dict[str, Any], output_directory: Path) -> None:
     colors = {
         "random": "#3b82b4",
         "compiled_middle": "#d95f02",
+        "compiled_middle_frozen": "#4c956c",
     }
     labels = {
         "random": "Random",
         "compiled_middle": "Compiled middle",
+        "compiled_middle_frozen": "Compiled middle (frozen)",
     }
     figure, axes = plt.subplots(1, 2, figsize=(11.5, 4.3))
     for initialization in INITIALIZATIONS:
@@ -920,40 +951,37 @@ def render_plots(summary: dict[str, Any], output_directory: Path) -> None:
     plt.close(figure)
 
     random = summary["initializations"].get("random")
-    compiled = summary["initializations"].get("compiled_middle")
-    if random is None or compiled is None:
-        return
-    steps = sorted(
-        set(map(int, random["by_step"]))
-        & set(map(int, compiled["by_step"]))
-    )
-    advantages = [
-        random["by_step"][str(step)]["bits_per_byte"]["mean"]
-        - compiled["by_step"][str(step)]["bits_per_byte"]["mean"]
-        for step in steps
+    candidates = [
+        initialization
+        for initialization in INITIALIZATIONS[1:]
+        if initialization in summary["initializations"]
     ]
+    if random is None or not candidates:
+        return
     figure, axis = plt.subplots(figsize=(6.7, 4.2))
     axis.axhline(0.0, color="#222222", linewidth=1)
-    axis.plot(steps, advantages, color="#4c956c", linewidth=2)
-    axis.fill_between(
-        steps,
-        0,
-        advantages,
-        where=[value >= 0 for value in advantages],
-        color="#4c956c",
-        alpha=0.2,
-    )
-    axis.fill_between(
-        steps,
-        0,
-        advantages,
-        where=[value < 0 for value in advantages],
-        color="#c44e52",
-        alpha=0.2,
-    )
+    for initialization in candidates:
+        candidate = summary["initializations"][initialization]
+        steps = sorted(
+            set(map(int, random["by_step"]))
+            & set(map(int, candidate["by_step"]))
+        )
+        advantages = [
+            random["by_step"][str(step)]["bits_per_byte"]["mean"]
+            - candidate["by_step"][str(step)]["bits_per_byte"]["mean"]
+            for step in steps
+        ]
+        axis.plot(
+            steps,
+            advantages,
+            color=colors[initialization],
+            label=labels[initialization],
+            linewidth=2,
+        )
     axis.set_xlabel("Optimizer updates")
-    axis.set_ylabel("Random BPC - compiled-middle BPC")
+    axis.set_ylabel("Random BPC - candidate BPC")
     axis.set_title("Positive values favour compiled transfer")
+    axis.legend(frameon=False)
     axis.grid(alpha=0.25)
     figure.tight_layout()
     figure.savefig(

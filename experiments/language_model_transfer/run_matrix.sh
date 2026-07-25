@@ -13,7 +13,7 @@ mkdir -p "${ARTIFACT_ROOT}" "${RESULT_ROOT}"
 
 pids=()
 for seed in ${SEEDS}; do
-  for initialization in random compiled_middle; do
+  for initialization in random compiled_middle compiled_middle_frozen; do
     run_name="${initialization}_seed${seed}"
     output_directory="${ARTIFACT_ROOT}/${run_name}"
     if [[ -s "${output_directory}/metrics.json" ]] \

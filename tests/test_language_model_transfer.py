@@ -81,6 +81,25 @@ def test_compiled_middle_changes_only_middle_blocks() -> None:
     assert any(name.startswith("encoder.blocks.3.") for name in changed)
 
 
+def test_frozen_compiled_middle_has_identical_weights_and_is_not_trainable() -> None:
+    trainable = build_language_model(_config("compiled_middle"))
+    frozen = build_language_model(_config("compiled_middle_frozen"))
+
+    for name, parameter in frozen.named_parameters():
+        assert torch.equal(
+            parameter,
+            dict(trainable.named_parameters())[name],
+        )
+        expected_trainable = not name.startswith(
+            (
+                "encoder.blocks.2.",
+                "encoder.blocks.3.",
+                "position_embedding.",
+            )
+        )
+        assert parameter.requires_grad == expected_trainable
+
+
 def test_language_model_is_causal_and_has_byte_logits() -> None:
     model = build_language_model(_config("compiled_middle"))
     model.eval()
