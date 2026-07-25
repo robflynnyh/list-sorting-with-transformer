@@ -195,6 +195,17 @@ The extra low-rate updates therefore changed the endpoint by less than one
 learning rate; extending training beyond 10,000 updates provided no meaningful
 complete-trace gain.
 
+A controlled 10,000-step weight-decay comparison found that reducing AdamW
+weight decay from `0.01` to `0.001` improved the independent length-400
+complete accuracy from 96.68% to **98.44%**. Removing weight decay entirely
+returned 96.68%, so a small amount of weight decay was beneficial:
+
+| Weight decay | L400 next token | L400 complete |
+| ---: | ---: | ---: |
+| `0` | 96.68% | 96.68% |
+| `0.001` | **98.44%** | **98.44%** |
+| `0.01` | 96.88% | 96.68% |
+
 On half of Stage-4 training examples, the final
 query's attention is restricted to `address(4)`. This encourages the new
 address to be computed as a local modular shift instead of recovered from the
