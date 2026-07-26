@@ -32,6 +32,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     initialize_fresh_backward_rule,
     load_checkpoint,
     parse_candidate_devices,
+    routing_population_summary,
     save_checkpoint,
     shard_candidate_specs,
     update_plateau_state,
@@ -211,6 +212,46 @@ def test_candidate_summary_reports_the_fittest_candidate_metrics() -> None:
     assert summary["robust/masked_accuracy"] == 0.6
     assert summary["robust/incorrect_accuracy"] == 0.6
     assert summary["robust/correct_leak_accuracy"] == 0.7
+
+
+def test_routing_population_summary_links_selectivity_to_fitness() -> None:
+    clean = [
+        ShortcutMetrics(
+            2.0,
+            0.5,
+            {"masked": 0.6, "incorrect": 0.4},
+            {"masked": 1.9, "incorrect": 2.1},
+            8,
+            8,
+            0.2,
+        ),
+        ShortcutMetrics(
+            2.5,
+            0.2,
+            {"masked": 0.3, "incorrect": 0.1},
+            {"masked": 2.4, "incorrect": 2.6},
+            6,
+            5,
+            0.4,
+        ),
+    ]
+    statistics = [
+        [{"routing_leak_relative_gate": 0.8}],
+        [{"routing_leak_relative_gate": 1.1}],
+    ]
+
+    summary = routing_population_summary(
+        torch.tensor([2.0, 0.0]),
+        clean,
+        statistics,
+    )
+
+    assert abs(summary["backward/population_leak_relative_gate_min"] - 0.8) < 1e-6
+    assert summary["backward/population_selective_fraction"] == 0.5
+    assert summary["backward/selectivity_fitness_correlation"] > 0.99
+    assert abs(
+        summary["backward/best_fitness_leak_relative_gate"] - 0.8
+    ) < 1e-6
 
 
 def test_worst_mode_fitness_uses_the_weaker_clean_split() -> None:

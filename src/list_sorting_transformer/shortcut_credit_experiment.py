@@ -445,7 +445,10 @@ def train_candidate_shard(
             correct_batches=worker_correct_batches,
             initial_clean_metrics=initial_clean_metrics,
             device=device,
-            capture_statistics=candidate_index == 0,
+            capture_statistics=(
+                isinstance(worker_center_rule, AttentionRoutingRule)
+                or candidate_index == 0
+            ),
         )
         results.append(
             (candidate_index, fitness, clean, correct, statistics)
@@ -583,6 +586,74 @@ def candidate_summary(
         ),
         "robust/prediction_mode_fraction": (
             robust_clean.prediction_mode_fraction
+        ),
+    }
+
+
+def routing_population_summary(
+    fitnesses: Tensor,
+    clean_metrics: list[ShortcutMetrics],
+    candidate_statistics: list[list[dict[str, float]]],
+) -> dict[str, float]:
+    """Report whether routing selectivity exists and fitness rewards it."""
+
+    if not candidate_statistics or any(
+        not statistics for statistics in candidate_statistics
+    ):
+        return {}
+    relative_gates = torch.tensor(
+        [
+            sum(
+                item["routing_leak_relative_gate"]
+                for item in statistics
+            )
+            / len(statistics)
+            for statistics in candidate_statistics
+        ],
+        dtype=torch.float32,
+    )
+    selectivity = 1.0 - relative_gates
+    centered_fitness = fitnesses.float().cpu() - fitnesses.float().cpu().mean()
+    centered_selectivity = selectivity - selectivity.mean()
+    denominator = (
+        centered_fitness.square().sum()
+        * centered_selectivity.square().sum()
+    ).sqrt()
+    correlation = (
+        float(
+            (centered_fitness * centered_selectivity).sum()
+            / denominator
+        )
+        if float(denominator) > 0
+        else 0.0
+    )
+    best_index = int(fitnesses.argmax())
+    robust_index = max(
+        range(len(clean_metrics)),
+        key=lambda index: min(
+            clean_metrics[index].mode_accuracy["masked"],
+            clean_metrics[index].mode_accuracy["incorrect"],
+        ),
+    )
+    return {
+        "backward/population_leak_relative_gate_min": float(
+            relative_gates.min()
+        ),
+        "backward/population_leak_relative_gate_mean": float(
+            relative_gates.mean()
+        ),
+        "backward/population_leak_relative_gate_max": float(
+            relative_gates.max()
+        ),
+        "backward/population_selective_fraction": float(
+            (relative_gates < 0.9).float().mean()
+        ),
+        "backward/selectivity_fitness_correlation": correlation,
+        "backward/best_fitness_leak_relative_gate": float(
+            relative_gates[best_index]
+        ),
+        "backward/robust_candidate_leak_relative_gate": float(
+            relative_gates[robust_index]
         ),
     }
 
@@ -835,7 +906,10 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     correct_batches=correct_batches,
                     initial_clean_metrics=initial_clean_metrics,
                     device=device,
-                    capture_statistics=candidate_index == 0,
+                    capture_statistics=(
+                        isinstance(center_rule, AttentionRoutingRule)
+                        or candidate_index == 0
+                    ),
                 )
                 candidate_outputs.append(
                     (
@@ -882,12 +956,16 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         fitness_values = []
         clean_results = []
         correct_results = []
+        candidate_statistics: list[list[dict[str, float]]] = []
         captured_statistics: list[dict[str, float]] = []
-        for _, fitness, clean, correct, statistics in candidate_outputs:
+        for candidate_index, fitness, clean, correct, statistics in (
+            candidate_outputs
+        ):
             fitness_values.append(fitness)
             clean_results.append(clean)
             correct_results.append(correct)
-            if statistics:
+            candidate_statistics.append(statistics)
+            if candidate_index == 0 and statistics:
                 captured_statistics = statistics
 
         fitness_tensor = torch.tensor(fitness_values, device=device)
@@ -906,6 +984,14 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             clean_results,
             correct_results,
         )
+        if isinstance(center_rule, AttentionRoutingRule):
+            summary.update(
+                routing_population_summary(
+                    fitness_tensor,
+                    clean_results,
+                    candidate_statistics,
+                )
+            )
         summary.update(center_update_summary(center_rule, center_parameters))
         summary.update(
             center_routing_summary(

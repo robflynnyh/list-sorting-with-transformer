@@ -856,3 +856,53 @@ step fivefold:
   worst-split CE fitness.
 - GPUs 2-3 run this lineage while the independent-map control continues on
   GPUs 0-1.
+
+The first matched window shows no shared-map advantage:
+
+| Router, generations 0-9 | Clean CE | Masked | Wrong hint | Correct leak | Robust min split |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Independent maps | 2.3520 | 20.78% | 14.85% | 35.19% | 16.13% |
+| One shared map | 2.3530 | 20.69% | 14.80% | 35.64% | 15.94% |
+
+The shared centre remained stable but learned broad rather than selective
+suppression: its mean unperturbed leak/other gate ratio was `0.998`, with
+`1.0` meaning no preference. A second ten-generation window will test whether
+selectivity appears after the shared suppression strength becomes active.
+
+The second window improved while retaining all ten output classes:
+
+| Shared-map window | Clean CE | Masked | Wrong hint | Correct leak | Robust min split | Centre leak ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Generations 0-9 | 2.3530 | 20.69% | 14.80% | 35.64% | 15.94% | 0.998 |
+| Generations 10-19 | 2.3296 | 20.44% | 16.70% | 37.73% | 17.85% | 0.988 |
+
+Population-level routing diagnostics were added and replayed from the
+generation-20 checkpoint. They average each candidate's leak-edge gate
+relative to its other final-query gates over all inner steps, then compare
+selectivity (`1 - relative gate`) with candidate fitness:
+
+| Replay generation | Best ratio in population | Candidates below 0.9 | Fitness/selectivity correlation | Fittest candidate ratio |
+| ---: | ---: | ---: | ---: | ---: |
+| 20 | 0.834 | 4.69% | +0.736 | 0.834 |
+| 21 | 0.818 | 6.25% | +0.738 | 0.845 |
+
+This separates two hypotheses. Selective candidates do exist in a population
+of 64, and lower leak ratios are strongly associated with better worst-split
+CE fitness. The remaining issue is whether repeated low-step EGGROLL updates
+can accumulate this signal into the centre, especially after moving to the
+harder horizon-80 problem. Directly selecting the candidate with the best
+sampled minimum accuracy is less reliable: its ratios were `1.041` and
+`1.003`, consistent with noisy accuracy estimates.
+
+The independent-map control completed two horizon-80 windows before being
+stopped at its durable generation-70 checkpoint:
+
+| Independent-map horizon-80 window | Clean CE | Masked | Wrong hint | Correct leak | Robust min split |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Generations 51-60 | 3.1847 | 17.15% | 0.0% | 100% | 0.0% |
+| Generations 61-70 | 3.1466 | 18.70% | 0.0% | 100% | 0.0% |
+
+This is not evidence that horizon 80 is intrinsically hopeless; it establishes
+that the independent router had not escaped the shortcut after 20 generations
+there. The shared router will receive a substantially longer horizon-80 phase
+before it is assessed.
