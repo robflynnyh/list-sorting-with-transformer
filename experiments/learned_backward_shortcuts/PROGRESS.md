@@ -251,3 +251,22 @@ treated as part of the continued trajectory.
 - The resumed generations 40 and 41 completed successfully. Antithetic
   pair-difference RMS remained material at `0.0811` and `0.0759`, while the
   corrected stale counter advanced exactly from 39 to 41.
+
+#### First horizon promotion
+
+The corrected curriculum promoted exactly at the configured boundary:
+
+- Generation 50: horizon 10, stale count 50, promotion flag set.
+- Generation 51: horizon 20, stale count reset to zero.
+- Mean post-training clean CE improved from approximately `2.70` over the final
+  horizon-10 generations to `2.6354` on the first horizon-20 generation.
+- Antithetic pair-difference RMS remained nonzero at `0.0573`.
+- Mean correct-leak, masked-leak, and incorrect-leak accuracies were all near
+  chance (`10.6%`, `11.2%`, and `10.8%`). Twenty updates are therefore still
+  before the shortcut-learning transition.
+- Scalar runtime increased from approximately `23s` to `32s` per generation,
+  substantially less than a full doubling because fixed candidate evaluation
+  accounts for part of each generation.
+
+This verifies that the curriculum advances deterministically on the corrected
+objective and preserves a usable EGGROLL signal after the objective changes.
