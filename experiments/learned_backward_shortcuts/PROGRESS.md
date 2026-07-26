@@ -306,7 +306,20 @@ generation-60 checkpoint so those diagnostics are present before reaching the
 shortcut-learning horizons:
 
 - Continued run:
-  `learned-backward-p64-diversity-resume60-seed7`
+  [`learned-backward-p64-diversity-resume60-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/1fialmlh)
 - Source checkpoint:
   `learned-backward-p64-clean-plateau-resume40-seed7/checkpoint_000060.pt`
 - Preserved curriculum state: horizon 20 with 9 stale generations.
+
+The first diversity-enabled generation revealed that the horizon-20 models are
+still effectively collapsed:
+
+- Mean distinct predicted digit values: `1.31 / 10`.
+- Mean modal prediction fraction: `97.1%`.
+- Masked / incorrect accuracy: `9.6% / 10.1%`.
+
+Thus, the horizon-20 CE reduction is mostly the model learning to place output
+mass on the digit vocabulary rather than retrieving the pointed value. This
+does not invalidate CE as the EGGROLL fitness, but it prevents interpreting
+the early CE gain as task learning. Prediction diversity must expand before
+accuracy changes can be meaningful.
