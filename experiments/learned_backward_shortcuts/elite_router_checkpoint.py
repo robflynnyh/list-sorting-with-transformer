@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 from pathlib import Path
 from typing import Sequence
 
@@ -16,7 +17,9 @@ from list_sorting_transformer.shortcut_credit import (
     sample_eggroll_direction,
 )
 from list_sorting_transformer.shortcut_credit_experiment import (
+    PlateauState,
     ShortcutCreditExperimentConfig,
+    update_elite_search_state,
 )
 from list_sorting_transformer.shortcut_credit_routing_plot import (
     load_attention_router,
@@ -73,6 +76,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--generation", type=int, required=True)
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        help="training horizon used to evaluate the selected candidates",
+    )
     parser.add_argument("--elite-indices", type=parse_indices, required=True)
     parser.add_argument(
         "--alpha",
@@ -80,10 +88,17 @@ def main() -> None:
         type=float,
         required=True,
     )
+    parser.add_argument(
+        "--mark-accepted",
+        action="store_true",
+        help="advance the saved adaptive search state as an accepted update",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     if args.generation < 0:
         raise ValueError("generation must be nonnegative")
+    if args.horizon is not None and args.horizon < 1:
+        raise ValueError("horizon must be positive")
     if any(not 0 <= alpha <= 1 for alpha in args.alpha):
         raise ValueError("alpha must be in [0, 1]")
 
@@ -126,13 +141,25 @@ def main() -> None:
         # This checkpoint contains the update produced by args.generation, so
         # resuming it should begin at the following generation.
         derived["generation"] = args.generation
+        if args.horizon is not None:
+            derived["horizon"] = args.horizon
         derived["elite_interpolation"] = {
             "source_checkpoint": str(args.checkpoint),
             "generation": args.generation,
+            "horizon": args.horizon,
             "candidate_indices": list(args.elite_indices),
             "alpha": alpha,
             "search_sigma": search_sigma,
+            "marked_accepted": args.mark_accepted,
         }
+        if args.mark_accepted:
+            plateau_state = PlateauState(**checkpoint["plateau_state"])
+            update_elite_search_state(
+                plateau_state,
+                accepted=True,
+                config=config,
+            )
+            derived["plateau_state"] = asdict(plateau_state)
         torch.save(derived, output)
         print(output)
 

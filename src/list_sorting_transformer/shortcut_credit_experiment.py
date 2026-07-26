@@ -78,6 +78,7 @@ class ShortcutCreditExperimentConfig:
     route_output_projection: bool = False
     shared_routing_map: bool = True
     fitness_objective: str = "mean_clean_ce"
+    fitness_checkpoints: str | None = None
     forward_layers: int = 3
     backward_layers: int = 2
     heads: int = 4
@@ -127,8 +128,23 @@ class ShortcutCreditExperimentConfig:
         if self.fitness_objective not in {
             "mean_clean_ce",
             "worst_mode_ce",
+            "worst_checkpoint_mode_ce",
         }:
             raise ValueError("unknown fitness_objective")
+        checkpoints = parse_fitness_checkpoints(self.fitness_checkpoints)
+        if self.fitness_objective == "worst_checkpoint_mode_ce":
+            if not checkpoints:
+                raise ValueError(
+                    "worst_checkpoint_mode_ce requires fitness_checkpoints"
+                )
+            if checkpoints[-1] > self.max_horizon:
+                raise ValueError(
+                    "fitness checkpoints must not exceed max_horizon"
+                )
+        elif checkpoints:
+            raise ValueError(
+                "fitness_checkpoints require worst_checkpoint_mode_ce"
+            )
         if self.outer_update_rule not in {
             "paper_standardized",
             "elite_centroid",
@@ -191,6 +207,25 @@ class ForwardTrajectoryMetrics:
     correct: ShortcutMetrics
     heldout_clean: ShortcutMetrics | None = None
     heldout_correct: ShortcutMetrics | None = None
+    checkpoint_clean: tuple[tuple[int, ShortcutMetrics], ...] = ()
+
+
+def parse_fitness_checkpoints(value: str | None) -> tuple[int, ...]:
+    if value is None:
+        return ()
+    try:
+        checkpoints = tuple(int(item.strip()) for item in value.split(","))
+    except ValueError as error:
+        raise ValueError("fitness checkpoints must be integers") from error
+    if (
+        not checkpoints
+        or any(checkpoint < 1 for checkpoint in checkpoints)
+        or tuple(sorted(set(checkpoints))) != checkpoints
+    ):
+        raise ValueError(
+            "fitness checkpoints must be unique increasing positive integers"
+        )
+    return checkpoints
 
 
 def make_mode_batches(
@@ -378,6 +413,7 @@ def train_candidate(
         config.fitness_objective,
         initial_clean_metrics,
         trajectory.clean,
+        checkpoint_clean=trajectory.checkpoint_clean,
     )
     return (
         fitness,
@@ -415,14 +451,30 @@ def train_forward_trajectory(
         model.parameters(),
         lr=config.forward_learning_rate,
     )
+    checkpoint_steps = parse_fitness_checkpoints(config.fitness_checkpoints)
+    if checkpoint_steps and checkpoint_steps[-1] > len(inner_batches):
+        raise ValueError(
+            "fitness checkpoints must not exceed the trajectory horizon"
+        )
+    checkpoint_step_set = set(checkpoint_steps)
+    checkpoint_clean = []
     model.train()
-    for batch in inner_batches:
+    for step, batch in enumerate(inner_batches, start=1):
         optimizer.zero_grad(set_to_none=True)
         loss = shortcut_loss(model, batch, backward_rule)
         loss.backward()
         optimizer.step()
+        if step in checkpoint_step_set:
+            checkpoint_clean.append(
+                (step, evaluate_shortcut_batches(model, fitness_batches))
+            )
+            model.train()
 
-    clean_metrics = evaluate_shortcut_batches(model, fitness_batches)
+    clean_metrics = (
+        checkpoint_clean[-1][1]
+        if checkpoint_clean and checkpoint_clean[-1][0] == len(inner_batches)
+        else evaluate_shortcut_batches(model, fitness_batches)
+    )
     correct_metrics = evaluate_shortcut_batches(model, correct_batches)
     heldout_clean_metrics = (
         None
@@ -439,6 +491,17 @@ def train_forward_trajectory(
         correct=correct_metrics,
         heldout_clean=heldout_clean_metrics,
         heldout_correct=heldout_correct_metrics,
+        checkpoint_clean=tuple(checkpoint_clean),
+    )
+
+
+def worst_checkpoint_mode_loss(
+    checkpoint_clean: tuple[tuple[int, ShortcutMetrics], ...],
+) -> float:
+    if not checkpoint_clean:
+        raise ValueError("checkpoint fitness requires checkpoint metrics")
+    return max(
+        max(metrics.mode_loss.values()) for _, metrics in checkpoint_clean
     )
 
 
@@ -446,6 +509,8 @@ def candidate_fitness(
     objective: str,
     initial: ShortcutMetrics,
     trained: ShortcutMetrics,
+    *,
+    checkpoint_clean: tuple[tuple[int, ShortcutMetrics], ...] = (),
 ) -> float:
     if objective == "mean_clean_ce":
         return initial.loss - trained.loss
@@ -453,6 +518,9 @@ def candidate_fitness(
         initial_worst = max(initial.mode_loss.values())
         trained_worst = max(trained.mode_loss.values())
         return initial_worst - trained_worst
+    if objective == "worst_checkpoint_mode_ce":
+        initial_worst = max(initial.mode_loss.values())
+        return initial_worst - worst_checkpoint_mode_loss(checkpoint_clean)
     raise ValueError(f"unknown fitness objective: {objective}")
 
 
@@ -481,6 +549,78 @@ def trajectory_summary(
     }
     if fitness is not None:
         summary[f"{prefix}/fitness"] = fitness
+    return summary
+
+
+def checkpoint_trajectory_summary(
+    prefix: str,
+    trajectory: ForwardTrajectoryMetrics,
+) -> dict[str, float]:
+    if not trajectory.checkpoint_clean:
+        return {}
+    summary = {
+        f"{prefix}/worst_checkpoint_mode_loss": (
+            worst_checkpoint_mode_loss(trajectory.checkpoint_clean)
+        )
+    }
+    for step, metrics in trajectory.checkpoint_clean:
+        summary.update(
+            {
+                f"{prefix}/checkpoint_{step}_clean_loss": metrics.loss,
+                f"{prefix}/checkpoint_{step}_min_mode_accuracy": min(
+                    metrics.mode_accuracy.values()
+                ),
+                f"{prefix}/checkpoint_{step}_worst_mode_loss": max(
+                    metrics.mode_loss.values()
+                ),
+            }
+        )
+    return summary
+
+
+def checkpoint_population_summary(
+    trajectories: list[ForwardTrajectoryMetrics],
+) -> dict[str, float]:
+    checkpoint_groups = [
+        trajectory.checkpoint_clean for trajectory in trajectories
+    ]
+    if not checkpoint_groups or not checkpoint_groups[0]:
+        return {}
+    expected_steps = tuple(step for step, _ in checkpoint_groups[0])
+    if any(
+        tuple(step for step, _ in checkpoint_group) != expected_steps
+        for checkpoint_group in checkpoint_groups
+    ):
+        raise ValueError("candidate checkpoint steps must match")
+    summary = {
+        "transition/worst_checkpoint_mode_loss_mean": (
+            sum(
+                worst_checkpoint_mode_loss(checkpoint_group)
+                for checkpoint_group in checkpoint_groups
+            )
+            / len(checkpoint_groups)
+        )
+    }
+    for checkpoint_index, step in enumerate(expected_steps):
+        metrics = [
+            checkpoint_group[checkpoint_index][1]
+            for checkpoint_group in checkpoint_groups
+        ]
+        summary.update(
+            {
+                f"transition/checkpoint_{step}_clean_loss_mean": (
+                    sum(item.loss for item in metrics) / len(metrics)
+                ),
+                f"transition/checkpoint_{step}_min_mode_accuracy_mean": (
+                    sum(min(item.mode_accuracy.values()) for item in metrics)
+                    / len(metrics)
+                ),
+                f"transition/checkpoint_{step}_worst_mode_loss_mean": (
+                    sum(max(item.mode_loss.values()) for item in metrics)
+                    / len(metrics)
+                ),
+            }
+        )
     return summary
 
 
@@ -1684,12 +1824,14 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         correct_results = []
         heldout_clean_results = []
         heldout_correct_results = []
+        candidate_trajectories = []
         candidate_statistics: list[list[dict[str, float]]] = []
         captured_statistics: list[dict[str, float]] = []
         for candidate_index, fitness, trajectory, statistics in (
             candidate_outputs
         ):
             fitness_values.append(fitness)
+            candidate_trajectories.append(trajectory)
             clean_results.append(trajectory.clean)
             correct_results.append(trajectory.correct)
             if (
@@ -1748,11 +1890,13 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             config.fitness_objective,
             initial_clean_metrics,
             ordinary_trajectory.clean,
+            checkpoint_clean=ordinary_trajectory.checkpoint_clean,
         )
         masked_training_fitness = candidate_fitness(
             config.fitness_objective,
             initial_clean_metrics,
             masked_training_trajectory.clean,
+            checkpoint_clean=masked_training_trajectory.checkpoint_clean,
         )
         center_clean = center_trajectory.clean
         center_correct = center_trajectory.correct
@@ -1850,6 +1994,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 config.fitness_objective,
                 initial_clean_metrics,
                 elite_proposal_trajectory.clean,
+                checkpoint_clean=(
+                    elite_proposal_trajectory.checkpoint_clean
+                ),
             )
             elite_acceptance_center_fitnesses = [center_fitness]
             elite_acceptance_proposal_fitnesses = [
@@ -1920,6 +2067,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                         config.fitness_objective,
                         acceptance_initial,
                         acceptance_center.clean,
+                        checkpoint_clean=(
+                            acceptance_center.checkpoint_clean
+                        ),
                     )
                 )
                 elite_acceptance_proposal_fitnesses.append(
@@ -1927,6 +2077,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                         config.fitness_objective,
                         acceptance_initial,
                         acceptance_proposal.clean,
+                        checkpoint_clean=(
+                            acceptance_proposal.checkpoint_clean
+                        ),
                     )
                 )
             restore_center_parameters(
@@ -1961,6 +2114,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             correct_results,
         )
         summary.update(
+            checkpoint_population_summary(candidate_trajectories)
+        )
+        summary.update(
             heldout_candidate_summary(
                 fitness_tensor.cpu(),
                 clean_results,
@@ -1976,6 +2132,12 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             )
         )
         summary.update(
+            checkpoint_trajectory_summary(
+                "center_rule",
+                center_trajectory,
+            )
+        )
+        summary.update(
             trajectory_summary(
                 "ordinary_rule",
                 ordinary_fitness,
@@ -1984,11 +2146,23 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             )
         )
         summary.update(
+            checkpoint_trajectory_summary(
+                "ordinary_rule",
+                ordinary_trajectory,
+            )
+        )
+        summary.update(
             trajectory_summary(
                 "masked_training",
                 masked_training_fitness,
                 masked_training_clean,
                 masked_training_correct,
+            )
+        )
+        summary.update(
+            checkpoint_trajectory_summary(
+                "masked_training",
+                masked_training_trajectory,
             )
         )
         summary.update(
@@ -2125,6 +2299,12 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     elite_proposal_trajectory.correct,
                 )
             )
+            summary.update(
+                checkpoint_trajectory_summary(
+                    "elite_proposal",
+                    elite_proposal_trajectory,
+                )
+            )
             summary[
                 "outer/proposal_fitness_minus_center"
             ] = elite_proposal_fitness - center_fitness
@@ -2173,13 +2353,18 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         # Mean fitness cannot be compared across generations because each
         # generation starts from a different model and initial clean loss.
         # Post-training clean CE is the stable cross-generation objective.
-        plateau_objective = -summary[
-            (
-                "clean/worst_mode_loss_mean"
-                if config.fitness_objective == "worst_mode_ce"
-                else "clean/loss_mean"
-            )
-        ]
+        if config.fitness_objective == "worst_checkpoint_mode_ce":
+            plateau_objective = -summary[
+                "transition/worst_checkpoint_mode_loss_mean"
+            ]
+        else:
+            plateau_objective = -summary[
+                (
+                    "clean/worst_mode_loss_mean"
+                    if config.fitness_objective == "worst_mode_ce"
+                    else "clean/loss_mean"
+                )
+            ]
         promote_horizon = update_plateau_state(
             plateau_state,
             objective=plateau_objective,
@@ -2333,9 +2518,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--fitness-objective",
-        choices=("mean_clean_ce", "worst_mode_ce"),
+        choices=(
+            "mean_clean_ce",
+            "worst_mode_ce",
+            "worst_checkpoint_mode_ce",
+        ),
         default="mean_clean_ce",
         help="candidate objective used by the EGGROLL update",
+    )
+    parser.add_argument(
+        "--fitness-checkpoints",
+        help=(
+            "comma-separated forward-update checkpoints used by a "
+            "checkpoint-aware fitness objective"
+        ),
     )
     parser.add_argument("--forward-layers", type=int, default=3)
     parser.add_argument("--backward-layers", type=int, default=2)

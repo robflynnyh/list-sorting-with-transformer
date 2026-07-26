@@ -42,6 +42,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     load_checkpoint,
     make_inner_batches,
     parse_candidate_devices,
+    parse_fitness_checkpoints,
     restore_center_parameters,
     resolve_resume_horizon,
     routing_population_summary,
@@ -51,6 +52,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     trajectory_summary,
     update_elite_search_state,
     update_plateau_state,
+    worst_checkpoint_mode_loss,
 )
 
 
@@ -841,6 +843,151 @@ def test_worst_mode_fitness_uses_the_weaker_clean_split() -> None:
     assert abs(
         candidate_fitness("worst_mode_ce", initial, trained) - 0.7
     ) < 1e-12
+
+
+def test_checkpoint_fitness_uses_worst_mode_across_training_steps() -> None:
+    initial = ShortcutMetrics(
+        3.0,
+        0.1,
+        {"masked": 0.1, "incorrect": 0.1},
+        {"masked": 2.8, "incorrect": 3.2},
+        4,
+        3,
+        0.6,
+    )
+    early = ShortcutMetrics(
+        1.0,
+        0.8,
+        {"masked": 0.9, "incorrect": 0.7},
+        {"masked": 0.5, "incorrect": 1.5},
+        10,
+        10,
+        0.2,
+    )
+    collapsed = ShortcutMetrics(
+        1.5,
+        0.6,
+        {"masked": 0.5, "incorrect": 0.7},
+        {"masked": 2.4, "incorrect": 1.1},
+        10,
+        10,
+        0.2,
+    )
+    recovered = ShortcutMetrics(
+        0.8,
+        0.9,
+        {"masked": 0.9, "incorrect": 0.9},
+        {"masked": 0.8, "incorrect": 0.8},
+        10,
+        10,
+        0.2,
+    )
+    checkpoints = ((2, early), (3, collapsed), (4, recovered))
+
+    assert worst_checkpoint_mode_loss(checkpoints) == pytest.approx(2.4)
+    assert candidate_fitness(
+        "worst_checkpoint_mode_ce",
+        initial,
+        recovered,
+        checkpoint_clean=checkpoints,
+    ) == pytest.approx(0.8)
+
+
+def test_checkpoint_fitness_config_requires_valid_schedule() -> None:
+    assert parse_fitness_checkpoints("2,4,8") == (2, 4, 8)
+    with pytest.raises(ValueError, match="unique increasing"):
+        parse_fitness_checkpoints("4,2")
+    with pytest.raises(ValueError, match="requires fitness_checkpoints"):
+        ShortcutCreditExperimentConfig(
+            fitness_objective="worst_checkpoint_mode_ce",
+        )
+    with pytest.raises(ValueError, match="must not exceed max_horizon"):
+        ShortcutCreditExperimentConfig(
+            fitness_objective="worst_checkpoint_mode_ce",
+            fitness_checkpoints="2,5",
+            max_horizon=4,
+        )
+    with pytest.raises(ValueError, match="require worst_checkpoint"):
+        ShortcutCreditExperimentConfig(fitness_checkpoints="2,4")
+
+
+def test_forward_trajectory_records_requested_continuous_checkpoints() -> None:
+    config = ShortcutCreditExperimentConfig(
+        population_size=2,
+        horizon=3,
+        max_horizon=3,
+        batch_size=4,
+        fitness_examples=8,
+        fitness_batch_size=4,
+        correct_eval_examples=4,
+        min_length=4,
+        max_length=4,
+        d_model=32,
+        backward_d_model=32,
+        forward_layers=1,
+        backward_layers=1,
+        heads=4,
+        fitness_objective="worst_checkpoint_mode_ce",
+        fitness_checkpoints="1,3",
+    )
+    vocabulary = small_vocabulary()
+    model = ShortcutDecoderTransformer(
+        make_forward_model_config(
+            vocabulary,
+            d_model=32,
+            n_layers=1,
+            n_heads=4,
+        )
+    )
+    inner = make_inner_batches(
+        config,
+        horizon=3,
+        vocabulary=vocabulary,
+        generator=torch.Generator().manual_seed(201),
+        device=torch.device("cpu"),
+    )
+    fitness = make_fitness_batches(
+        8,
+        min_length=4,
+        max_length=4,
+        batch_size=4,
+        generator=torch.Generator().manual_seed(202),
+        vocabulary=vocabulary,
+    )
+    correct = (
+        make_shortcut_batch(
+            4,
+            4,
+            leak_mode="correct",
+            generator=torch.Generator().manual_seed(203),
+            vocabulary=vocabulary,
+        ),
+    )
+
+    trajectory = train_forward_trajectory(
+        config,
+        base_state=deepcopy(model.state_dict()),
+        backward_rule=None,
+        inner_batches=inner,
+        fitness_batches=fitness,
+        correct_batches=correct,
+        device=torch.device("cpu"),
+    )
+
+    assert tuple(step for step, _ in trajectory.checkpoint_clean) == (1, 3)
+    assert trajectory.clean is trajectory.checkpoint_clean[-1][1]
+
+    too_short_inner = inner[:2]
+    with pytest.raises(ValueError, match="trajectory horizon"):
+        train_forward_trajectory(
+            config,
+            base_state=deepcopy(model.state_dict()),
+            backward_rule=None,
+            inner_batches=too_short_inner,
+            fitness_batches=fitness,
+            correct_batches=correct,
+            device=torch.device("cpu"),
+        )
 
 
 def test_right_padded_evaluation_preserves_query_logits() -> None:
