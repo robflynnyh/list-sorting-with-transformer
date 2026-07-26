@@ -2069,7 +2069,20 @@ the population still contains a coherent ranking signal even though the
 four-elite centroid produced little gain. The accepted checkpoint is now
 evolving at horizon 2,000 in
 [W&B](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/h112pijo),
-while its horizon-1,280 before/after audit runs independently.
+and its horizon-1,280 before/after behavior was audited independently.
+
+That audit found a rare instability. Across 40 matched trajectories, 39 tied
+and one regressed after the accepted update; none improved. Mean weaker-split
+accuracy consequently fell from `94.35%` to `93.96%`, and clean CE worsened
+from `0.2560` to `0.2783`. The update was almost neutral for typical
+trajectories but harmful for one initialization and shortcut-training stream.
+This exposes a weakness in accepting a proposal on the single training
+trajectory used to rank its population. After the scheduled horizon sweep, the
+next protocol should rank candidates as before but compare the proposed
+centroid and old centre across several independent shortcut-training
+trajectories, all evaluated on the same fixed 512-example fitness set. This
+does not introduce fresh fitness data and adds only a small fraction of the
+population-search cost.
 
 Long-horizon audits now use
 [`checkpoint_pair_diagnostic.py`](checkpoint_pair_diagnostic.py). It evaluates
@@ -2086,3 +2099,5 @@ and
 [`results/random_h640_pre_g67_replications_summary.json`](results/random_h640_pre_g67_replications_summary.json).
 The matched horizon-640 update is in
 [`results/random_h640_g67_pair_summary.json`](results/random_h640_g67_pair_summary.json).
+The combined 40-trajectory horizon-1,280 update is in
+[`results/random_h1280_g68_pair_40_summary.json`](results/random_h1280_g68_pair_40_summary.json).
