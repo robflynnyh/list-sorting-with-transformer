@@ -1640,3 +1640,28 @@ Their all-hint-source ratios are `1.001` and `0.994`, however. Generation 20's
 semantic suppression is therefore not the only useful candidate mechanism.
 The population can discover broader nonuniform rules before, or instead of,
 converging to a simple moving-hint mask.
+
+Across generations 20--29, the robust outer-selected candidate averages
+`56.99%` fresh weaker-split accuracy and `96.17%` correct-hint accuracy. The
+mean outer/fresh population-objective correlation is `0.989`; nine of ten
+generations exceed `0.997`, with generation 29 still positive at `0.910`.
+Thus, useful candidate behavior continues to transfer to examples that played
+no role in selection.
+
+The accumulated centre has not yet inherited that behavior:
+
+| Fresh held-out aggregate, generations 20--29 | Evolved centre | Ordinary training | Masked training |
+| --- | ---: | ---: | ---: |
+| Mean weaker-split accuracy | 2.62% | 2.97% | 26.84% |
+| Mean correct-hint accuracy | 97.19% | 94.45% | 52.81% |
+| Mean clean CE | 3.118 | 3.108 | 2.350 |
+
+The paired centre-minus-ordinary weaker-split difference is only `-0.35`
+percentage points, and the centre wins two of ten generations on that metric.
+Its mean all-hint-source relative gate is `0.998`, while robust candidates
+range from `0.877` to `1.537`. This rules out a simple monotonic story in which
+every useful early rule must already look like a clean semantic hint mask.
+Broad, source-favoring, source-suppressing, and other nonuniform rules can all
+be intermediate strategies. The primary convergence criterion is therefore
+fresh matched behavior; routing selectivity is tracked separately to explain
+the eventual solution if and when the centre becomes useful.
