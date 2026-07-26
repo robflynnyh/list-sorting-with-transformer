@@ -690,13 +690,46 @@ class AttentionRoutingRule(nn.Module):
                 device=hidden.device,
             ).tril()
             valid_gates = forward_gates[..., causal]
-            leak_gates = forward_gates[..., -1, -2]
-            other_query_gates = torch.cat(
-                (
-                    forward_gates[..., -1, :-2],
-                    forward_gates[..., -1, -1:],
-                ),
+            leak_token = self.config.vocab_size - 3
+            leak_mask = token_ids.eq(leak_token)
+            if not bool(leak_mask.sum(dim=1).eq(1).all()):
+                raise ValueError(
+                    "every routing prompt must contain exactly one leak"
+                )
+            hint_positions = leak_mask.to(dtype=torch.int64).argmax(
+                dim=1
+            ) + 1
+            if bool(hint_positions.ge(sequence_length).any()):
+                raise ValueError("leak marker must be followed by a hint")
+            query_gates = forward_gates[..., -1, :]
+            hint_indices = hint_positions.view(
+                batch_size,
+                1,
+                1,
+                1,
+            ).expand(
+                batch_size,
+                self.config.forward_layers,
+                self.config.n_heads,
+                1,
+            )
+            leak_gates = query_gates.gather(
                 dim=-1,
+                index=hint_indices,
+            ).squeeze(-1)
+            other_mask = torch.ones(
+                batch_size,
+                sequence_length,
+                dtype=torch.bool,
+                device=hidden.device,
+            )
+            other_mask.scatter_(
+                1,
+                hint_positions.unsqueeze(1),
+                False,
+            )
+            other_query_gates = query_gates.masked_select(
+                other_mask[:, None, None, :].expand_as(query_gates)
             )
             self.statistics.append(
                 {

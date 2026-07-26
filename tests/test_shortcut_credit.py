@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
 import torch
 
 from list_sorting_transformer.tokens import SEP
@@ -500,6 +501,60 @@ def test_attention_router_only_suppresses_existing_routes() -> None:
             ordinary.parameters(),
             modified.parameters(),
         )
+    )
+
+
+def test_attention_router_statistics_follow_random_leak_positions() -> None:
+    torch.manual_seed(61)
+    vocabulary = small_vocabulary()
+    rule = small_routing_rule(shared_routing_map=True)
+    with torch.no_grad():
+        rule.gates.fill_(0.2)
+    batch = make_shortcut_batch(
+        16,
+        8,
+        leak_mode="correct",
+        leak_placement="random_list",
+        generator=torch.Generator().manual_seed(62),
+        vocabulary=vocabulary,
+    )
+    leak_positions = (
+        batch.input_ids.eq(vocabulary.leak_token)
+        .nonzero(as_tuple=False)[:, 1]
+    )
+    assert leak_positions.unique().numel() > 1
+
+    gates = rule.attention_gates(batch.input_ids)[0]
+    rows = torch.arange(batch.batch_size)
+    expected_leak_gate = gates[
+        rows,
+        :,
+        -1,
+        leak_positions + 1,
+    ].mean()
+    other_mask = torch.ones(
+        batch.batch_size,
+        gates.shape[-1],
+        dtype=torch.bool,
+    )
+    other_mask.scatter_(1, (leak_positions + 1).unsqueeze(1), False)
+    expected_other_gate = gates[:, :, -1].masked_select(
+        other_mask[:, None, :].expand_as(gates[:, :, -1])
+    ).mean()
+
+    rule.capture_statistics = True
+    rule.clear_statistics()
+    rule.attention_gates(batch.input_ids)
+    statistics = rule.statistics[-1]
+
+    assert statistics["routing_leak_gate"] == pytest.approx(
+        float(expected_leak_gate)
+    )
+    assert statistics["routing_query_other_gate"] == pytest.approx(
+        float(expected_other_gate)
+    )
+    assert statistics["routing_leak_relative_gate"] == pytest.approx(
+        float(expected_leak_gate / expected_other_gate)
     )
 
 
