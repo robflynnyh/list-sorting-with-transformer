@@ -1114,6 +1114,23 @@ The next capacity test should therefore preserve the learned centre and
 increase the inner horizon after its horizon-80 behavior is shown to be
 stable.
 
+The fourth window shows the conservative centre continuing to catch up:
+
+| Generations 110-119 | Clean CE | Masked | Wrong hint | Correct leak | Minimum clean split | Robust candidate min | Centre leak ratio | Centre update / RMS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Conservative (`0.02`) | 2.5164 | 21.37% | 11.41% | 68.28% | 11.41% | 18.75% | 0.340 | 0.92% |
+| Medium (`0.05`) | 2.2997 | 22.15% | 17.46% | 37.81% | 17.46% | 20.78% | 0.165 | 2.04% |
+
+Conservative wrong-hint accuracy has now risen monotonically across the four
+matched windows: `0.51%`, `2.11%`, `5.55%`, then `11.41%`. This confirms that
+the smaller outer step was delayed rather than inert. The medium branch is
+instead stabilizing near the horizon-80 oracle range. Its centre remains
+`3.32` percentage points below its robust sampled candidates on the weaker
+split, while the conservative gap is `7.34` points. Both branches remain
+useful: medium tests the attainable horizon-80 solution, and conservative
+tests whether a slower trajectory eventually reaches similar selectivity with
+less loss of correct-leak performance.
+
 ![Horizon-80 centre-step comparison](results/attention_router_center_step_comparison.png)
 
 #### Learned routing structure
