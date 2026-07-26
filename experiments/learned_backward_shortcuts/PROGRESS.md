@@ -1287,6 +1287,32 @@ lower clean CE is not accompanied by output collapse: all ten values are used.
 Routing the output-projection parameter gradient is substantially worse on
 this task and should be disabled in the semantic EGGROLL run.
 
+Two additional CPU seeds reveal substantial forward-training variance:
+
+| Seed | Ordinary correct-hint training | Masked-hint training | Q/K/V hint-source oracle | Complete-attention oracle |
+| ---: | ---: | ---: | ---: | ---: |
+| 7 | 9.77% | 78.52% | 77.15% | 26.76% |
+| 8 | 88.67% | 79.69% | 91.80% | 20.70% |
+| 9 | 8.01% | 20.90% | 25.20% | 18.75% |
+| Mean | 35.48% | 59.70% | 64.71% | 22.07% |
+| Sample standard deviation | 46.07 | 33.61 | 35.00 | 4.18 |
+
+These cells report balanced masked/incorrect clean accuracy. Ordinary Adam
+learns the true task as well as the shortcut on seed 8, but collapses to the
+shortcut on seeds 7 and 9. Even direct masked-hint training varies sharply,
+so one initialization cannot define the benchmark. The Q/K/V oracle is within
+`1.37` points of masked training on seed 7 and exceeds it on seeds 8 and 9.
+Its three-seed masked and wrong-hint means are `64.97%` and `64.45%`; all three
+seeds use all ten output values.
+
+The existing EGGROLL harness already samples a fresh forward initialization
+per generation and shares it across every antithetic candidate, which targets
+the expectation over this variance without corrupting within-generation
+comparisons. The first semantic run should retain that protocol. Averaging
+multiple forward initializations inside each generation is a possible
+variance-reduction follow-up, but would multiply the already substantial
+horizon-160 cost and is not required for the first search.
+
 These are CPU prerequisites, not the final benchmark. They must be replicated
 on a GPU after the active fixed-suffix runs release one. If replicated, the
 first semantic search should start from a fresh shared router at fixed horizon
