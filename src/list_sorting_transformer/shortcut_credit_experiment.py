@@ -87,6 +87,7 @@ class ShortcutCreditExperimentConfig:
     wandb_project: str = "list-sorting-learned-backward"
     wandb_entity: str | None = None
     resume: str | None = None
+    resume_horizon: int | None = None
     candidate_devices: str | None = None
 
     def __post_init__(self) -> None:
@@ -156,6 +157,13 @@ class ShortcutCreditExperimentConfig:
             raise ValueError("invalid task length range")
         if self.horizon > self.max_horizon:
             raise ValueError("horizon must not exceed max_horizon")
+        if self.resume_horizon is not None:
+            if self.resume is None:
+                raise ValueError("resume_horizon requires a resume checkpoint")
+            if not 1 <= self.resume_horizon <= self.max_horizon:
+                raise ValueError(
+                    "resume_horizon must be in [1, max_horizon]"
+                )
         if not 0 <= self.plateau_ema_decay < 1:
             raise ValueError("plateau_ema_decay must be in [0, 1)")
         if min(
@@ -1396,6 +1404,15 @@ def load_checkpoint(
     )
 
 
+def resolve_resume_horizon(
+    config: ShortcutCreditExperimentConfig,
+    checkpoint_horizon: int,
+) -> int:
+    if config.resume_horizon is None:
+        return checkpoint_horizon
+    return config.resume_horizon
+
+
 def maybe_initialize_wandb(
     config: ShortcutCreditExperimentConfig,
 ) -> Any | None:
@@ -1443,6 +1460,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             Path(config.resume),
             device=device,
         )
+        horizon = resolve_resume_horizon(config, horizon)
         if center_rule.config != backward_config:
             raise ValueError("resume checkpoint architecture differs from config")
     if plateau_state.search_sigma is None:
@@ -2174,6 +2192,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--wandb-entity")
     parser.add_argument("--resume")
+    parser.add_argument(
+        "--resume-horizon",
+        type=int,
+        help="override the evolved horizon stored in a resume checkpoint",
+    )
     return parser
 
 

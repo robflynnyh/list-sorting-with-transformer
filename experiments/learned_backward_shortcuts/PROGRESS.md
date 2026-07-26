@@ -1917,3 +1917,49 @@ Matched audit outputs:
 [`results/random_elite_post_g42_replications_summary.json`](results/random_elite_post_g42_replications_summary.json),
 and
 [`results/random_elite_post_g45_replications_summary.json`](results/random_elite_post_g45_replications_summary.json).
+
+The working success criterion is `98--99%` mean unseen weaker-split accuracy,
+not accuracy on the fixed fitness set. Continued accepted updates produced a
+smaller but repeatable gain:
+
+| Checkpoint | Standard 20 | Additional 20 | Combined 40 |
+| --- | ---: | ---: | ---: |
+| After generation 49 | 92.77% | 93.83% | **93.30%** |
+| After generation 52 | 92.58% | 93.79% | 93.18% |
+| After generation 58 | **93.09%** | not run | not combined |
+
+The generation-52 rule is effectively tied with generation 49 on external
+data despite three additional fixed-fitness improvements. The paper-style
+control was stopped after generation 100: its recent fresh weaker-split
+accuracy remained mostly `0--10%`, even while sampled candidates continued to
+reach as high as `95.7%`. This strengthens the conclusion that aggregating the
+whole population, rather than candidate discovery, caused the original
+failure.
+
+Longer forward training with the generation-49 rule diagnoses the next
+bottleneck:
+
+| Shortcut-only forward updates | Mean unseen weaker-split accuracy | Clean CE |
+| ---: | ---: | ---: |
+| 160 | 92.77% | 0.436 |
+| 320 | **93.81%** | **0.263** |
+| 640 | **93.81%** | 0.264 |
+
+The current rule remains shortcut-resistant at longer horizons and benefits
+from training to 320 updates, but then saturates. Merely running it for 640
+updates cannot reach the `98--99%` target. The next phase therefore resumes
+from checkpoint 59 and evolves the backward rule with a 320-update inner
+horizon. The resume path has an explicit, tested horizon override so this
+transition preserves checkpoint lineage and adaptive-search state.
+
+Continued-audit outputs:
+[`results/random_elite_post_g49_replications_summary.json`](results/random_elite_post_g49_replications_summary.json),
+[`results/random_elite_post_g49_extra_replications_summary.json`](results/random_elite_post_g49_extra_replications_summary.json),
+[`results/random_elite_post_g52_replications_summary.json`](results/random_elite_post_g52_replications_summary.json),
+and
+[`results/random_elite_post_g52_extra_replications_summary.json`](results/random_elite_post_g52_extra_replications_summary.json).
+
+Horizon-audit outputs:
+[`results/random_elite_g49_h320_replications_summary.json`](results/random_elite_g49_h320_replications_summary.json)
+and
+[`results/random_elite_g49_h640_replications_summary.json`](results/random_elite_g49_h640_replications_summary.json).

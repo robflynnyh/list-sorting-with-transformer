@@ -40,6 +40,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     make_inner_batches,
     parse_candidate_devices,
     restore_center_parameters,
+    resolve_resume_horizon,
     routing_population_summary,
     save_checkpoint,
     shard_candidate_specs,
@@ -457,6 +458,27 @@ def test_elite_search_sigma_grows_after_success_streak() -> None:
     state.consecutive_accepted_updates = 2
     update_elite_search_state(state, accepted=True, config=config)
     assert state.search_sigma == pytest.approx(0.2)
+
+
+def test_resume_horizon_override_is_explicit() -> None:
+    default_config = ShortcutCreditExperimentConfig()
+    assert resolve_resume_horizon(default_config, 160) == 160
+
+    override_config = ShortcutCreditExperimentConfig(
+        resume="checkpoint.pt",
+        resume_horizon=320,
+        max_horizon=640,
+    )
+    assert resolve_resume_horizon(override_config, 160) == 320
+
+    with pytest.raises(ValueError, match="requires a resume"):
+        ShortcutCreditExperimentConfig(resume_horizon=20)
+    with pytest.raises(ValueError, match="resume_horizon"):
+        ShortcutCreditExperimentConfig(
+            resume="checkpoint.pt",
+            resume_horizon=641,
+            max_horizon=640,
+        )
 
 
 def test_center_rule_summary_reports_unperturbed_training_metrics() -> None:
