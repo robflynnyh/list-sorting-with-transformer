@@ -205,6 +205,14 @@ def plot_chained_metrics(
         label="leak/other routing gate",
         color="#8c564b",
     )
+    _plot_series(
+        eggroll_axis,
+        rows,
+        "backward/best_fitness_leak_relative_gate",
+        label="fittest candidate leak/other gate",
+        color="#17becf",
+        linestyle=":",
+    )
     horizon_axis = eggroll_axis.twinx()
     _plot_series(
         horizon_axis,

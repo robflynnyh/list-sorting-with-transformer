@@ -944,3 +944,55 @@ Generation 50 triggered the shared router's transition to horizon 80.
 Checkpoint 50 preserves the completed horizon-40 centre. The horizon-80 phase
 will be run for substantially longer than the 20-generation independent
 control before success or failure is judged.
+
+The first horizon-80 window remains shortcut-dominated, but the following
+partial window begins to expose useful candidates:
+
+| Shared-map horizon-80 window | Clean CE | Masked | Wrong hint | Correct leak | Robust candidate min | Centre leak ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Generations 51-60 | 3.1292 | 18.14% | 0.018% | 99.90% | 0.98% | 0.769 |
+| Generations 61-69 | 3.0578 | 19.60% | 0.156% | 99.56% | 5.16% | 0.731 |
+
+Here the ordinary columns are population means, whereas `Robust candidate
+min` selects the best minimum of masked and wrong-hint accuracy in each
+generation. Individual fittest candidates reached:
+
+| Generation | Masked | Wrong hint | Centre leak ratio |
+| ---: | ---: | ---: | ---: |
+| 63 | 22.66% | 13.67% | 0.686 |
+| 66 | 24.61% | 8.59% | 0.886 |
+| 68 | 23.44% | 7.81% | 0.619 |
+
+This is candidate evidence, not yet centre performance, but repeated
+wrong-hint success shows that horizon-80 escape directions are available.
+
+A matched checkpoint-60 population replay gave:
+
+| Population | Best ratio | Candidates below 0.9 | Fitness/selectivity correlation | Best masked / wrong / correct-leak | Time |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 | 0.402 | 78.12% | +0.369 | 21.09% / 3.91% / 83.59% | 50 s |
+| 256 | 0.396 | 77.73% | +0.308 | 21.09% / 3.91% / 83.59% | 212 s |
+
+The additional 192 candidates neither improve the best trained model nor the
+fitness/selectivity relationship. P256 is therefore not worth its `4.2x`
+cost at this centre. The authoritative long continuation uses P64, records
+population diagnostics every generation, and is capped at horizon 80 so it
+cannot promote prematurely:
+
+- Run:
+  [`attention-router-shared-h80-long-p64-popdiag-resume70-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/1dzqg8f6)
+- Source:
+  `attention-router-shared-p64-s0035-outer002-worstce-seed7/checkpoint_000070.pt`.
+- Configuration: generations 70-249, horizon fixed at 80, population 64,
+  `sigma=0.035`, outer learning rate schedule starting near `0.0144`, and
+  worst-split CE fitness.
+
+![Shared attention-router progress](results/attention_router_shared_progress.png)
+
+The continuation's first two generations demonstrate why candidate-level
+diagnostics matter. Generation 70 had no wrong-hint success despite `85.94%`
+of candidates having a leak ratio below `0.9`. At generation 71, the fittest
+candidate reached `23.83%` masked and `16.02%` wrong-hint accuracy with a
+`0.330` leak ratio and `63.28%` correct-leak accuracy. Population-mean
+wrong-hint accuracy rose to `0.88%`. The centre itself still requires repeated
+updates before these candidate gains can be considered learned.
