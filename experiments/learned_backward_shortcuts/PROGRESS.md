@@ -1697,3 +1697,42 @@ Replication outputs:
 [`results/random_checkpoint30_replications.jsonl`](results/random_checkpoint30_replications.jsonl)
 and
 [`results/random_checkpoint30_replications_summary.json`](results/random_checkpoint30_replications_summary.json).
+
+Checkpoint 40 provides no evidence of a transition yet. Across live
+generations 30--39, the centre and ordinary rule average `8.67%` and `8.55%`
+fresh weaker-split accuracy, but the centre is worse by `0.062` clean CE and
+wins only one of ten accuracy comparisons. A new independent 20-replication
+audit is also negative:
+
+| Checkpoint-40 independent replication mean | Evolved centre | Ordinary training | Masked training |
+| --- | ---: | ---: | ---: |
+| Weaker-split accuracy | 1.80% | 5.57% | 24.77% |
+| Correct-hint accuracy | 96.99% | 95.31% | 43.52% |
+| Clean CE | 3.325 | 3.045 | 2.059 |
+
+On those seeds, the centre loses `3.77` percentage points and `0.280` CE
+relative to ordinary training. It wins `2/20` accuracy comparisons and `5/20`
+CE comparisons.
+
+For a direct trajectory comparison, checkpoint 40 was additionally evaluated
+on the exact 20 forward initializations and datasets used for checkpoint 30:
+
+| Same-seed centre checkpoint | Weaker-split accuracy | Correct-hint accuracy | Clean CE |
+| --- | ---: | ---: | ---: |
+| Generation 30 | 7.07% | 95.39% | 3.080 |
+| Generation 40 | 6.78% | 95.00% | 3.118 |
+
+The ten additional outer updates therefore did not improve the centre on a
+fixed evaluation distribution. Routing remains broad as well: the
+generation-40 hint gate is `0.377` versus `0.382` over all query sources, and
+all measured semantic roles remain within about `0.8%` of their
+position-matched controls. This still does not exclude a later phase change,
+but it establishes that generations 30--40 made the router more suppressive
+without making its learned credit assignment more useful.
+
+Checkpoint-40 outputs:
+[`results/random_checkpoint40_replications.jsonl`](results/random_checkpoint40_replications.jsonl),
+[`results/random_checkpoint40_replications_summary.json`](results/random_checkpoint40_replications_summary.json),
+[`results/random_checkpoint40_replications_matched30.jsonl`](results/random_checkpoint40_replications_matched30.jsonl),
+and
+[`results/random_checkpoint40_replications_matched30_summary.json`](results/random_checkpoint40_replications_matched30_summary.json).
