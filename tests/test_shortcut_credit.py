@@ -144,14 +144,18 @@ def test_candidate_summary_reports_the_fittest_candidate_metrics() -> None:
     clean = [
         ShortcutMetrics(2.4, 0.2, {"masked": 0.3, "incorrect": 0.1}, 4, 3, 0.6),
         ShortcutMetrics(2.1, 0.6, {"masked": 0.7, "incorrect": 0.5}, 8, 7, 0.3),
+        ShortcutMetrics(2.2, 0.6, {"masked": 0.6, "incorrect": 0.6}, 8, 8, 0.2),
+        ShortcutMetrics(2.5, 0.1, {"masked": 0.1, "incorrect": 0.1}, 2, 2, 0.8),
     ]
     correct = [
         ShortcutMetrics(2.0, 0.4, {"correct": 0.4}, 5, 4, 0.5),
         ShortcutMetrics(1.0, 0.9, {"correct": 0.9}, 9, 8, 0.2),
+        ShortcutMetrics(1.5, 0.7, {"correct": 0.7}, 8, 8, 0.2),
+        ShortcutMetrics(2.5, 0.1, {"correct": 0.1}, 2, 2, 0.8),
     ]
 
     summary = candidate_summary(
-        torch.tensor([0.1, 0.8]),
+        torch.tensor([0.1, 0.8, 0.2, 0.0]),
         clean,
         correct,
     )
@@ -162,6 +166,11 @@ def test_candidate_summary_reports_the_fittest_candidate_metrics() -> None:
     assert summary["best/masked_accuracy"] == 0.7
     assert summary["best/incorrect_accuracy"] == 0.5
     assert summary["best/correct_leak_accuracy"] == 0.9
+    assert summary["robust/candidate_index"] == 2
+    assert summary["robust/min_mode_accuracy"] == 0.6
+    assert summary["robust/masked_accuracy"] == 0.6
+    assert summary["robust/incorrect_accuracy"] == 0.6
+    assert summary["robust/correct_leak_accuracy"] == 0.7
 
 
 def test_right_padded_evaluation_preserves_query_logits() -> None:

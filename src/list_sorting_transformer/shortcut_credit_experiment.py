@@ -488,6 +488,15 @@ def candidate_summary(
     best_index = int(fitnesses.argmax())
     best_clean = clean_metrics[best_index]
     best_correct = correct_metrics[best_index]
+    robust_index = max(
+        range(len(clean_metrics)),
+        key=lambda index: min(
+            clean_metrics[index].mode_accuracy["masked"],
+            clean_metrics[index].mode_accuracy["incorrect"],
+        ),
+    )
+    robust_clean = clean_metrics[robust_index]
+    robust_correct = correct_metrics[robust_index]
     return {
         "fitness/mean": float(fitnesses.mean()),
         "fitness/std": float(fitnesses.std(unbiased=False)),
@@ -517,6 +526,25 @@ def candidate_summary(
         ),
         "best/prediction_mode_fraction": (
             best_clean.prediction_mode_fraction
+        ),
+        "robust/candidate_index": robust_index,
+        "robust/min_mode_accuracy": min(
+            robust_clean.mode_accuracy["masked"],
+            robust_clean.mode_accuracy["incorrect"],
+        ),
+        "robust/fitness": float(fitnesses[robust_index]),
+        "robust/clean_loss": robust_clean.loss,
+        "robust/clean_accuracy": robust_clean.accuracy,
+        "robust/masked_accuracy": robust_clean.mode_accuracy["masked"],
+        "robust/incorrect_accuracy": (
+            robust_clean.mode_accuracy["incorrect"]
+        ),
+        "robust/correct_leak_accuracy": robust_correct.accuracy,
+        "robust/unique_value_predictions": float(
+            robust_clean.unique_value_prediction_count
+        ),
+        "robust/prediction_mode_fraction": (
+            robust_clean.prediction_mode_fraction
         ),
     }
 
