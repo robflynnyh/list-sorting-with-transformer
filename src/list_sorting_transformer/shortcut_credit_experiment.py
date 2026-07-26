@@ -141,6 +141,14 @@ class PlateauState:
     stale_generations: int = 0
 
 
+@dataclass(frozen=True)
+class ForwardTrajectoryMetrics:
+    clean: ShortcutMetrics
+    correct: ShortcutMetrics
+    heldout_clean: ShortcutMetrics | None = None
+    heldout_correct: ShortcutMetrics | None = None
+
+
 def make_mode_batches(
     example_count: int,
     *,
@@ -292,7 +300,9 @@ def train_candidate(
     device: torch.device,
     capture_statistics: bool,
     perturbation_sigma: float | None = None,
-) -> tuple[float, ShortcutMetrics, ShortcutMetrics, list[dict[str, float]]]:
+    heldout_fitness_batches: tuple[ShortcutBatch, ...] | None = None,
+    heldout_correct_batches: tuple[ShortcutBatch, ...] | None = None,
+) -> tuple[float, ForwardTrajectoryMetrics, list[dict[str, float]]]:
     backward_rule = initialize_backward_rule(
         center_rule.config,
         device=device,
@@ -309,24 +319,25 @@ def train_candidate(
         sign=sign,
     )
     backward_rule.capture_statistics = capture_statistics
-    clean_metrics, correct_metrics = train_forward_trajectory(
+    trajectory = train_forward_trajectory(
         config,
         base_state=base_state,
         backward_rule=backward_rule,
         inner_batches=inner_batches,
         fitness_batches=fitness_batches,
         correct_batches=correct_batches,
+        heldout_fitness_batches=heldout_fitness_batches,
+        heldout_correct_batches=heldout_correct_batches,
         device=device,
     )
     fitness = candidate_fitness(
         config.fitness_objective,
         initial_clean_metrics,
-        clean_metrics,
+        trajectory.clean,
     )
     return (
         fitness,
-        clean_metrics,
-        correct_metrics,
+        trajectory,
         list(backward_rule.statistics),
     )
 
@@ -339,10 +350,16 @@ def train_forward_trajectory(
     inner_batches: tuple[ShortcutBatch, ...],
     fitness_batches: tuple[ShortcutBatch, ...],
     correct_batches: tuple[ShortcutBatch, ...],
+    heldout_fitness_batches: tuple[ShortcutBatch, ...] | None = None,
+    heldout_correct_batches: tuple[ShortcutBatch, ...] | None = None,
     device: torch.device,
-) -> tuple[ShortcutMetrics, ShortcutMetrics]:
+) -> ForwardTrajectoryMetrics:
     """Train one forward model from the shared per-generation state."""
 
+    if (heldout_fitness_batches is None) != (
+        heldout_correct_batches is None
+    ):
+        raise ValueError("both held-out batch groups must be provided together")
     model = initialize_forward_model(
         config,
         ShortcutPointerVocabulary("numbers", 10),
@@ -363,7 +380,22 @@ def train_forward_trajectory(
 
     clean_metrics = evaluate_shortcut_batches(model, fitness_batches)
     correct_metrics = evaluate_shortcut_batches(model, correct_batches)
-    return clean_metrics, correct_metrics
+    heldout_clean_metrics = (
+        None
+        if heldout_fitness_batches is None
+        else evaluate_shortcut_batches(model, heldout_fitness_batches)
+    )
+    heldout_correct_metrics = (
+        None
+        if heldout_correct_batches is None
+        else evaluate_shortcut_batches(model, heldout_correct_batches)
+    )
+    return ForwardTrajectoryMetrics(
+        clean=clean_metrics,
+        correct=correct_metrics,
+        heldout_clean=heldout_clean_metrics,
+        heldout_correct=heldout_correct_metrics,
+    )
 
 
 def candidate_fitness(
@@ -382,12 +414,11 @@ def candidate_fitness(
 
 def trajectory_summary(
     prefix: str,
-    fitness: float,
+    fitness: float | None,
     clean: ShortcutMetrics,
     correct: ShortcutMetrics,
 ) -> dict[str, float]:
-    return {
-        f"{prefix}/fitness": fitness,
+    summary = {
         f"{prefix}/clean_loss": clean.loss,
         f"{prefix}/clean_accuracy": clean.accuracy,
         f"{prefix}/masked_accuracy": clean.mode_accuracy["masked"],
@@ -404,6 +435,9 @@ def trajectory_summary(
             clean.prediction_mode_fraction
         ),
     }
+    if fitness is not None:
+        summary[f"{prefix}/fitness"] = fitness
+    return summary
 
 
 def center_rule_summary(
@@ -469,8 +503,7 @@ def train_candidate_shard(
     tuple[
         int,
         float,
-        ShortcutMetrics,
-        ShortcutMetrics,
+        ForwardTrajectoryMetrics,
         list[dict[str, float]],
     ]
 ]:
@@ -504,7 +537,7 @@ def train_candidate_shard(
 
     results = []
     for candidate_index, direction_index, sign in candidate_specs:
-        fitness, clean, correct, statistics = train_candidate(
+        fitness, trajectory, statistics = train_candidate(
             config,
             base_state=worker_base_state,
             center_rule=worker_center_rule,
@@ -522,7 +555,7 @@ def train_candidate_shard(
             ),
         )
         results.append(
-            (candidate_index, fitness, clean, correct, statistics)
+            (candidate_index, fitness, trajectory, statistics)
         )
     return results
 
@@ -963,6 +996,27 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         generation_started_at = time.monotonic()
         generation_seed = config.seed * 1_000_003 + generation * 10_007
         initialization_seed = generation_seed + 1
+        heldout_generator = torch.Generator().manual_seed(
+            generation_seed + 4
+        )
+        heldout_fitness_batches = make_fitness_batches(
+            config.fitness_examples,
+            min_length=config.min_length,
+            max_length=config.max_length,
+            batch_size=config.fitness_batch_size,
+            generator=heldout_generator,
+            vocabulary=vocabulary,
+            leak_placement=config.leak_placement,
+            device=device,
+        )
+        heldout_correct_batches = make_mode_batches(
+            config.correct_eval_examples,
+            leak_mode="correct",
+            config=config,
+            vocabulary=vocabulary,
+            generator=heldout_generator,
+            device=device,
+        )
         base_model = initialize_forward_model(
             config,
             vocabulary,
@@ -1021,14 +1075,13 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             tuple[
                 int,
                 float,
-                ShortcutMetrics,
-                ShortcutMetrics,
+                ForwardTrajectoryMetrics,
                 list[dict[str, float]],
             ]
         ] = []
         if len(candidate_devices) == 1:
             for candidate_index, direction_index, sign in candidate_specs:
-                fitness, clean, correct, statistics = train_candidate(
+                fitness, trajectory, statistics = train_candidate(
                     config,
                     base_state=base_state,
                     center_rule=center_rule,
@@ -1049,8 +1102,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     (
                         candidate_index,
                         fitness,
-                        clean,
-                        correct,
+                        trajectory,
                         statistics,
                     )
                 )
@@ -1092,22 +1144,17 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         correct_results = []
         candidate_statistics: list[list[dict[str, float]]] = []
         captured_statistics: list[dict[str, float]] = []
-        for candidate_index, fitness, clean, correct, statistics in (
+        for candidate_index, fitness, trajectory, statistics in (
             candidate_outputs
         ):
             fitness_values.append(fitness)
-            clean_results.append(clean)
-            correct_results.append(correct)
+            clean_results.append(trajectory.clean)
+            correct_results.append(trajectory.correct)
             candidate_statistics.append(statistics)
             if candidate_index == 0 and statistics:
                 captured_statistics = statistics
 
-        (
-            center_fitness,
-            center_clean,
-            center_correct,
-            _,
-        ) = train_candidate(
+        center_fitness, center_trajectory, _ = train_candidate(
             config,
             base_state=base_state,
             center_rule=center_rule,
@@ -1121,37 +1168,75 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             device=device,
             capture_statistics=False,
             perturbation_sigma=0.0,
+            heldout_fitness_batches=heldout_fitness_batches,
+            heldout_correct_batches=heldout_correct_batches,
         )
-        ordinary_clean, ordinary_correct = train_forward_trajectory(
+        ordinary_trajectory = train_forward_trajectory(
             config,
             base_state=base_state,
             backward_rule=None,
             inner_batches=inner_batches,
             fitness_batches=fitness_batches,
             correct_batches=correct_batches,
+            heldout_fitness_batches=heldout_fitness_batches,
+            heldout_correct_batches=heldout_correct_batches,
             device=device,
         )
-        masked_training_clean, masked_training_correct = (
-            train_forward_trajectory(
-                config,
-                base_state=base_state,
-                backward_rule=None,
-                inner_batches=masked_inner_batches,
-                fitness_batches=fitness_batches,
-                correct_batches=correct_batches,
-                device=device,
-            )
+        masked_training_trajectory = train_forward_trajectory(
+            config,
+            base_state=base_state,
+            backward_rule=None,
+            inner_batches=masked_inner_batches,
+            fitness_batches=fitness_batches,
+            correct_batches=correct_batches,
+            heldout_fitness_batches=heldout_fitness_batches,
+            heldout_correct_batches=heldout_correct_batches,
+            device=device,
         )
         ordinary_fitness = candidate_fitness(
             config.fitness_objective,
             initial_clean_metrics,
-            ordinary_clean,
+            ordinary_trajectory.clean,
         )
         masked_training_fitness = candidate_fitness(
             config.fitness_objective,
             initial_clean_metrics,
-            masked_training_clean,
+            masked_training_trajectory.clean,
         )
+        center_clean = center_trajectory.clean
+        center_correct = center_trajectory.correct
+        ordinary_clean = ordinary_trajectory.clean
+        ordinary_correct = ordinary_trajectory.correct
+        masked_training_clean = masked_training_trajectory.clean
+        masked_training_correct = masked_training_trajectory.correct
+        if any(
+            metrics is None
+            for metrics in (
+                center_trajectory.heldout_clean,
+                center_trajectory.heldout_correct,
+                ordinary_trajectory.heldout_clean,
+                ordinary_trajectory.heldout_correct,
+                masked_training_trajectory.heldout_clean,
+                masked_training_trajectory.heldout_correct,
+            )
+        ):
+            raise RuntimeError("held-out trajectory metrics were not produced")
+        center_heldout_clean = center_trajectory.heldout_clean
+        center_heldout_correct = center_trajectory.heldout_correct
+        ordinary_heldout_clean = ordinary_trajectory.heldout_clean
+        ordinary_heldout_correct = ordinary_trajectory.heldout_correct
+        masked_training_heldout_clean = (
+            masked_training_trajectory.heldout_clean
+        )
+        masked_training_heldout_correct = (
+            masked_training_trajectory.heldout_correct
+        )
+        assert center_heldout_clean is not None
+        assert center_heldout_correct is not None
+        assert ordinary_heldout_clean is not None
+        assert ordinary_heldout_correct is not None
+        assert masked_training_heldout_clean is not None
+        assert masked_training_heldout_correct is not None
         fitness_tensor = torch.tensor(fitness_values, device=device)
         outer_learning_rate = linear_outer_learning_rate(config, generation)
         standardized = paper_eggroll_update(
@@ -1191,6 +1276,30 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 masked_training_correct,
             )
         )
+        summary.update(
+            trajectory_summary(
+                "heldout_center_rule",
+                None,
+                center_heldout_clean,
+                center_heldout_correct,
+            )
+        )
+        summary.update(
+            trajectory_summary(
+                "heldout_ordinary_rule",
+                None,
+                ordinary_heldout_clean,
+                ordinary_heldout_correct,
+            )
+        )
+        summary.update(
+            trajectory_summary(
+                "heldout_masked_training",
+                None,
+                masked_training_heldout_clean,
+                masked_training_heldout_correct,
+            )
+        )
         center_min_accuracy = min(
             center_clean.mode_accuracy["masked"],
             center_clean.mode_accuracy["incorrect"],
@@ -1202,6 +1311,14 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         masked_training_min_accuracy = min(
             masked_training_clean.mode_accuracy["masked"],
             masked_training_clean.mode_accuracy["incorrect"],
+        )
+        center_heldout_min_accuracy = min(
+            center_heldout_clean.mode_accuracy["masked"],
+            center_heldout_clean.mode_accuracy["incorrect"],
+        )
+        ordinary_heldout_min_accuracy = min(
+            ordinary_heldout_clean.mode_accuracy["masked"],
+            ordinary_heldout_clean.mode_accuracy["incorrect"],
         )
         summary.update(
             {
@@ -1216,6 +1333,13 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 ),
                 "comparison/masked_training_clean_loss_improvement_over_ordinary": (
                     ordinary_clean.loss - masked_training_clean.loss
+                ),
+                "heldout_comparison/center_minus_ordinary_min_accuracy": (
+                    center_heldout_min_accuracy
+                    - ordinary_heldout_min_accuracy
+                ),
+                "heldout_comparison/center_clean_loss_improvement_over_ordinary": (
+                    ordinary_heldout_clean.loss - center_heldout_clean.loss
                 ),
             }
         )

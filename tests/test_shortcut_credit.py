@@ -39,6 +39,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     routing_population_summary,
     save_checkpoint,
     shard_candidate_specs,
+    train_forward_trajectory,
     trajectory_summary,
     update_plateau_state,
 )
@@ -380,6 +381,129 @@ def test_trajectory_summary_supports_matched_baseline_prefixes() -> None:
     assert summary["ordinary_rule/fitness"] == 0.7
     assert summary["ordinary_rule/min_mode_accuracy"] == 0.4
     assert summary["ordinary_rule/correct_leak_accuracy"] == 0.8
+
+
+def test_trajectory_summary_can_omit_fitness_for_heldout_data() -> None:
+    clean = ShortcutMetrics(
+        2.0,
+        0.5,
+        {"masked": 0.6, "incorrect": 0.4},
+        {"masked": 1.9, "incorrect": 2.1},
+        8,
+        7,
+        0.2,
+    )
+    correct = ShortcutMetrics(
+        1.2,
+        0.8,
+        {"correct": 0.8},
+        {"correct": 1.2},
+        9,
+        8,
+        0.2,
+    )
+
+    summary = trajectory_summary(
+        "heldout_center_rule",
+        None,
+        clean,
+        correct,
+    )
+
+    assert "heldout_center_rule/fitness" not in summary
+    assert summary["heldout_center_rule/min_mode_accuracy"] == 0.4
+
+
+def test_forward_trajectory_evaluates_outer_loop_unseen_batches() -> None:
+    config = ShortcutCreditExperimentConfig(
+        population_size=2,
+        horizon=1,
+        max_horizon=1,
+        batch_size=4,
+        fitness_examples=8,
+        fitness_batch_size=4,
+        correct_eval_examples=4,
+        min_length=4,
+        max_length=4,
+        d_model=32,
+        backward_d_model=32,
+        forward_layers=1,
+        backward_layers=1,
+        heads=4,
+    )
+    vocabulary = small_vocabulary()
+    model = ShortcutDecoderTransformer(
+        make_forward_model_config(
+            vocabulary,
+            d_model=32,
+            n_layers=1,
+            n_heads=4,
+        )
+    )
+    base_state = deepcopy(model.state_dict())
+    inner = (
+        make_shortcut_batch(
+            4,
+            4,
+            leak_mode="correct",
+            generator=torch.Generator().manual_seed(1),
+            vocabulary=vocabulary,
+        ),
+    )
+    fitness = make_fitness_batches(
+        8,
+        min_length=4,
+        max_length=4,
+        batch_size=4,
+        generator=torch.Generator().manual_seed(2),
+        vocabulary=vocabulary,
+    )
+    correct = (
+        make_shortcut_batch(
+            4,
+            4,
+            leak_mode="correct",
+            generator=torch.Generator().manual_seed(3),
+            vocabulary=vocabulary,
+        ),
+    )
+    heldout_fitness = make_fitness_batches(
+        8,
+        min_length=4,
+        max_length=4,
+        batch_size=4,
+        generator=torch.Generator().manual_seed(4),
+        vocabulary=vocabulary,
+    )
+    heldout_correct = (
+        make_shortcut_batch(
+            4,
+            4,
+            leak_mode="correct",
+            generator=torch.Generator().manual_seed(5),
+            vocabulary=vocabulary,
+        ),
+    )
+
+    trajectory = train_forward_trajectory(
+        config,
+        base_state=base_state,
+        backward_rule=None,
+        inner_batches=inner,
+        fitness_batches=fitness,
+        correct_batches=correct,
+        heldout_fitness_batches=heldout_fitness,
+        heldout_correct_batches=heldout_correct,
+        device=torch.device("cpu"),
+    )
+
+    assert trajectory.heldout_clean is not None
+    assert trajectory.heldout_correct is not None
+    assert set(trajectory.heldout_clean.mode_accuracy) == {
+        "masked",
+        "incorrect",
+    }
+    assert set(trajectory.heldout_correct.mode_accuracy) == {"correct"}
 
 
 def test_masked_inner_batches_match_correct_batch_content_and_positions() -> None:
