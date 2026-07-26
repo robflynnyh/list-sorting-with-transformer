@@ -460,6 +460,7 @@ class AttentionRoutingRuleConfig:
     ffn_multiplier: float = 4.0
     routing_temperature: float = 0.1
     max_log_suppression: float = 8.0
+    route_output_projection: bool = False
 
     def __post_init__(self) -> None:
         if min(
@@ -595,7 +596,9 @@ class AttentionRoutingRule(nn.Module):
             dtype=hidden.dtype,
         ).view(1, 1, 1, sequence_length, 1)
         routing_priority = reverse_weights * valid_destinations
-        active_strength = F.relu(self.gates).view(
+        active_strength = (
+            self.config.max_log_suppression * F.relu(self.gates)
+        ).view(
             1,
             self.config.forward_layers,
             self.config.n_heads,
@@ -615,6 +618,14 @@ class AttentionRoutingRule(nn.Module):
                 device=hidden.device,
             ).tril()
             valid_gates = forward_gates[..., causal]
+            leak_gates = forward_gates[..., -1, -2]
+            other_query_gates = torch.cat(
+                (
+                    forward_gates[..., -1, :-2],
+                    forward_gates[..., -1, -1:],
+                ),
+                dim=-1,
+            )
             self.statistics.append(
                 {
                     "routing_gate": float(valid_gates.mean()),
@@ -623,6 +634,16 @@ class AttentionRoutingRule(nn.Module):
                         (valid_gates < 0.99).float().mean()
                     ),
                     "routing_strength": float(active_strength.mean()),
+                    "routing_leak_gate": float(leak_gates.mean()),
+                    "routing_query_other_gate": float(
+                        other_query_gates.mean()
+                    ),
+                    "routing_leak_relative_gate": float(
+                        leak_gates.mean()
+                        / other_query_gates.mean().clamp_min(
+                            torch.finfo(hidden.dtype).tiny
+                        )
+                    ),
                 }
             )
         return tuple(forward_gates.unbind(dim=1))
@@ -652,6 +673,10 @@ class ShortcutDecoderTransformer(DecoderTransformer):
                     None
                     if attention_gates is None
                     else attention_gates[layer_index]
+                ),
+                route_output_projection=(
+                    isinstance(backward_rule, AttentionRoutingRule)
+                    and backward_rule.config.route_output_projection
                 ),
             )
             if (
@@ -798,6 +823,7 @@ class ShortcutMetrics:
     loss: float
     accuracy: float
     mode_accuracy: dict[str, float]
+    mode_loss: dict[str, float]
     unique_prediction_count: int
     unique_value_prediction_count: int
     prediction_mode_fraction: float
@@ -817,6 +843,7 @@ def evaluate_shortcut_batches(
     total_correct = 0
     total_examples = 0
     mode_correct: dict[str, int] = defaultdict(int)
+    mode_loss: dict[str, float] = defaultdict(float)
     mode_examples: dict[str, int] = defaultdict(int)
     prediction_counts = torch.zeros(
         model.config.vocab_size,
@@ -860,6 +887,7 @@ def evaluate_shortcut_batches(
                 if mode == leak_mode
             ]
             mode_correct[leak_mode] += int(correct[indices].sum())
+            mode_loss[leak_mode] += float(losses[indices].sum())
             mode_examples[leak_mode] += len(indices)
         prediction_counts += torch.bincount(
             predictions.detach().cpu(),
@@ -872,6 +900,10 @@ def evaluate_shortcut_batches(
         accuracy=total_correct / total_examples,
         mode_accuracy={
             mode: mode_correct[mode] / count
+            for mode, count in mode_examples.items()
+        },
+        mode_loss={
+            mode: mode_loss[mode] / count
             for mode, count in mode_examples.items()
         },
         unique_prediction_count=int(prediction_counts.count_nonzero()),

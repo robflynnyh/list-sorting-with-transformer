@@ -645,3 +645,113 @@ continuation is:
   [`attention-router-p64-resume20-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/331xexyu)
 - Source checkpoint: `attention-router-p64-h40-seed7/checkpoint_000020.pt`.
 - Generations 20-26 from the original process are superseded.
+
+#### Original router's horizon-80 failure
+
+The router continued through generation 50 and automatically promoted to
+horizon 80. Its final horizon-40 window remained balanced:
+
+| Window | Clean CE | Masked | Wrong hint | Correct leak |
+| --- | ---: | ---: | ---: | ---: |
+| Generations 40-50 | 2.3583 | 20.7% | 16.6% | 39.3% |
+| Generations 51-59, horizon 80 | 3.1966 | 17.3% | 0.0% | 100.0% |
+
+Every one of the 576 candidates evaluated over the first nine horizon-80
+generations followed the shortcut on the wrong-hint split. The run was stopped
+at its durable generation-60 checkpoint.
+
+A matched generation-50 radius replay showed that this was not fixed by
+searching moderately farther from the centre:
+
+| Sigma | Clean CE | Masked | Wrong hint | Correct leak | Pair delta RMS |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.05 | 3.2626 | 15.9% | 0.0% | 100.0% | 0.0101 |
+| 0.10 | 3.2598 | 16.1% | 0.0% | 100.0% | 0.0156 |
+| 0.20 | 3.2565 | 16.1% | 0.0% | 100.0% | 0.0262 |
+| 0.40 | 3.2520 | 16.3% | 0.0% | 100.0% | 0.0374 |
+
+The ranking signal grew with radius, but none of the 256 candidates resisted
+the shortcut. Edge-level inspection explained why. At the generation-50
+centre, the leak edge retained `97.2%`, `98.2%`, and `99.7%` of the average
+other-edge gate in the three layers. Across the complete radius replay, the
+most selective candidate still retained `57.5%`; no candidate reduced the
+leak edge below `50%` of comparable routes.
+
+#### Oracle routing and complete-attention correction
+
+An oracle diagnostic suppresses only the final query's direct backward edge
+to the leaked-answer token. It uses the same forward initialization, biased
+batches, optimizer, and fixed clean evaluation data:
+
+| Horizon | Backward route | Masked | Wrong hint | Correct leak | Clean CE |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 40 | Ordinary Adam | 22.3% | 18.4% | 43.0% | 2.3539 |
+| 40 | Q/K/V edge suppression | 21.1% | 18.4% | 26.6% | 2.3244 |
+| 40 | Complete attention suppression | 20.3% | 17.2% | 26.6% | 2.3220 |
+| 80 | Ordinary Adam | 15.2% | 0.0% | 100.0% | 3.2705 |
+| 80 | Q/K/V edge suppression | 22.3% | 18.4% | 35.9% | 2.2736 |
+| 80 | Complete attention suppression | 19.1% | 21.1% | 37.5% | 2.2973 |
+
+Thus attention-edge suppression can prevent the shortcut transition. The
+failure was in discovering a selective route, not in the basic intervention.
+
+The diagnostic also exposed two implementation limitations:
+
+1. The normal forward attention remains unchanged by design. Its output
+   projection therefore received parameter gradients computed from an
+   activation that still contained the leak, even when Q/K/V backward credit
+   for that edge was suppressed.
+2. `max_log_suppression=8` was only used as a final clamp. It did not scale the
+   nonnegative routing strength. Because the reverse softmax has only two
+   possible destinations at the penultimate leak token, realistic
+   perturbations could not strongly suppress its edge to the final query.
+
+The corrected optional route keeps the normal forward output exact but uses
+the routed value mixture when computing the attention output projection's
+parameter gradient. The maximum log-suppression value now also scales the
+active routing strength before clamping. Tests verify that the identity centre
+still matches ordinary gradients, active routing changes the output projection
+gradient, and gates remain suppress-only.
+
+Full-population horizon-40 calibration selected `sigma=0.05`:
+
+| Sigma | Pair delta RMS | Standardized fitness SD | Centre update / RMS |
+| ---: | ---: | ---: | ---: |
+| 0.050 | 0.00125 | 0.303 | 3.05% |
+| 0.075 | 0.00197 | 0.475 | 6.65% |
+
+The larger radius produces more separation but more than doubles the first
+centre update. The corrected run is:
+
+- Run:
+  [`attention-router-complete-p64-h40-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/onxqe0tf)
+- Configuration: population 64, horizon 40, `sigma=0.05`, complete-attention
+  routing, and two-GPU candidate sharding.
+- Additional diagnostics report the leak-edge gate relative to the other
+  final-query gates, so broad suppression is not mistaken for selective
+  shortcut blocking.
+
+### 2026-07-26: robust fitness continuation
+
+The unrestricted gradient-transformer rule's first two horizon-80
+ten-generation windows were:
+
+| Window | Clean CE | Masked | Wrong hint | Correct leak | Robust min split |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Generations 200-209 | 2.8838 | 17.4% | 1.7% | 85.9% | 10.0% |
+| Generations 210-219 | 2.5741 | 12.3% | 7.5% | 38.3% | 11.1% |
+
+The mean-CE objective reduced shortcut confidence but also drove masked
+accuracy toward chance. This is calibration, not stable pointer retrieval.
+Some individual candidates had both masked and wrong-hint accuracy above
+chance, but they were not consistently selected by mean CE.
+
+The harness now supports a `worst_mode_ce` objective. Candidate fitness is the
+reduction in the worse of masked and incorrect-hint CE, and the plateau
+objective uses that same quantity. This prevents an improvement on one clean
+split from hiding regression on the other. A first attempt from checkpoint
+220 was stopped after two generations because its local population was already
+collapsed (`1.28` and `1.45 / 10` distinct predicted digits). The controlled
+continuation therefore starts from the pre-collapse generation-190
+horizon-80 checkpoint; its result will be compared against the existing
+mean-CE lineage from the same centre.

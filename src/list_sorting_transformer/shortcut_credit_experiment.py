@@ -63,6 +63,8 @@ class ShortcutCreditExperimentConfig:
     d_model: int = 128
     backward_d_model: int = 128
     backward_rule_type: str = "gradient_transformer"
+    route_output_projection: bool = False
+    fitness_objective: str = "mean_clean_ce"
     forward_layers: int = 3
     backward_layers: int = 2
     heads: int = 4
@@ -105,6 +107,11 @@ class ShortcutCreditExperimentConfig:
             "attention_router",
         }:
             raise ValueError("unknown backward_rule_type")
+        if self.fitness_objective not in {
+            "mean_clean_ce",
+            "worst_mode_ce",
+        }:
+            raise ValueError("unknown fitness_objective")
         if self.fitness_examples % 2:
             raise ValueError("fitness_examples must be even")
         if not 2 <= self.min_length <= self.max_length:
@@ -203,6 +210,7 @@ def make_rule_config(
         d_model=config.backward_d_model,
         n_heads=config.heads,
         forward_layers=config.forward_layers,
+        route_output_projection=config.route_output_projection,
     )
 
 
@@ -306,13 +314,31 @@ def train_candidate(
 
     clean_metrics = evaluate_shortcut_batches(model, fitness_batches)
     correct_metrics = evaluate_shortcut_batches(model, correct_batches)
-    fitness = initial_clean_metrics.loss - clean_metrics.loss
+    fitness = candidate_fitness(
+        config.fitness_objective,
+        initial_clean_metrics,
+        clean_metrics,
+    )
     return (
         fitness,
         clean_metrics,
         correct_metrics,
         list(backward_rule.statistics),
     )
+
+
+def candidate_fitness(
+    objective: str,
+    initial: ShortcutMetrics,
+    trained: ShortcutMetrics,
+) -> float:
+    if objective == "mean_clean_ce":
+        return initial.loss - trained.loss
+    if objective == "worst_mode_ce":
+        initial_worst = max(initial.mode_loss.values())
+        trained_worst = max(trained.mode_loss.values())
+        return initial_worst - trained_worst
+    raise ValueError(f"unknown fitness objective: {objective}")
 
 
 def parse_candidate_devices(
@@ -475,6 +501,13 @@ def candidate_summary(
     correct_accuracies = torch.tensor(
         [metrics.accuracy for metrics in correct_metrics]
     )
+    masked_losses = torch.tensor(
+        [metrics.mode_loss["masked"] for metrics in clean_metrics]
+    )
+    incorrect_losses = torch.tensor(
+        [metrics.mode_loss["incorrect"] for metrics in clean_metrics]
+    )
+    worst_mode_losses = torch.maximum(masked_losses, incorrect_losses)
     clean_unique_values = torch.tensor(
         [
             metrics.unique_value_prediction_count
@@ -507,6 +540,9 @@ def candidate_summary(
         "clean/accuracy_mean": float(clean_accuracies.mean()),
         "clean/masked_accuracy_mean": float(masked_accuracies.mean()),
         "clean/incorrect_accuracy_mean": float(incorrect_accuracies.mean()),
+        "clean/masked_loss_mean": float(masked_losses.mean()),
+        "clean/incorrect_loss_mean": float(incorrect_losses.mean()),
+        "clean/worst_mode_loss_mean": float(worst_mode_losses.mean()),
         "clean/unique_value_predictions_mean": float(
             clean_unique_values.mean()
         ),
@@ -887,7 +923,13 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         # Mean fitness cannot be compared across generations because each
         # generation starts from a different model and initial clean loss.
         # Post-training clean CE is the stable cross-generation objective.
-        plateau_objective = -summary["clean/loss_mean"]
+        plateau_objective = -summary[
+            (
+                "clean/worst_mode_loss_mean"
+                if config.fitness_objective == "worst_mode_ce"
+                else "clean/loss_mean"
+            )
+        ]
         promote_horizon = update_plateau_state(
             plateau_state,
             objective=plateau_objective,
@@ -975,6 +1017,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--backward-rule-type",
         choices=("gradient_transformer", "attention_router"),
         default="gradient_transformer",
+    )
+    parser.add_argument(
+        "--route-output-projection",
+        action="store_true",
+        help=(
+            "apply attention routing to output-projection parameter gradients"
+        ),
+    )
+    parser.add_argument(
+        "--fitness-objective",
+        choices=("mean_clean_ce", "worst_mode_ce"),
+        default="mean_clean_ce",
+        help="candidate objective used by the EGGROLL update",
     )
     parser.add_argument("--forward-layers", type=int, default=3)
     parser.add_argument("--backward-layers", type=int, default=2)

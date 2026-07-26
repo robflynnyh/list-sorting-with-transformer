@@ -128,6 +128,14 @@ def plot_chained_metrics(
         color="#222222",
         linestyle="--",
     )
+    _plot_series(
+        accuracy_axis,
+        rows,
+        "robust/min_mode_accuracy",
+        label="best candidate's weaker clean split",
+        color="#7b2cbf",
+        linestyle=":",
+    )
     accuracy_axis.axhline(
         0.1,
         color="#555555",
@@ -189,6 +197,13 @@ def plot_chained_metrics(
         "backward/center_gate_abs_mean",
         label="center gate magnitude",
         color="#f94144",
+    )
+    _plot_series(
+        eggroll_axis,
+        rows,
+        "backward/routing_leak_relative_gate_mean",
+        label="leak/other routing gate",
+        color="#8c564b",
     )
     horizon_axis = eggroll_axis.twinx()
     _plot_series(

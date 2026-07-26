@@ -26,6 +26,7 @@ from list_sorting_transformer.shortcut_credit import (
 from list_sorting_transformer.shortcut_credit_experiment import (
     PlateauState,
     ShortcutCreditExperimentConfig,
+    candidate_fitness,
     candidate_summary,
     initialize_fresh_backward_rule,
     load_checkpoint,
@@ -65,7 +66,10 @@ def small_rule() -> LearnedBackwardRule:
     )
 
 
-def small_routing_rule() -> AttentionRoutingRule:
+def small_routing_rule(
+    *,
+    route_output_projection: bool = False,
+) -> AttentionRoutingRule:
     return AttentionRoutingRule(
         AttentionRoutingRuleConfig(
             vocab_size=small_vocabulary().size,
@@ -73,6 +77,7 @@ def small_routing_rule() -> AttentionRoutingRule:
             n_heads=4,
             forward_layers=2,
             ffn_multiplier=2.0,
+            route_output_projection=route_output_projection,
         )
     )
 
@@ -142,16 +147,48 @@ def test_evaluation_reports_prediction_diversity() -> None:
 
 def test_candidate_summary_reports_the_fittest_candidate_metrics() -> None:
     clean = [
-        ShortcutMetrics(2.4, 0.2, {"masked": 0.3, "incorrect": 0.1}, 4, 3, 0.6),
-        ShortcutMetrics(2.1, 0.6, {"masked": 0.7, "incorrect": 0.5}, 8, 7, 0.3),
-        ShortcutMetrics(2.2, 0.6, {"masked": 0.6, "incorrect": 0.6}, 8, 8, 0.2),
-        ShortcutMetrics(2.5, 0.1, {"masked": 0.1, "incorrect": 0.1}, 2, 2, 0.8),
+        ShortcutMetrics(
+            2.4,
+            0.2,
+            {"masked": 0.3, "incorrect": 0.1},
+            {"masked": 2.3, "incorrect": 2.5},
+            4,
+            3,
+            0.6,
+        ),
+        ShortcutMetrics(
+            2.1,
+            0.6,
+            {"masked": 0.7, "incorrect": 0.5},
+            {"masked": 2.0, "incorrect": 2.2},
+            8,
+            7,
+            0.3,
+        ),
+        ShortcutMetrics(
+            2.2,
+            0.6,
+            {"masked": 0.6, "incorrect": 0.6},
+            {"masked": 2.2, "incorrect": 2.2},
+            8,
+            8,
+            0.2,
+        ),
+        ShortcutMetrics(
+            2.5,
+            0.1,
+            {"masked": 0.1, "incorrect": 0.1},
+            {"masked": 2.5, "incorrect": 2.5},
+            2,
+            2,
+            0.8,
+        ),
     ]
     correct = [
-        ShortcutMetrics(2.0, 0.4, {"correct": 0.4}, 5, 4, 0.5),
-        ShortcutMetrics(1.0, 0.9, {"correct": 0.9}, 9, 8, 0.2),
-        ShortcutMetrics(1.5, 0.7, {"correct": 0.7}, 8, 8, 0.2),
-        ShortcutMetrics(2.5, 0.1, {"correct": 0.1}, 2, 2, 0.8),
+        ShortcutMetrics(2.0, 0.4, {"correct": 0.4}, {"correct": 2.0}, 5, 4, 0.5),
+        ShortcutMetrics(1.0, 0.9, {"correct": 0.9}, {"correct": 1.0}, 9, 8, 0.2),
+        ShortcutMetrics(1.5, 0.7, {"correct": 0.7}, {"correct": 1.5}, 8, 8, 0.2),
+        ShortcutMetrics(2.5, 0.1, {"correct": 0.1}, {"correct": 2.5}, 2, 2, 0.8),
     ]
 
     summary = candidate_summary(
@@ -171,6 +208,34 @@ def test_candidate_summary_reports_the_fittest_candidate_metrics() -> None:
     assert summary["robust/masked_accuracy"] == 0.6
     assert summary["robust/incorrect_accuracy"] == 0.6
     assert summary["robust/correct_leak_accuracy"] == 0.7
+
+
+def test_worst_mode_fitness_uses_the_weaker_clean_split() -> None:
+    initial = ShortcutMetrics(
+        3.0,
+        0.1,
+        {"masked": 0.1, "incorrect": 0.1},
+        {"masked": 2.8, "incorrect": 3.2},
+        4,
+        3,
+        0.6,
+    )
+    trained = ShortcutMetrics(
+        2.2,
+        0.2,
+        {"masked": 0.2, "incorrect": 0.2},
+        {"masked": 2.0, "incorrect": 2.5},
+        5,
+        4,
+        0.5,
+    )
+
+    assert abs(
+        candidate_fitness("mean_clean_ce", initial, trained) - 0.8
+    ) < 1e-12
+    assert abs(
+        candidate_fitness("worst_mode_ce", initial, trained) - 0.7
+    ) < 1e-12
 
 
 def test_right_padded_evaluation_preserves_query_logits() -> None:
@@ -248,7 +313,7 @@ def test_zero_routing_gate_preserves_forward_and_ordinary_gradients() -> None:
     torch.manual_seed(51)
     ordinary = small_model()
     modified = deepcopy(ordinary)
-    rule = small_routing_rule()
+    rule = small_routing_rule(route_output_projection=True)
     batch = make_shortcut_batch(
         4,
         8,
@@ -298,6 +363,12 @@ def test_attention_router_only_suppresses_existing_routes() -> None:
         assert bool((gate <= 1).all())
         assert bool((gate < 1).any())
 
+    rule.capture_statistics = True
+    rule.clear_statistics()
+    rule.attention_gates(batch.input_ids)
+    assert abs(rule.statistics[-1]["routing_strength"] - 1.6) < 1e-6
+    assert 0 < rule.statistics[-1]["routing_leak_relative_gate"]
+
     ordinary_loss = shortcut_loss(ordinary, batch)
     ordinary_loss.backward()
     modified_loss = shortcut_loss(modified, batch, rule)
@@ -314,6 +385,55 @@ def test_attention_router_only_suppresses_existing_routes() -> None:
             modified.parameters(),
         )
     )
+
+
+def test_attention_router_can_route_output_projection_credit() -> None:
+    torch.manual_seed(55)
+    ordinary = small_model()
+    qkv_only = deepcopy(ordinary)
+    projection_routed = deepcopy(ordinary)
+    qkv_rule = small_routing_rule()
+    projection_rule = small_routing_rule(route_output_projection=True)
+    projection_rule.load_state_dict(qkv_rule.state_dict())
+    with torch.no_grad():
+        qkv_rule.gates.fill_(0.2)
+        projection_rule.gates.fill_(0.2)
+    batch = make_shortcut_batch(
+        4,
+        8,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(56),
+        vocabulary=small_vocabulary(),
+    )
+
+    ordinary_loss = shortcut_loss(ordinary, batch)
+    ordinary_loss.backward()
+    qkv_loss = shortcut_loss(qkv_only, batch, qkv_rule)
+    qkv_loss.backward()
+    projection_loss = shortcut_loss(
+        projection_routed,
+        batch,
+        projection_rule,
+    )
+    projection_loss.backward()
+
+    torch.testing.assert_close(qkv_loss, ordinary_loss, rtol=0, atol=0)
+    torch.testing.assert_close(projection_loss, ordinary_loss, rtol=0, atol=0)
+    ordinary_gradient = ordinary.blocks[-1].attention.output.weight.grad
+    qkv_gradient = qkv_only.blocks[-1].attention.output.weight.grad
+    projection_gradient = (
+        projection_routed.blocks[-1].attention.output.weight.grad
+    )
+    assert ordinary_gradient is not None
+    assert qkv_gradient is not None
+    assert projection_gradient is not None
+    torch.testing.assert_close(
+        qkv_gradient,
+        ordinary_gradient,
+        rtol=0,
+        atol=0,
+    )
+    assert not torch.allclose(projection_gradient, ordinary_gradient)
 
 
 def test_modified_gradient_preserves_per_example_rms() -> None:
