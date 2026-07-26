@@ -1080,4 +1080,27 @@ to generation 250. The conservative branch remains a delayed-learning control;
 it will not be rejected solely because it needs more generations at its
 smaller update size.
 
+The third matched window confirms that the separation is sustained:
+
+| Generations 100-109 | Clean CE | Masked | Wrong hint | Correct leak | Minimum clean split | Robust candidate min | Centre leak ratio | Centre update / RMS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Conservative (`0.02`) | 2.6853 | 20.70% | 5.55% | 85.23% | 5.55% | 16.95% | 0.363 | 0.96% |
+| Medium (`0.05`) | 2.3375 | 21.56% | 17.30% | 44.30% | 17.23% | 19.38% | 0.202 | 2.20% |
+
+The medium centre now nearly reaches its sampled candidates: its average
+weaker-split accuracy is only `2.11` percentage points below the robust
+candidate average. The conservative centre is improving too, from `2.11%` to
+`5.55%` wrong-hint accuracy between the last two windows, but remains
+`11.40` points below its candidate average. This supports the delayed-learning
+hypothesis while still showing that `0.05` transfers the available signal much
+more efficiently.
+
+The medium branch produced nine rather than ten distinct value predictions in
+one of these ten evaluations, then immediately returned to ten. Its average
+modal prediction fraction remains `27.1%`, so this is not currently a
+persistent output-collapse failure. Correct-leak accuracy continues to fall as
+the routing map suppresses the shortcut; the decisive later test is whether
+longer inner training raises both shortcut-free modes beyond their current
+roughly `20%` ceiling.
+
 ![Horizon-80 centre-step comparison](results/attention_router_center_step_comparison.png)
