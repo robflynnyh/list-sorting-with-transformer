@@ -11,6 +11,7 @@ from list_sorting_transformer.shortcut_credit import (
     BackwardRuleConfig,
     LearnedBackwardRule,
     ShortcutDecoderTransformer,
+    ShortcutMetrics,
     ShortcutPointerVocabulary,
     apply_eggroll_direction,
     clone_center_parameters,
@@ -25,6 +26,7 @@ from list_sorting_transformer.shortcut_credit import (
 from list_sorting_transformer.shortcut_credit_experiment import (
     PlateauState,
     ShortcutCreditExperimentConfig,
+    candidate_summary,
     initialize_fresh_backward_rule,
     load_checkpoint,
     parse_candidate_devices,
@@ -136,6 +138,30 @@ def test_evaluation_reports_prediction_diversity() -> None:
     assert 1 <= metrics.unique_prediction_count <= model.config.vocab_size
     assert 0 <= metrics.unique_value_prediction_count <= 10
     assert 1 / 32 <= metrics.prediction_mode_fraction <= 1
+
+
+def test_candidate_summary_reports_the_fittest_candidate_metrics() -> None:
+    clean = [
+        ShortcutMetrics(2.4, 0.2, {"masked": 0.3, "incorrect": 0.1}, 4, 3, 0.6),
+        ShortcutMetrics(2.1, 0.6, {"masked": 0.7, "incorrect": 0.5}, 8, 7, 0.3),
+    ]
+    correct = [
+        ShortcutMetrics(2.0, 0.4, {"correct": 0.4}, 5, 4, 0.5),
+        ShortcutMetrics(1.0, 0.9, {"correct": 0.9}, 9, 8, 0.2),
+    ]
+
+    summary = candidate_summary(
+        torch.tensor([0.1, 0.8]),
+        clean,
+        correct,
+    )
+
+    assert summary["best/candidate_index"] == 1
+    assert summary["best/fitness"] == torch.tensor(0.8).item()
+    assert summary["best/clean_accuracy"] == 0.6
+    assert summary["best/masked_accuracy"] == 0.7
+    assert summary["best/incorrect_accuracy"] == 0.5
+    assert summary["best/correct_leak_accuracy"] == 0.9
 
 
 def test_right_padded_evaluation_preserves_query_logits() -> None:

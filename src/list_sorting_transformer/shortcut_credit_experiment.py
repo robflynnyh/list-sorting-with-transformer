@@ -485,6 +485,9 @@ def candidate_summary(
     clean_mode_fractions = torch.tensor(
         [metrics.prediction_mode_fraction for metrics in clean_metrics]
     )
+    best_index = int(fitnesses.argmax())
+    best_clean = clean_metrics[best_index]
+    best_correct = correct_metrics[best_index]
     return {
         "fitness/mean": float(fitnesses.mean()),
         "fitness/std": float(fitnesses.std(unbiased=False)),
@@ -502,6 +505,19 @@ def candidate_summary(
             clean_mode_fractions.mean()
         ),
         "correct_leak/accuracy_mean": float(correct_accuracies.mean()),
+        "best/candidate_index": best_index,
+        "best/fitness": float(fitnesses[best_index]),
+        "best/clean_loss": best_clean.loss,
+        "best/clean_accuracy": best_clean.accuracy,
+        "best/masked_accuracy": best_clean.mode_accuracy["masked"],
+        "best/incorrect_accuracy": best_clean.mode_accuracy["incorrect"],
+        "best/correct_leak_accuracy": best_correct.accuracy,
+        "best/unique_value_predictions": float(
+            best_clean.unique_value_prediction_count
+        ),
+        "best/prediction_mode_fraction": (
+            best_clean.prediction_mode_fraction
+        ),
     }
 
 
