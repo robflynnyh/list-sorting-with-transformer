@@ -1099,8 +1099,19 @@ The medium branch produced nine rather than ten distinct value predictions in
 one of these ten evaluations, then immediately returned to ten. Its average
 modal prediction fraction remains `27.1%`, so this is not currently a
 persistent output-collapse failure. Correct-leak accuracy continues to fall as
-the routing map suppresses the shortcut; the decisive later test is whether
-longer inner training raises both shortcut-free modes beyond their current
-roughly `20%` ceiling.
+the routing map suppresses the shortcut.
+
+The roughly `20%` shortcut-free accuracy is not evidence that this learned
+router has stalled below the available horizon-80 solution. The earlier
+hand-coded oracle diagnostic reached `22.3% / 18.4%` masked/wrong-hint accuracy
+when routing Q/K/V gradients and `19.1% / 21.1%` when also routing the output
+projection. The learned medium centre's `21.56% / 17.30%` is already close to
+that oracle range. Clean-only Adam also required about 320 inner updates to
+reach near-perfect retrieval; at 80 updates it achieved only
+`17.6% / 15.7%`. This suppress-only backward-rule family can prevent the
+shortcut transition, but it cannot create arbitrary new credit directions.
+The next capacity test should therefore preserve the learned centre and
+increase the inner horizon after its horizon-80 behavior is shown to be
+stable.
 
 ![Horizon-80 centre-step comparison](results/attention_router_center_step_comparison.png)
