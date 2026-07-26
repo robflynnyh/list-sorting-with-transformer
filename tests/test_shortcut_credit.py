@@ -39,6 +39,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     load_checkpoint,
     make_inner_batches,
     parse_candidate_devices,
+    restore_center_parameters,
     routing_population_summary,
     save_checkpoint,
     shard_candidate_specs,
@@ -402,6 +403,19 @@ def test_elite_centroid_update_averages_selected_candidates() -> None:
             parameter,
             center[name] + expected_delta,
         )
+
+
+def test_restore_center_parameters_reverts_elite_update() -> None:
+    rule = small_rule()
+    center = clone_center_parameters(rule)
+    with torch.no_grad():
+        for parameter in rule.parameters():
+            parameter.add_(1.0)
+
+    restore_center_parameters(rule, center)
+
+    for name, parameter in rule.named_parameters():
+        torch.testing.assert_close(parameter, center[name], rtol=0, atol=0)
 
 
 def test_center_rule_summary_reports_unperturbed_training_metrics() -> None:
@@ -1242,7 +1256,10 @@ def test_attention_router_checkpoint_round_trip(tmp_path: Path) -> None:
         config=config,
         generation=4,
         horizon=20,
-        plateau_state=PlateauState(stale_generations=3),
+        plateau_state=PlateauState(
+            stale_generations=3,
+            search_sigma=0.025,
+        ),
     )
 
     loaded, generation, horizon, plateau = load_checkpoint(
@@ -1254,6 +1271,7 @@ def test_attention_router_checkpoint_round_trip(tmp_path: Path) -> None:
     assert generation == 5
     assert horizon == 20
     assert plateau.stale_generations == 3
+    assert plateau.search_sigma == 0.025
     for expected, actual in zip(rule.parameters(), loaded.parameters()):
         torch.testing.assert_close(expected, actual, rtol=0, atol=0)
 

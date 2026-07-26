@@ -8,6 +8,9 @@ from experiments.learned_backward_shortcuts.elite_router_checkpoint import (
     parse_indices,
 )
 from list_sorting_transformer.shortcut_credit import EggrollDirection
+from list_sorting_transformer.shortcut_credit_experiment import (
+    ShortcutCreditExperimentConfig,
+)
 
 
 def test_parse_indices_requires_unique_nonnegative_values() -> None:
@@ -35,3 +38,15 @@ def test_elite_parameter_delta_respects_antithetic_signs() -> None:
         delta,
         torch.tensor([-0.5, -0.5]),
     )
+
+
+def test_backtracking_config_rejects_invalid_sigma_bounds() -> None:
+    with pytest.raises(ValueError, match="sigma_decay"):
+        ShortcutCreditExperimentConfig(
+            elite_rejection_sigma_decay=1.0,
+        )
+    with pytest.raises(ValueError, match="elite_min_sigma"):
+        ShortcutCreditExperimentConfig(
+            sigma=0.1,
+            elite_min_sigma=0.2,
+        )

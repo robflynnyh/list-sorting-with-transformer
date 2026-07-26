@@ -106,6 +106,9 @@ def main() -> None:
         )
         derived = dict(checkpoint)
         derived["backward_rule_state"] = rule.state_dict()
+        # This checkpoint contains the update produced by args.generation, so
+        # resuming it should begin at the following generation.
+        derived["generation"] = args.generation
         derived["elite_interpolation"] = {
             "source_checkpoint": str(args.checkpoint),
             "generation": args.generation,

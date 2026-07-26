@@ -66,6 +66,9 @@ class ShortcutCreditExperimentConfig:
     outer_update_rule: str = "paper_standardized"
     elite_count: int = 8
     elite_interpolation: float = 0.5
+    elite_backtracking: bool = False
+    elite_rejection_sigma_decay: float = 0.5
+    elite_min_sigma: float = 1e-4
     d_model: int = 128
     backward_d_model: int = 128
     backward_rule_type: str = "gradient_transformer"
@@ -132,6 +135,12 @@ class ShortcutCreditExperimentConfig:
             raise ValueError("elite_count must not exceed population_size")
         if not 0 < self.elite_interpolation <= 1:
             raise ValueError("elite_interpolation must be in (0, 1]")
+        if not 0 < self.elite_rejection_sigma_decay < 1:
+            raise ValueError(
+                "elite_rejection_sigma_decay must be in (0, 1)"
+            )
+        if not 0 < self.elite_min_sigma <= self.sigma:
+            raise ValueError("elite_min_sigma must be in (0, sigma]")
         if self.leak_placement not in {"suffix", "random_list"}:
             raise ValueError("unknown leak placement")
         if self.fitness_examples % 2:
@@ -155,6 +164,7 @@ class PlateauState:
     ema_fitness: float | None = None
     best_ema_fitness: float = float("-inf")
     stale_generations: int = 0
+    search_sigma: float | None = None
 
 
 @dataclass(frozen=True)
@@ -517,6 +527,7 @@ def train_candidate_shard(
     heldout_fitness_batches: tuple[ShortcutBatch, ...],
     heldout_correct_batches: tuple[ShortcutBatch, ...],
     initial_clean_metrics: ShortcutMetrics,
+    perturbation_sigma: float,
 ) -> list[
     tuple[
         int,
@@ -577,6 +588,7 @@ def train_candidate_shard(
                 isinstance(worker_center_rule, AttentionRoutingRule)
                 or candidate_index == 0
             ),
+            perturbation_sigma=perturbation_sigma,
             heldout_fitness_batches=worker_heldout_fitness_batches,
             heldout_correct_batches=worker_heldout_correct_batches,
         )
@@ -627,6 +639,15 @@ def elite_centroid_update(
             interpolation * centroid_delta / elite_count
         )
     return elite_indices
+
+
+@torch.no_grad()
+def restore_center_parameters(
+    module: BackwardRule,
+    center_parameters: dict[str, Tensor],
+) -> None:
+    for name, parameter in module.named_parameters():
+        parameter.copy_(center_parameters[name])
 
 
 def update_plateau_state(
@@ -1387,6 +1408,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         )
         if center_rule.config != backward_config:
             raise ValueError("resume checkpoint architecture differs from config")
+    if plateau_state.search_sigma is None:
+        plateau_state.search_sigma = config.sigma
 
     fitness_generator = torch.Generator().manual_seed(config.seed + 10_000)
     fitness_batches = make_fitness_batches(
@@ -1412,6 +1435,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
     started_at = time.monotonic()
     for generation in range(start_generation, config.generations):
         generation_started_at = time.monotonic()
+        generation_sigma = plateau_state.search_sigma
+        if generation_sigma is None:
+            raise RuntimeError("search sigma was not initialized")
         generation_seed = config.seed * 1_000_003 + generation * 10_007
         initialization_seed = generation_seed + 1
         heldout_generator = torch.Generator().manual_seed(
@@ -1515,6 +1541,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                         isinstance(center_rule, AttentionRoutingRule)
                         or candidate_index == 0
                     ),
+                    perturbation_sigma=generation_sigma,
                     heldout_fitness_batches=heldout_fitness_batches,
                     heldout_correct_batches=heldout_correct_batches,
                 )
@@ -1550,6 +1577,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                         heldout_fitness_batches=heldout_fitness_batches,
                         heldout_correct_batches=heldout_correct_batches,
                         initial_clean_metrics=initial_clean_metrics,
+                        perturbation_sigma=generation_sigma,
                     )
                     for shard, worker_device in zip(
                         shards,
@@ -1679,7 +1707,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 fitness_tensor,
                 clean_results,
                 token_ids=inner_batches[-1].input_ids,
-                sigma=config.sigma,
+                sigma=generation_sigma,
             )
             if isinstance(center_rule, AttentionRoutingRule)
             else {}
@@ -1693,21 +1721,60 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 center_rule,
                 directions,
                 fitness_tensor,
-                sigma=config.sigma,
+                sigma=generation_sigma,
                 learning_rate=outer_learning_rate,
             )
             elite_indices = None
+            elite_proposal_fitness = None
+            elite_proposal_trajectory = None
+            elite_update_accepted = None
         else:
             elite_indices = elite_centroid_update(
                 center_rule,
                 directions,
                 fitness_tensor,
-                sigma=config.sigma,
+                sigma=generation_sigma,
                 elite_count=config.elite_count,
                 interpolation=config.elite_interpolation,
             )
         if isinstance(center_rule, AttentionRoutingRule):
             center_rule.project_parameters_()
+        if (
+            config.outer_update_rule == "elite_centroid"
+            and config.elite_backtracking
+        ):
+            elite_proposal_trajectory = train_forward_trajectory(
+                config,
+                base_state=base_state,
+                backward_rule=center_rule,
+                inner_batches=inner_batches,
+                fitness_batches=fitness_batches,
+                correct_batches=correct_batches,
+                heldout_fitness_batches=heldout_fitness_batches,
+                heldout_correct_batches=heldout_correct_batches,
+                device=device,
+            )
+            elite_proposal_fitness = candidate_fitness(
+                config.fitness_objective,
+                initial_clean_metrics,
+                elite_proposal_trajectory.clean,
+            )
+            elite_update_accepted = (
+                elite_proposal_fitness > center_fitness
+            )
+            if not elite_update_accepted:
+                restore_center_parameters(center_rule, center_parameters)
+                if isinstance(center_rule, AttentionRoutingRule):
+                    center_rule.project_parameters_()
+                plateau_state.search_sigma = max(
+                    config.elite_min_sigma,
+                    generation_sigma
+                    * config.elite_rejection_sigma_decay,
+                )
+        elif config.outer_update_rule == "elite_centroid":
+            elite_proposal_fitness = None
+            elite_proposal_trajectory = None
+            elite_update_accepted = True
         summary = candidate_summary(
             fitness_tensor.cpu(),
             clean_results,
@@ -1832,7 +1899,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "generation": generation,
                 "horizon": horizon,
                 "population_size": config.population_size,
-                "search/sigma": config.sigma,
+                "search/sigma": generation_sigma,
+                "search/next_sigma": plateau_state.search_sigma,
                 "candidate_device_count": len(candidate_devices),
                 "outer_learning_rate": outer_learning_rate,
                 "outer/update_rule_elite_centroid": float(
@@ -1858,6 +1926,25 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "timing/elapsed_seconds": time.monotonic() - started_at,
             }
         )
+        if elite_update_accepted is not None:
+            summary["outer/update_accepted"] = float(
+                elite_update_accepted
+            )
+        if (
+            elite_proposal_fitness is not None
+            and elite_proposal_trajectory is not None
+        ):
+            summary.update(
+                trajectory_summary(
+                    "elite_proposal",
+                    elite_proposal_fitness,
+                    elite_proposal_trajectory.clean,
+                    elite_proposal_trajectory.correct,
+                )
+            )
+            summary[
+                "outer/proposal_fitness_minus_center"
+            ] = elite_proposal_fitness - center_fitness
         if captured_statistics:
             for key in captured_statistics[0]:
                 if key == "layer":
@@ -1905,11 +1992,12 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             wandb_run.log(summary, step=generation)
 
         if promote_horizon and horizon < config.max_horizon:
+            search_sigma = plateau_state.search_sigma
             horizon = min(
                 config.max_horizon,
                 horizon * config.horizon_multiplier,
             )
-            plateau_state = PlateauState()
+            plateau_state = PlateauState(search_sigma=search_sigma)
             print(f"Increasing evolved horizon to {horizon}", flush=True)
 
         if (
@@ -1976,6 +2064,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--elite-count", type=int, default=8)
     parser.add_argument("--elite-interpolation", type=float, default=0.5)
+    parser.add_argument(
+        "--elite-backtracking",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="accept an elite proposal only when it improves centre fitness",
+    )
+    parser.add_argument(
+        "--elite-rejection-sigma-decay",
+        type=float,
+        default=0.5,
+        help="multiply sigma by this factor after rejecting a proposal",
+    )
+    parser.add_argument("--elite-min-sigma", type=float, default=1e-4)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--backward-d-model", type=int, default=128)
     parser.add_argument(

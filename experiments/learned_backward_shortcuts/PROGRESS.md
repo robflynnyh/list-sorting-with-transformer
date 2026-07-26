@@ -1843,3 +1843,41 @@ Consolidated results:
 [`results/random_g40_elite_0p4000_validation.jsonl`](results/random_g40_elite_0p4000_validation.jsonl),
 and
 [`results/random_g40_elite_0p5000_validation.jsonl`](results/random_g40_elite_0p5000_validation.jsonl).
+
+Repeated elite updates exposed a second problem: a fixed search radius is
+unsafe after the centre improves. The first top-eight update at
+`sigma=0.21`, `alpha=0.50` converted the poor generation-40 centre into a
+strong rule. On generation 41 it reached `94.14%` weaker-split accuracy on
+the outer examples and `91.80%` on held-out examples, versus `22.66%` and
+`21.48%` for ordinary training. However, applying another elite update at the
+same radius collapsed the next generation's fresh weaker-split accuracy to
+`3.91%`. This was not caused by manually changing sigma: the failed repeated
+run used `sigma=0.21` throughout.
+
+The update now uses automatic backtracking. An elite-centroid move is treated
+as a proposal and trained on the same forward initialization and batches as
+the current centre. The proposal is committed only if its outer fitness is
+higher. A rejected proposal restores the centre exactly and halves the search
+sigma for the following generation; the current sigma is stored in the
+checkpoint so resuming cannot silently reset it.
+
+A deterministic generation-41 replay validates the rejection path:
+
+| Generation-41 backtracking check | Value |
+| --- | ---: |
+| Current-centre fitness | 2.491 |
+| Proposed-centre fitness | 0.740 |
+| Proposal minus centre | -1.751 |
+| Update accepted | no |
+| Actual parameter-update RMS | 0.000 |
+| Current sigma | 0.210 |
+| Automatically selected next sigma | 0.105 |
+| Held-out centre weaker-split accuracy retained | 91.80% |
+
+The adaptive trajectory resumes from this preserved centre at generation 42.
+This is a trust-region safeguard rather than a manually chosen per-generation
+schedule: sigma changes only when the experiment itself rejects a harmful
+proposal.
+
+Backtracking replay:
+[`results/random_g41_elite_backtracking_summary.json`](results/random_g41_elite_backtracking_summary.json).
