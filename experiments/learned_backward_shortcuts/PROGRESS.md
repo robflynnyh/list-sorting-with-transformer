@@ -381,3 +381,31 @@ The speedup is sublinear because model construction and Python/CUDA launch
 overhead are still partly serialized, but the implementation provides a
 validated path to larger populations. The live trajectory will adopt two-GPU
 sharding from its next durable checkpoint while both devices are available.
+
+#### Horizon 20 completion and horizon 40
+
+Horizon 20 ended at generation 101. Across the 42 authoritative generations
+with diversity metrics:
+
+- Mean clean CE: `2.6548`.
+- Mean correct / masked / incorrect accuracy:
+  `9.95% / 10.16% / 9.96%`.
+- Mean distinct predicted digits: `1.14 / 10`.
+- Mean modal prediction fraction: `98.3%`.
+- Mean antithetic pair-difference RMS: `0.0646`.
+
+There was no retrieval or shortcut-learning transition at horizon 20. The
+centre gate also remained small (`0.0053` mean magnitude).
+
+The curriculum promoted to horizon 40 at generation 102. Over its first four
+generations:
+
+- Mean clean CE fell to `2.5413`.
+- All three accuracies remained near chance.
+- Mean distinct predicted digits / modal fraction:
+  `1.04 / 10` and `99.7%`.
+- Mean pair-difference RMS remained material at `0.0598`.
+
+The lower CE at horizon 40 is therefore still calibration without argmax
+retrieval. One-GPU runtime is approximately `50s` per generation. The next
+checkpoint will enable the validated two-GPU sharding path.
