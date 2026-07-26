@@ -843,11 +843,16 @@ Fresh full-population calibration gave:
 The `sigma=0.05` horizon-40 row predates projection and moved its sole
 suppression strength negative, making the updated centre inactive. The
 projected `sigma=0.035` probe is local while retaining measurable ranking
-signal, so it is selected for the main shared-map lineage:
+signal. A first continuation at outer learning rate `0.1` was stopped after
+generation 2: once the suppression strength became positive, centre updates
+jumped to `5-6%` and robust wrong-hint accuracy fell from `15.6%` to `9.4%`.
+The replacement keeps the informative candidate radius but reduces the centre
+step fivefold:
 
 - Run:
-  [`attention-router-shared-p64-s0035-worstce-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/czkit9uv)
+  [`attention-router-shared-p64-s0035-outer002-worstce-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/j92lh3gd)
 - Configuration: population 64, horizon 40, complete attention-gradient
-  routing, one shared map, `sigma=0.035`, and worst-split CE fitness.
+  routing, one shared map, `sigma=0.035`, outer learning rate `0.02`, and
+  worst-split CE fitness.
 - GPUs 2-3 run this lineage while the independent-map control continues on
   GPUs 0-1.
