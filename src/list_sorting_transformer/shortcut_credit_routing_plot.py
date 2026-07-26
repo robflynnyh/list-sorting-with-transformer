@@ -20,6 +20,7 @@ from .shortcut_credit import (
     ShortcutPointerVocabulary,
     make_shortcut_batch,
 )
+from .tokens import SEP
 
 
 ROLE_LABELS = (
@@ -88,11 +89,25 @@ def query_role_gates(
     )
     if pointer_positions.numel() != batch_size:
         raise ValueError("every prompt must contain exactly one pointer")
+    leak_positions = (
+        batch.input_ids.eq(vocabulary.leak_token)
+        .nonzero(as_tuple=False)[:, 1]
+        .to(gates.device)
+    )
+    separator_positions = (
+        batch.input_ids.eq(SEP)
+        .nonzero(as_tuple=False)[:, 1]
+        .to(gates.device)
+    )
+    if leak_positions.numel() != batch_size:
+        raise ValueError("every prompt must contain exactly one leak marker")
+    if separator_positions.numel() != batch_size:
+        raise ValueError("every prompt must contain exactly one separator")
     query = sequence_length - 1
     values = (
-        gates[rows, query, query - 1].mean(),
-        gates[rows, query, query - 2].mean(),
-        gates[rows, query, query - 3].mean(),
+        gates[rows, query, leak_positions + 1].mean(),
+        gates[rows, query, leak_positions].mean(),
+        gates[rows, query, separator_positions].mean(),
         gates[rows, query, pointer_positions].mean(),
         gates[rows, query, pointer_positions + 1].mean(),
         gates[rows, query, pointer_positions + 3].mean(),
@@ -122,9 +137,18 @@ def position_matched_role_gates(
     )
     if pointer_positions.numel() != batch.batch_size:
         raise ValueError("every prompt must contain exactly one pointer")
+    leak_positions = (
+        batch.input_ids.eq(vocabulary.leak_token)
+        .nonzero(as_tuple=False)[:, 1]
+        .to(gates.device)
+    )
+    if leak_positions.numel() != batch.batch_size:
+        raise ValueError("every prompt must contain exactly one leak marker")
     final_query_gates = gates[:, -1]
     position_means = final_query_gates.mean(dim=0)
     return {
+        "hint": float(position_means[leak_positions + 1].mean()),
+        "leak marker": float(position_means[leak_positions].mean()),
         "pointer": float(position_means[pointer_positions].mean()),
         "pointer value": float(
             position_means[pointer_positions + 1].mean()
@@ -200,6 +224,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("correct", "masked", "incorrect"),
         default="correct",
     )
+    parser.add_argument(
+        "--leak-placement",
+        choices=("suffix", "random_list"),
+        default="suffix",
+    )
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--output", type=Path, required=True)
     return parser
@@ -215,6 +244,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         leak_mode=args.leak_mode,
         generator=generator,
         vocabulary=vocabulary,
+        leak_placement=args.leak_placement,
     )
     summaries = []
     matched_summaries = []

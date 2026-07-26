@@ -1665,3 +1665,35 @@ Broad, source-favoring, source-suppressing, and other nonuniform rules can all
 be intermediate strategies. The primary convergence criterion is therefore
 fresh matched behavior; routing selectivity is tracked separately to explain
 the eventual solution if and when the centre becomes useful.
+
+Checkpoint 30 was then tested across 20 additional matched forward
+initializations and datasets:
+
+| Checkpoint-30 replication mean | Evolved centre | Ordinary training | Masked training |
+| --- | ---: | ---: | ---: |
+| Weaker-split accuracy | 7.07% | 12.40% | 27.75% |
+| Correct-hint accuracy | 95.39% | 92.27% | 44.80% |
+| Clean CE | 3.080 | 2.771 | 2.031 |
+
+The centre loses `5.33` percentage points of weaker-split accuracy and `0.309`
+CE relative to ordinary training. It wins only `3/20` accuracy comparisons and
+`2/20` CE comparisons. This confirms that the generation-level aggregate was
+not hiding a useful checkpoint behind evaluation variance: at generation 30,
+the accumulated centre is genuinely worse than the ordinary backward rule.
+That is a baseline for detecting a later transition, not a reason to stop the
+long run. The fixed-position experiment only became strongly useful after a
+much longer trajectory.
+
+The routing diagnostic now locates the leak marker and hint dynamically, so it
+is valid for random-list placement. At checkpoints 10, 20, and 30, the mean
+gate drops from roughly `0.76` to `0.62` to `0.46`, but every semantic role
+tracks its absolute-position-matched control within about `0.5%`. The centre
+is therefore becoming strongly suppressive without yet choosing a useful
+source role:
+
+![Random-list routing roles](results/random_list_routing_roles.png)
+
+Replication outputs:
+[`results/random_checkpoint30_replications.jsonl`](results/random_checkpoint30_replications.jsonl)
+and
+[`results/random_checkpoint30_replications_summary.json`](results/random_checkpoint30_replications_summary.json).

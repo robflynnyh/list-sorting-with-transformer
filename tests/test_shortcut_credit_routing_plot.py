@@ -56,6 +56,34 @@ def test_query_role_gates_extracts_prompt_positions() -> None:
     assert set(summary) == set(ROLE_LABELS)
 
 
+def test_query_role_gates_finds_randomly_placed_hint() -> None:
+    vocabulary = ShortcutPointerVocabulary("numbers", 10)
+    batch = make_shortcut_batch(
+        16,
+        8,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(17),
+        vocabulary=vocabulary,
+        leak_placement="random_list",
+    )
+    sequence_length = batch.input_ids.shape[1]
+    gates = torch.ones(16, 2, sequence_length, sequence_length)
+    rows = torch.arange(16)
+    leaks = (
+        batch.input_ids.eq(vocabulary.leak_token)
+        .nonzero(as_tuple=False)[:, 1]
+    )
+    query = sequence_length - 1
+    gates[rows, :, query, leaks] = 0.2
+    gates[rows, :, query, leaks + 1] = 0.3
+
+    summary = query_role_gates(gates, batch, vocabulary)
+
+    assert leaks.unique().numel() > 1
+    assert summary["leak marker"] == pytest.approx(0.2)
+    assert summary["hint"] == pytest.approx(0.3)
+
+
 def test_position_matched_roles_use_same_absolute_positions() -> None:
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
     batch = make_shortcut_batch(
@@ -91,6 +119,16 @@ def test_position_matched_roles_use_same_absolute_positions() -> None:
     )
     assert summary["target value"] == pytest.approx(
         float((pointers + 3).float().mean())
+    )
+    leaks = (
+        batch.input_ids.eq(vocabulary.leak_token)
+        .nonzero(as_tuple=False)[:, 1]
+    )
+    assert summary["leak marker"] == pytest.approx(
+        float(leaks.float().mean())
+    )
+    assert summary["hint"] == pytest.approx(
+        float((leaks + 1).float().mean())
     )
 
 
