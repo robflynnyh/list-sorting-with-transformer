@@ -22,6 +22,8 @@ from list_sorting_transformer.shortcut_credit import (
 from list_sorting_transformer.shortcut_credit_experiment import (
     PlateauState,
     ShortcutCreditExperimentConfig,
+    parse_candidate_devices,
+    shard_candidate_specs,
     update_plateau_state,
 )
 
@@ -280,3 +282,31 @@ def test_plateau_state_tracks_a_comparable_objective() -> None:
     assert update_plateau_state(state, objective=-2.0, config=config)
     assert not update_plateau_state(state, objective=-1.9, config=config)
     assert state.stale_generations == 0
+
+
+def test_candidate_device_parser_preserves_explicit_shard_order() -> None:
+    devices = parse_candidate_devices(
+        "cuda:2, cuda:0, cuda:1",
+        torch.device("cuda:0"),
+    )
+
+    assert devices == (
+        torch.device("cuda:2"),
+        torch.device("cuda:0"),
+        torch.device("cuda:1"),
+    )
+
+
+def test_candidate_shards_keep_antithetic_pairs_together() -> None:
+    specs = tuple(
+        (2 * direction + sign_index, direction, sign)
+        for direction in range(4)
+        for sign_index, sign in enumerate((1, -1))
+    )
+
+    shards = shard_candidate_specs(specs, 2)
+
+    assert shards == (
+        ((0, 0, 1), (1, 0, -1), (4, 2, 1), (5, 2, -1)),
+        ((2, 1, 1), (3, 1, -1), (6, 3, 1), (7, 3, -1)),
+    )

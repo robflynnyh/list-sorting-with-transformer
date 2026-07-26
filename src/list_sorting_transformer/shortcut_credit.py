@@ -454,6 +454,18 @@ class EggrollDirection:
     tensors: dict[str, Tensor]
 
 
+def move_eggroll_direction(
+    direction: EggrollDirection,
+    device: torch.device | str,
+) -> EggrollDirection:
+    return EggrollDirection(
+        {
+            name: tensor.to(device)
+            for name, tensor in direction.tensors.items()
+        }
+    )
+
+
 def sample_eggroll_direction(
     module: nn.Module,
     *,

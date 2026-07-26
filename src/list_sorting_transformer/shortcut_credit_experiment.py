@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ from .shortcut_credit import (
     make_fitness_batches,
     make_forward_model_config,
     make_shortcut_batch,
+    move_eggroll_direction,
     paper_eggroll_update,
     sample_eggroll_direction,
     shortcut_loss,
@@ -67,6 +69,7 @@ class ShortcutCreditExperimentConfig:
     wandb_project: str = "list-sorting-learned-backward"
     wandb_entity: str | None = None
     resume: str | None = None
+    candidate_devices: str | None = None
 
     def __post_init__(self) -> None:
         positive_integers = (
@@ -155,12 +158,13 @@ def initialize_forward_model(
     config: ShortcutCreditExperimentConfig,
     vocabulary: ShortcutPointerVocabulary,
     *,
-    initialization_seed: int,
+    initialization_seed: int | None,
     device: torch.device,
 ) -> ShortcutDecoderTransformer:
-    torch.manual_seed(initialization_seed)
-    if device.type == "cuda":
-        torch.cuda.manual_seed_all(initialization_seed)
+    if initialization_seed is not None:
+        torch.manual_seed(initialization_seed)
+        if device.type == "cuda":
+            torch.cuda.manual_seed_all(initialization_seed)
     model_config = make_forward_model_config(
         vocabulary,
         d_model=config.d_model,
@@ -202,7 +206,6 @@ def train_candidate(
     config: ShortcutCreditExperimentConfig,
     *,
     base_state: dict[str, Tensor],
-    initialization_seed: int,
     center_rule: LearnedBackwardRule,
     center_parameters: dict[str, Tensor],
     direction: EggrollDirection,
@@ -217,7 +220,7 @@ def train_candidate(
     model = initialize_forward_model(
         config,
         ShortcutPointerVocabulary("numbers", 10),
-        initialization_seed=initialization_seed,
+        initialization_seed=None,
         device=device,
     )
     model.load_state_dict(base_state)
@@ -250,6 +253,113 @@ def train_candidate(
         correct_metrics,
         list(backward_rule.statistics),
     )
+
+
+def parse_candidate_devices(
+    configured_devices: str | None,
+    primary_device: torch.device,
+) -> tuple[torch.device, ...]:
+    if configured_devices is None:
+        return (primary_device,)
+    devices = tuple(
+        torch.device(item.strip())
+        for item in configured_devices.split(",")
+        if item.strip()
+    )
+    if not devices:
+        raise ValueError("candidate_devices must contain at least one device")
+    if len(set(devices)) != len(devices):
+        raise ValueError("candidate_devices must not contain duplicates")
+    if any(device.type != "cuda" for device in devices):
+        raise ValueError("parallel candidate devices must be CUDA devices")
+    return devices
+
+
+def shard_candidate_specs(
+    candidate_specs: tuple[tuple[int, int, int], ...],
+    worker_count: int,
+) -> tuple[tuple[tuple[int, int, int], ...], ...]:
+    """Keep both signs of each antithetic direction on the same worker."""
+
+    if worker_count < 1:
+        raise ValueError("worker_count must be positive")
+    return tuple(
+        tuple(
+            spec
+            for spec in candidate_specs
+            if spec[1] % worker_count == worker_index
+        )
+        for worker_index in range(worker_count)
+    )
+
+
+def train_candidate_shard(
+    config: ShortcutCreditExperimentConfig,
+    *,
+    candidate_specs: tuple[tuple[int, int, int], ...],
+    device: torch.device,
+    base_state: dict[str, Tensor],
+    center_rule_config: BackwardRuleConfig,
+    center_parameters: dict[str, Tensor],
+    directions: tuple[EggrollDirection, ...],
+    inner_batches: tuple[ShortcutBatch, ...],
+    fitness_batches: tuple[ShortcutBatch, ...],
+    correct_batches: tuple[ShortcutBatch, ...],
+    initial_clean_metrics: ShortcutMetrics,
+) -> list[
+    tuple[
+        int,
+        float,
+        ShortcutMetrics,
+        ShortcutMetrics,
+        list[dict[str, float]],
+    ]
+]:
+    """Evaluate one deterministic subset of candidates on one CUDA device."""
+
+    torch.cuda.set_device(device)
+    worker_center_rule = LearnedBackwardRule(center_rule_config).to(device)
+    worker_center_parameters = {
+        name: tensor.to(device)
+        for name, tensor in center_parameters.items()
+    }
+    worker_base_state = {
+        name: tensor.to(device)
+        for name, tensor in base_state.items()
+    }
+    worker_inner_batches = tuple(batch.to(device) for batch in inner_batches)
+    worker_fitness_batches = tuple(
+        batch.to(device) for batch in fitness_batches
+    )
+    worker_correct_batches = tuple(
+        batch.to(device) for batch in correct_batches
+    )
+    direction_indices = {spec[1] for spec in candidate_specs}
+    worker_directions = {
+        index: move_eggroll_direction(directions[index], device)
+        for index in direction_indices
+    }
+
+    results = []
+    for candidate_index, direction_index, sign in candidate_specs:
+        fitness, clean, correct, statistics = train_candidate(
+            config,
+            base_state=worker_base_state,
+            center_rule=worker_center_rule,
+            center_parameters=worker_center_parameters,
+            direction=worker_directions[direction_index],
+            sign=sign,
+            inner_batches=worker_inner_batches,
+            fitness_batches=worker_fitness_batches,
+            correct_batches=worker_correct_batches,
+            initial_clean_metrics=initial_clean_metrics,
+            device=device,
+            capture_statistics=candidate_index == 0,
+        )
+        results.append(
+            (candidate_index, fitness, clean, correct, statistics)
+        )
+    return results
 
 
 def linear_outer_learning_rate(
@@ -423,6 +533,10 @@ def maybe_initialize_wandb(
 
 def run(config: ShortcutCreditExperimentConfig) -> Path:
     device = resolve_device(config.device)
+    candidate_devices = parse_candidate_devices(
+        config.candidate_devices,
+        device,
+    )
     output_dir = Path(config.output_dir) / config.run_name
     output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = output_dir / "metrics.jsonl"
@@ -509,40 +623,92 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         )
         center_parameters = clone_center_parameters(center_rule)
 
-        fitness_values = []
-        clean_results = []
-        correct_results = []
-        captured_statistics: list[dict[str, float]] = []
-        for direction_index, direction in enumerate(directions):
-            for sign in (1, -1):
-                capture_statistics = (
-                    direction_index == 0 and sign == 1
-                )
-                (
-                    fitness,
-                    clean_metrics,
-                    correct_metrics,
-                    statistics,
-                ) = train_candidate(
+        candidate_specs = tuple(
+            (
+                2 * direction_index + sign_index,
+                direction_index,
+                sign,
+            )
+            for direction_index in range(len(directions))
+            for sign_index, sign in enumerate((1, -1))
+        )
+        candidate_outputs: list[
+            tuple[
+                int,
+                float,
+                ShortcutMetrics,
+                ShortcutMetrics,
+                list[dict[str, float]],
+            ]
+        ] = []
+        if len(candidate_devices) == 1:
+            for candidate_index, direction_index, sign in candidate_specs:
+                fitness, clean, correct, statistics = train_candidate(
                     config,
                     base_state=base_state,
-                    initialization_seed=initialization_seed,
                     center_rule=center_rule,
                     center_parameters=center_parameters,
-                    direction=direction,
+                    direction=directions[direction_index],
                     sign=sign,
                     inner_batches=inner_batches,
                     fitness_batches=fitness_batches,
                     correct_batches=correct_batches,
                     initial_clean_metrics=initial_clean_metrics,
                     device=device,
-                    capture_statistics=capture_statistics,
+                    capture_statistics=candidate_index == 0,
                 )
-                fitness_values.append(fitness)
-                clean_results.append(clean_metrics)
-                correct_results.append(correct_metrics)
-                if statistics:
-                    captured_statistics = statistics
+                candidate_outputs.append(
+                    (
+                        candidate_index,
+                        fitness,
+                        clean,
+                        correct,
+                        statistics,
+                    )
+                )
+        else:
+            shards = shard_candidate_specs(
+                candidate_specs,
+                len(candidate_devices),
+            )
+            with ThreadPoolExecutor(
+                max_workers=len(candidate_devices)
+            ) as executor:
+                futures = [
+                    executor.submit(
+                        train_candidate_shard,
+                        config,
+                        candidate_specs=shard,
+                        device=worker_device,
+                        base_state=base_state,
+                        center_rule_config=center_rule.config,
+                        center_parameters=center_parameters,
+                        directions=directions,
+                        inner_batches=inner_batches,
+                        fitness_batches=fitness_batches,
+                        correct_batches=correct_batches,
+                        initial_clean_metrics=initial_clean_metrics,
+                    )
+                    for shard, worker_device in zip(
+                        shards,
+                        candidate_devices,
+                    )
+                    if shard
+                ]
+                for future in futures:
+                    candidate_outputs.extend(future.result())
+
+        candidate_outputs.sort(key=lambda result: result[0])
+        fitness_values = []
+        clean_results = []
+        correct_results = []
+        captured_statistics: list[dict[str, float]] = []
+        for _, fitness, clean, correct, statistics in candidate_outputs:
+            fitness_values.append(fitness)
+            clean_results.append(clean)
+            correct_results.append(correct)
+            if statistics:
+                captured_statistics = statistics
 
         fitness_tensor = torch.tensor(fitness_values, device=device)
         outer_learning_rate = linear_outer_learning_rate(config, generation)
@@ -564,6 +730,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "generation": generation,
                 "horizon": horizon,
                 "population_size": config.population_size,
+                "candidate_device_count": len(candidate_devices),
                 "outer_learning_rate": outer_learning_rate,
                 "fitness/standardized_mean": float(standardized.mean()),
                 "fitness/standardized_std": float(
@@ -685,6 +852,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--checkpoint-interval", type=int, default=10)
     parser.add_argument("--device", default="auto")
+    parser.add_argument(
+        "--candidate-devices",
+        help="comma-separated CUDA devices for parallel candidate shards",
+    )
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument(
         "--wandb-project",

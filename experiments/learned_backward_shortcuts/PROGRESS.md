@@ -362,3 +362,22 @@ evaluator:
   [`learned-backward-p64-packed-resume80-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/hhw7gu1w)
 
 The packed run is therefore the authoritative trajectory from generation 80.
+
+#### Multi-GPU candidate sharding
+
+Candidate rollouts can optionally be sharded over explicitly reserved CUDA
+devices. Both signs of each antithetic direction remain on the same device, and
+results are restored to canonical population order before the unchanged
+EGGROLL update.
+
+A full population-64, horizon-20 replay from checkpoint 80 showed:
+
+- Scalar runtime: `28.9s`.
+- Two-GPU runtime: `23.2s` (`19.8%` faster).
+- Fitness, clean CE, every accuracy/diversity metric, pair-difference
+  statistics, and captured gradient statistics: exactly identical.
+
+The speedup is sublinear because model construction and Python/CUDA launch
+overhead are still partly serialized, but the implementation provides a
+validated path to larger populations. The live trajectory will adopt two-GPU
+sharding from its next durable checkpoint while both devices are available.
