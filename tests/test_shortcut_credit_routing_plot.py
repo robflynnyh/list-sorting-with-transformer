@@ -15,6 +15,7 @@ from list_sorting_transformer.shortcut_credit_routing_plot import (
     plot_routing_roles,
     position_matched_role_gates,
     query_role_gates,
+    routing_structure_summary,
 )
 
 
@@ -143,3 +144,19 @@ def test_plot_routing_roles(tmp_path: Path) -> None:
 
     assert output.exists()
     assert output.stat().st_size > 1_000
+
+
+def test_routing_structure_separates_position_and_input_variation() -> None:
+    gates = torch.ones(3, 2, 4, 4)
+    causal = torch.ones(4, 4, dtype=torch.bool).tril()
+    position_pattern = torch.arange(16, dtype=torch.float32).view(4, 4)
+    gates[:, :, causal] = position_pattern[causal]
+
+    positional = routing_structure_summary(gates)
+
+    assert positional["position profile std"] > 0
+    assert positional["input-conditioned rms"] == pytest.approx(0.0)
+    gates[0, :, causal] += 1.0
+    conditioned = routing_structure_summary(gates)
+    assert conditioned["input-conditioned rms"] > 0
+    assert conditioned["per-example mean std"] > 0

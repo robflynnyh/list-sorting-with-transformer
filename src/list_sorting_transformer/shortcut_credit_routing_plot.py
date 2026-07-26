@@ -159,6 +159,52 @@ def position_matched_role_gates(
     }
 
 
+def routing_structure_summary(attention_gates: Tensor) -> dict[str, float]:
+    """Decompose gate variation into positional and input-conditioned parts."""
+
+    if attention_gates.ndim != 4:
+        raise ValueError("attention gates must have shape [B, H, T, T]")
+    gates = attention_gates.mean(dim=1)
+    sequence_length = gates.shape[-1]
+    causal = torch.ones(
+        sequence_length,
+        sequence_length,
+        dtype=torch.bool,
+        device=gates.device,
+    ).tril()
+    valid = gates[:, causal]
+    position_profile = gates.mean(dim=0)
+    position_values = position_profile[causal]
+    residuals = (gates - position_profile)[..., causal]
+    query_values = gates[:, -1, :]
+    quantiles = torch.quantile(
+        valid.float(),
+        torch.tensor(
+            [0.1, 0.5, 0.9],
+            device=valid.device,
+        ),
+    )
+    return {
+        "gate mean": float(valid.mean()),
+        "gate std": float(valid.std(unbiased=False)),
+        "gate p10": float(quantiles[0]),
+        "gate p50": float(quantiles[1]),
+        "gate p90": float(quantiles[2]),
+        "position profile std": float(
+            position_values.std(unbiased=False)
+        ),
+        "input-conditioned rms": float(
+            residuals.square().mean().sqrt()
+        ),
+        "per-example mean std": float(
+            valid.mean(dim=1).std(unbiased=False)
+        ),
+        "final-query source std": float(
+            query_values.std(dim=1, unbiased=False).mean()
+        ),
+    }
+
+
 @torch.no_grad()
 def summarize_rule(
     rule: AttentionRoutingRule,
@@ -248,6 +294,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     summaries = []
     matched_summaries = []
+    structure_summaries = []
     for label, path in args.checkpoint:
         rule = load_attention_router(path)
         gates = rule.attention_gates(batch.input_ids)[0]
@@ -263,6 +310,9 @@ def main(argv: Sequence[str] | None = None) -> None:
                     vocabulary,
                 ),
             )
+        )
+        structure_summaries.append(
+            (label, routing_structure_summary(gates))
         )
     plot_routing_roles(summaries, args.output)
     for (label, summary), (_, matched) in zip(
@@ -280,6 +330,12 @@ def main(argv: Sequence[str] | None = None) -> None:
             for role in matched
         )
         print(f"{label} position-matched: {matched_values}")
+    for label, summary in structure_summaries:
+        values = " ".join(
+            f"{metric}={value:.4f}"
+            for metric, value in summary.items()
+        )
+        print(f"{label} structure: {values}")
     print(args.output)
 
 

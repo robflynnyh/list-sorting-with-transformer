@@ -1730,6 +1730,23 @@ position-matched controls. This still does not exclude a later phase change,
 but it establishes that generations 30--40 made the router more suppressive
 without making its learned credit assignment more useful.
 
+A variance decomposition checks whether role averaging is hiding other
+nonuniform structure:
+
+| Checkpoint | Mean gate | Total gate SD | Fixed-position profile SD | Input-conditioned RMS |
+| --- | ---: | ---: | ---: | ---: |
+| 10 | 0.745 | 0.060 | 0.060 | 0.0038 |
+| 20 | 0.606 | 0.087 | 0.087 | 0.0059 |
+| 30 | 0.430 | 0.105 | 0.105 | 0.0071 |
+| 40 | 0.362 | 0.105 | 0.104 | 0.0072 |
+
+The centre is not literally uniform. It has learned an increasingly strong
+absolute-position pattern, but almost none of the variation depends on which
+example or token occupies a position. At checkpoint 40, input-conditioned RMS
+is only about `6.9%` of total gate SD. A later useful phase could still build
+semantic selection on top of this positional scaffold, so both components
+will continue to be tracked separately.
+
 Checkpoint-40 outputs:
 [`results/random_checkpoint40_replications.jsonl`](results/random_checkpoint40_replications.jsonl),
 [`results/random_checkpoint40_replications_summary.json`](results/random_checkpoint40_replications_summary.json),
