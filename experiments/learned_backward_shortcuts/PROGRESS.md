@@ -875,6 +875,9 @@ The second window improved while retaining all ten output classes:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Generations 0-9 | 2.3530 | 20.69% | 14.80% | 35.64% | 15.94% | 0.998 |
 | Generations 10-19 | 2.3296 | 20.44% | 16.70% | 37.73% | 17.85% | 0.988 |
+| Generations 20-29 | 2.3405 | 21.87% | 17.43% | 41.15% | 18.91% | 0.934 |
+| Generations 30-39 | 2.3462 | 21.42% | 17.36% | 42.09% | 19.14% | 0.919 |
+| Generations 40-49 | 2.3522 | 20.75% | 16.89% | 36.30% | 18.16% | 0.824 |
 
 Population-level routing diagnostics were added and replayed from the
 generation-20 checkpoint. They average each candidate's leak-edge gate
@@ -893,6 +896,20 @@ can accumulate this signal into the centre, especially after moving to the
 harder horizon-80 problem. Directly selecting the candidate with the best
 sampled minimum accuracy is less reliable: its ratios were `1.041` and
 `1.003`, consistent with noisy accuracy estimates.
+
+A matched checkpoint-40 replay compared the exact P64 direction subset with a
+larger P256 population:
+
+| Population | Best ratio found | Candidates below 0.9 | Fitness/selectivity correlation | Fittest candidate ratio | Generation time |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 | 0.677 | 46.88% | +0.339 | 1.018 | 31.7 s |
+| 256 | 0.489 | 46.88% | +0.469 | 0.489 | 106.7 s |
+
+The evolved centre now makes selective perturbations common even at P64.
+Increasing the population improves the estimator and finds a much stronger
+fittest candidate, but costs `3.4x` more wall time. P64 remains the affordable
+choice for a long horizon-80 trajectory; P256 will be used for a shorter
+matched comparison from the same horizon-80 checkpoint.
 
 The independent-map control completed two horizon-80 windows before being
 stopped at its durable generation-70 checkpoint:
@@ -922,3 +939,8 @@ contains no strongly selective candidate and fitness is effectively unrelated
 to the small selectivity differences that remain. The corresponding shared-map
 diagnostic must be measured after its horizon transition; it should not be
 inferred from this failed independent centre.
+
+Generation 50 triggered the shared router's transition to horizon 80.
+Checkpoint 50 preserves the completed horizon-40 centre. The horizon-80 phase
+will be run for substantially longer than the 20-generation independent
+control before success or failure is judged.
