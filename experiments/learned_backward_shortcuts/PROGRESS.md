@@ -1043,3 +1043,17 @@ the bottleneck:
 This branch will be stopped at a matched durable checkpoint if its centre
 updates become nonlocal or if it does not convert candidate gains into centre
 accuracy.
+
+Across the matched generations 80-89:
+
+| Centre-step branch | Clean CE | Masked | Wrong hint | Correct leak | Minimum clean split | Fittest candidate wrong | Centre update / RMS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Conservative (`0.02`) | 2.9980 | 19.26% | 0.51% | 99.30% | 0.51% | 12.07% | 1.12% |
+| Medium (`0.05`) | 2.9252 | 19.38% | 1.17% | 95.70% | 1.17% | 14.14% | 2.80% |
+
+Both centres preserve all ten output classes. The medium branch converts more
+of the candidate signal into centre wrong-hint accuracy, lowers clean CE, and
+does not reduce masked accuracy. Its updates remain moderate rather than
+obviously nonlocal. However, centre wrong-hint accuracy is still low and
+varies by generation (`0-3.12%`), so both branches continue through a second
+matched window before one is selected.
