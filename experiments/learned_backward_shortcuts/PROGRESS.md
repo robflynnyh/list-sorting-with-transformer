@@ -1449,7 +1449,7 @@ generation therefore also samples fresh balanced masked, wrong-hint, and
 correct-hint evaluation examples. The learned centre, ordinary training, and
 masked training all use the exact same fresh examples.
 
-The active continuation is:
+The first held-out continuation ran through checkpoint 20:
 
 - Run:
   [`attention-router-random-list-h160-p64-s021-outer0007-heldout-resume10-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/n1xq8tsr)
@@ -1457,6 +1457,15 @@ The active continuation is:
   `attention-router-random-list-h160-p64-s021-outer0007-baselines-seed7/checkpoint_000010.pt`.
 - All search and training settings are unchanged; only the extra held-out
   measurements were added.
+
+The active candidate-held-out continuation is:
+
+- Run:
+  [`attention-router-random-list-h160-p64-s021-outer0007-candidate-heldout-resume20-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/m3tyle5h)
+- Resume source:
+  `attention-router-random-list-h160-p64-s021-outer0007-heldout-resume10-seed7/checkpoint_000020.pt`.
+- It additionally evaluates all 64 candidates on the fresh set, without using
+  those results in the EGGROLL update.
 
 The tracked matched-control plot is regenerated from the live JSONL metrics:
 
@@ -1466,7 +1475,7 @@ The tracked matched-control plot is regenerated from the live JSONL metrics:
 PYTHONPATH=src python -m \
   list_sorting_transformer.shortcut_credit_compare_plot \
   --matched-controls \
-  artifacts/learned_backward_shortcuts/attention-router-random-list-h160-p64-s021-outer0007-heldout-resume10-seed7/metrics.jsonl \
+  artifacts/learned_backward_shortcuts/attention-router-random-list-h160-p64-s021-outer0007-candidate-heldout-resume20-seed7/metrics.jsonl \
   --output \
   experiments/learned_backward_shortcuts/results/random_list_matched_controls.png
 ```
@@ -1561,12 +1570,29 @@ therefore negative for centre learning and still shows global rather than
 moving-hint-specific suppression. This remains an interim result before the
 longer horizon requested for learned credit assignment.
 
-The next checkpoint continuation will also evaluate every population candidate
-on the fresh held-out set. This is necessary because the currently reported
-"best" and "most robust" candidates are selected on the reused outer fitness
-set. The added metrics retain those outer-set selection indices, then report
+From checkpoint 20 onward, every population candidate is also evaluated on the
+fresh held-out set. The metrics retain outer-set selection indices, then report
 their fresh masked, wrong-hint, correct-hint, and clean-CE results. They also
 measure the population correlation between outer fitness and fresh negative
-worst-mode CE. The active generation-10 process cannot load new code, so this
-instrumentation will begin from its durable checkpoint 20 without resetting
-the evolved centre.
+worst-mode CE.
+
+Generation 20 was intentionally rerun from checkpoint 20. Every pre-existing
+outer, centre, control, routing, and update metric reproduces exactly, which
+validates the continuation. The new candidate evidence is:
+
+| Outer-selected candidate | Reused outer set | Fresh held-out set |
+| --- | ---: | ---: |
+| Masked accuracy | 54.69% | 47.27% |
+| Wrong-hint accuracy | 42.19% | 39.84% |
+| Weaker-split accuracy | 42.19% | 39.84% |
+| Correct-hint accuracy | 80.47% | 84.38% |
+| Clean CE | 1.677 | 1.731 |
+
+Across all 64 candidates, outer fitness correlates `0.998` with fresh
+negative worst-mode CE. Candidate quality is therefore genuine and not an
+artifact of repeatedly using the same outer examples. The candidate's
+all-hint-source relative gate is `0.877`, providing the first strong
+candidate-level link between semantic hint suppression and fresh function
+learning. The unresolved problem is now narrower: EGGROLL reliably samples
+useful, generalizing rules, but its accumulated centre still fails to capture
+them.

@@ -112,6 +112,9 @@ def test_plot_matched_controls_prefers_heldout_metrics(tmp_path: Path) -> None:
             "robust/min_mode_accuracy": 0.8,
             "robust/clean_loss": 0.7,
             "robust/correct_leak_accuracy": 1.0,
+            "robust/heldout_min_mode_accuracy": 0.7,
+            "robust/heldout_clean_loss": 0.8,
+            "robust/heldout_correct_leak_accuracy": 0.9,
             "heldout_comparison/center_minus_ordinary_min_accuracy": 0.1,
             "heldout_comparison/center_clean_loss_improvement_over_ordinary": 0.3,
         }

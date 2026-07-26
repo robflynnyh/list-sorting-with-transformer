@@ -226,6 +226,10 @@ def plot_matched_controls(
         for row in rows
     )
     heldout_prefix = "heldout_" if use_heldout else ""
+    candidate_heldout = any(
+        "robust/heldout_min_mode_accuracy" in row
+        for row in rows
+    )
     trajectories = (
         (
             "Evolved centre",
@@ -247,9 +251,13 @@ def plot_matched_controls(
         ),
         (
             (
-                "Most robust sampled rule (outer set)"
-                if use_heldout
-                else "Most robust sampled rule"
+                "Outer-selected robust rule (fresh evaluation)"
+                if candidate_heldout
+                else (
+                    "Most robust sampled rule (outer set)"
+                    if use_heldout
+                    else "Most robust sampled rule"
+                )
             ),
             "robust",
             "#d62728",
@@ -258,10 +266,15 @@ def plot_matched_controls(
     )
 
     for label, prefix, color, linestyle in trajectories:
+        metric_prefix = (
+            "robust/heldout_"
+            if prefix == "robust" and candidate_heldout
+            else f"{prefix}/"
+        )
         _plot(
             accuracy_axis,
             rows,
-            f"{prefix}/min_mode_accuracy",
+            f"{metric_prefix}min_mode_accuracy",
             label=label,
             color=color,
             linestyle=linestyle,
@@ -269,7 +282,7 @@ def plot_matched_controls(
         _plot(
             loss_axis,
             rows,
-            f"{prefix}/clean_loss",
+            f"{metric_prefix}clean_loss",
             label=label,
             color=color,
             linestyle=linestyle,
@@ -277,7 +290,7 @@ def plot_matched_controls(
         _plot(
             correct_axis,
             rows,
-            f"{prefix}/correct_leak_accuracy",
+            f"{metric_prefix}correct_leak_accuracy",
             label=label,
             color=color,
             linestyle=linestyle,
