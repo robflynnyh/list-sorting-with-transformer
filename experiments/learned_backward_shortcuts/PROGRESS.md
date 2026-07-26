@@ -2213,3 +2213,42 @@ Horizon-3,000 single-candidate outputs:
 [`results/random_h3000_g70_elite1_alpha10_audit20_summary.json`](results/random_h3000_g70_elite1_alpha10_audit20_summary.json),
 and
 [`results/random_h3000_g70_elite1_alpha10_best_seed_collapse.jsonl`](results/random_h3000_g70_elite1_alpha10_best_seed_collapse.jsonl).
+
+### Transition-aware evolution
+
+Commit `02796d9` implements the collapse-targeted objective as
+`worst_checkpoint_mode_ce`. Each candidate forward model is trained once
+continuously; evaluating a checkpoint does not restart the model or optimizer.
+At each requested update, the objective takes the larger CE of the masked and
+incorrect-hint fixed splits. Candidate fitness uses the largest of those
+values across all requested checkpoints. This is stricter than mean clean CE:
+a candidate cannot hide a collapse in one shortcut mode or recover before the
+final measurement.
+
+The implementation applies the same objective to population ranking, the old
+centre, the elite proposal, ordinary and masked-only controls, and every robust
+acceptance trajectory. It logs per-checkpoint clean CE, weaker-split accuracy,
+worst-mode CE, and the overall worst-checkpoint value. Focused tests, the full
+test suite, a CPU CLI smoke, and a two-GPU parallel-candidate/robust-acceptance
+smoke all pass.
+
+The accepted generation-70 single candidate was reconstructed with explicit
+lineage before resuming:
+
+- source generation: 70;
+- evaluated horizon: 3,000 updates;
+- selected population member: 32 at full interpolation;
+- search sigma: `0.013125`;
+- accepted-update streak: 2.
+
+Generation 71 is now running with population 64 across four GPUs:
+
+- continuous horizon: 3,600 updates;
+- fitness checkpoints: `2,800`, `3,000`, `3,200`, and `3,600`;
+- update: one best candidate at full interpolation;
+- acceptance: four independent inner trajectories, all scored on the same
+  permanent 512-example fitness set;
+- fresh held-out data remains report-only.
+
+Live run:
+[W&B](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/wr74mcwg).
