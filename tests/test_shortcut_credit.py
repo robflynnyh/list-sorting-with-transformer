@@ -32,6 +32,8 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     candidate_summary,
     center_rule_summary,
     center_routing_summary,
+    elite_centroid_update,
+    function_delta_alignment_summary,
     heldout_candidate_summary,
     initialize_fresh_backward_rule,
     load_checkpoint,
@@ -342,6 +344,64 @@ def test_routing_population_summary_links_selectivity_to_fitness() -> None:
         summary["backward/position_profile_fitness_correlation"]
         < -0.99
     )
+
+
+def test_function_delta_alignment_detects_agreeing_top_candidates() -> None:
+    deltas = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.8, 0.0],
+            [0.0, 1.0],
+            [0.0, -1.0],
+        ]
+    )
+    summary = function_delta_alignment_summary(
+        deltas,
+        torch.tensor([4.0, 3.0, 2.0, 1.0]),
+        robust_index=1,
+        top_k=2,
+    )
+
+    assert summary["backward/top_function_pairwise_cosine_mean"] == (
+        pytest.approx(1.0)
+    )
+    assert summary["backward/top_function_centroid_rms"] > 0
+    assert summary["backward/fitness_weighted_cosine_with_best"] > 0
+
+
+def test_elite_centroid_update_averages_selected_candidates() -> None:
+    rule = small_routing_rule()
+    center = clone_center_parameters(rule)
+    directions = (
+        sample_eggroll_direction(
+            rule,
+            generator=torch.Generator().manual_seed(91),
+        ),
+        sample_eggroll_direction(
+            rule,
+            generator=torch.Generator().manual_seed(92),
+        ),
+    )
+    fitnesses = torch.tensor([4.0, 0.0, 3.0, 1.0])
+
+    elite_indices = elite_centroid_update(
+        rule,
+        directions,
+        fitnesses,
+        sigma=0.2,
+        elite_count=2,
+        interpolation=0.5,
+    )
+
+    assert elite_indices.tolist() == [0, 2]
+    for name, parameter in rule.named_parameters():
+        expected_delta = 0.5 * 0.2 * (
+            directions[0].tensors[name] + directions[1].tensors[name]
+        ) / 2
+        torch.testing.assert_close(
+            parameter,
+            center[name] + expected_delta,
+        )
 
 
 def test_center_rule_summary_reports_unperturbed_training_metrics() -> None:

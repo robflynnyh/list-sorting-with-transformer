@@ -1,0 +1,37 @@
+from __future__ import annotations
+
+import pytest
+import torch
+
+from experiments.learned_backward_shortcuts.elite_router_checkpoint import (
+    elite_parameter_delta,
+    parse_indices,
+)
+from list_sorting_transformer.shortcut_credit import EggrollDirection
+
+
+def test_parse_indices_requires_unique_nonnegative_values() -> None:
+    assert parse_indices("2,5,7") == (2, 5, 7)
+    with pytest.raises(Exception):
+        parse_indices("2,2")
+    with pytest.raises(Exception):
+        parse_indices("-1,2")
+
+
+def test_elite_parameter_delta_respects_antithetic_signs() -> None:
+    directions = (
+        EggrollDirection({"weight": torch.tensor([1.0, 2.0])}),
+        EggrollDirection({"weight": torch.tensor([3.0, 4.0])}),
+    )
+
+    delta = elite_parameter_delta(
+        directions,
+        (0, 3),
+        parameter_name="weight",
+        sigma=0.5,
+    )
+
+    torch.testing.assert_close(
+        delta,
+        torch.tensor([-0.5, -0.5]),
+    )

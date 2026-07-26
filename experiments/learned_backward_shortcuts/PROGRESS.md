@@ -1792,3 +1792,54 @@ Candidate outputs:
 [`results/random_list_robust_candidate_routing.json`](results/random_list_robust_candidate_routing.json)
 and
 [`results/random_g40_population_structure_summary.json`](results/random_g40_population_structure_summary.json).
+
+Function-space analysis exposes why the paper-style centre update misses this
+signal. The eight highest-fitness generation-40 candidates have mean pairwise
+gate-map cosine `+0.586`: they are substantially aligned rather than eight
+unrelated lucky rules. In contrast, the standardized-fitness combination over
+all 64 candidate gate-map changes has cosine `-0.080` with the best candidate.
+For this nonlinear, suppress-only router, negatively weighting poor
+candidates rotates the all-population combination away from the coherent
+elite solution.
+
+A direct intervention tests this interpretation. Starting from checkpoint 40,
+the router parameters were moved a fraction `alpha` toward the mean parameter
+vector of the top eight candidates. Each setting used the same five matched
+forward initializations and datasets:
+
+| Elite interpolation `alpha` | Weaker-split accuracy | Advantage over ordinary | Clean CE improvement |
+| ---: | ---: | ---: | ---: |
+| 0.005 | 6.88% | -6.72 points | -0.211 |
+| 0.05 | 10.47% | -3.13 points | -0.073 |
+| 0.10 | 25.47% | +11.87 points | +0.389 |
+| 0.20 | 51.72% | +38.12 points | +1.323 |
+| 0.30 | 81.25% | +67.66 points | +1.991 |
+| 0.40 | 87.81% | +74.22 points | +2.105 |
+| 0.50 | 87.42% | +73.83 points | +2.077 |
+| 0.70 | 85.00% | +71.41 points | +2.000 |
+| 1.00 | 43.52% | +29.92 points | +1.077 |
+
+The useful region is broad, but moving all the way to the elite centroid is
+worse than interpolation. The `0.40` and `0.50` settings were then evaluated
+on 20 entirely new matched replications:
+
+| Fresh 20-seed validation | `alpha=0.40` | `alpha=0.50` | Ordinary | Masked training |
+| --- | ---: | ---: | ---: | ---: |
+| Weaker-split accuracy | 83.69% | **87.17%** | 9.08% | 22.30% |
+| Correct-hint accuracy | **97.42%** | 96.52% | 85.98% | 39.26% |
+| Clean CE improvement over ordinary | +2.168 | **+2.201** | 0 | not compared |
+| Paired accuracy wins | 20/20 | 20/20 | - | - |
+
+This establishes that candidate search was already finding a reusable
+shortcut-resistant backward rule. The failure was the paper-style
+all-population centre update, not candidate generalization or lack of a
+fitness signal. The next test is repeated top-eight centroid updates from the
+same checkpoint, run in parallel with the untouched paper-style trajectory.
+
+![Elite-centroid interpolation](results/random_g40_elite_interpolation.png)
+
+Consolidated results:
+[`results/random_g40_elite_interpolation_summary.json`](results/random_g40_elite_interpolation_summary.json),
+[`results/random_g40_elite_0p4000_validation.jsonl`](results/random_g40_elite_0p4000_validation.jsonl),
+and
+[`results/random_g40_elite_0p5000_validation.jsonl`](results/random_g40_elite_0p5000_validation.jsonl).

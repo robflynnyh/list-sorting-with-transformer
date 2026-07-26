@@ -14,5 +14,21 @@
   "population_position_profile_std_min": 0.0,
   "population_position_profile_std_max": 0.3547382056713104,
   "robust_candidate_position_profile_std": 0.25904497504234314,
-  "position_profile_fitness_correlation": 0.12309025228023529
+  "position_profile_fitness_correlation": 0.12309025228023529,
+  "top_eight_candidate_indices": [
+    36,
+    10,
+    2,
+    26,
+    25,
+    23,
+    58,
+    56
+  ],
+  "top_eight_function_pairwise_cosine_mean": 0.5862250924110413,
+  "top_eight_function_pairwise_cosine_abs_mean": 0.5862250924110413,
+  "top_eight_function_centroid_rms": 0.4354730248451233,
+  "fitness_weighted_function_delta_rms": 0.3976564407348633,
+  "fitness_weighted_cosine_with_best": -0.08013191819190979,
+  "unweighted_function_delta_rms": 0.4247831106185913
 }

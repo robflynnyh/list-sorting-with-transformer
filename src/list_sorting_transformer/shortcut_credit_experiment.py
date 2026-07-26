@@ -63,6 +63,9 @@ class ShortcutCreditExperimentConfig:
     forward_learning_rate: float = 3e-4
     sigma: float = 0.08
     outer_learning_rate: float = 0.1
+    outer_update_rule: str = "paper_standardized"
+    elite_count: int = 8
+    elite_interpolation: float = 0.5
     d_model: int = 128
     backward_d_model: int = 128
     backward_rule_type: str = "gradient_transformer"
@@ -101,6 +104,7 @@ class ShortcutCreditExperimentConfig:
             self.backward_layers,
             self.heads,
             self.checkpoint_interval,
+            self.elite_count,
         )
         if any(value < 1 for value in positive_integers):
             raise ValueError("integer configuration values must be positive")
@@ -116,6 +120,18 @@ class ShortcutCreditExperimentConfig:
             "worst_mode_ce",
         }:
             raise ValueError("unknown fitness_objective")
+        if self.outer_update_rule not in {
+            "paper_standardized",
+            "elite_centroid",
+        }:
+            raise ValueError("unknown outer_update_rule")
+        if (
+            self.outer_update_rule == "elite_centroid"
+            and self.elite_count > self.population_size
+        ):
+            raise ValueError("elite_count must not exceed population_size")
+        if not 0 < self.elite_interpolation <= 1:
+            raise ValueError("elite_interpolation must be in (0, 1]")
         if self.leak_placement not in {"suffix", "random_list"}:
             raise ValueError("unknown leak placement")
         if self.fitness_examples % 2:
@@ -580,6 +596,39 @@ def linear_outer_learning_rate(
     return config.outer_learning_rate * fraction_remaining
 
 
+@torch.no_grad()
+def elite_centroid_update(
+    module: BackwardRule,
+    directions: tuple[EggrollDirection, ...],
+    fitnesses: Tensor,
+    *,
+    sigma: float,
+    elite_count: int,
+    interpolation: float,
+) -> Tensor:
+    """Move the centre toward the mean of the highest-fitness candidates."""
+
+    if fitnesses.ndim != 1 or fitnesses.numel() != 2 * len(directions):
+        raise ValueError("fitnesses must contain one positive/negative pair")
+    if not 1 <= elite_count <= fitnesses.numel():
+        raise ValueError("elite_count must select from the population")
+    if not 0 < interpolation <= 1:
+        raise ValueError("interpolation must be in (0, 1]")
+    elite_indices = fitnesses.topk(elite_count).indices
+    for name, parameter in module.named_parameters():
+        centroid_delta = torch.zeros_like(parameter)
+        for candidate_index in elite_indices.tolist():
+            direction = directions[candidate_index // 2]
+            sign = 1 if candidate_index % 2 == 0 else -1
+            centroid_delta.add_(
+                sign * sigma * direction.tensors[name]
+            )
+        parameter.add_(
+            interpolation * centroid_delta / elite_count
+        )
+    return elite_indices
+
+
 def update_plateau_state(
     state: PlateauState,
     *,
@@ -1033,6 +1082,155 @@ def routing_population_summary(
     return summary
 
 
+def function_delta_alignment_summary(
+    candidate_deltas: Tensor,
+    fitnesses: Tensor,
+    *,
+    robust_index: int,
+    top_k: int = 8,
+) -> dict[str, float]:
+    """Summarize whether high-fitness function changes point together."""
+
+    if candidate_deltas.ndim != 2:
+        raise ValueError("candidate deltas must have shape [P, D]")
+    population_size = candidate_deltas.shape[0]
+    if fitnesses.shape != (population_size,):
+        raise ValueError("fitness count must match candidate deltas")
+    if not 0 <= robust_index < population_size:
+        raise ValueError("robust index must select a candidate")
+    if top_k < 2:
+        raise ValueError("top_k must be at least two")
+    top_k = min(top_k, population_size)
+
+    deltas = candidate_deltas.float()
+    norms = deltas.norm(dim=1)
+    normalized = deltas / norms.clamp_min(1e-12).unsqueeze(1)
+    top_indices = fitnesses.float().topk(top_k).indices
+    top_normalized = normalized[top_indices]
+    similarities = top_normalized @ top_normalized.T
+    off_diagonal = ~torch.eye(
+        top_k,
+        dtype=torch.bool,
+        device=similarities.device,
+    )
+    top_pairwise = similarities[off_diagonal]
+
+    standardized = (
+        fitnesses.float() - fitnesses.float().mean()
+    ) / torch.sqrt(fitnesses.float().var(unbiased=False) + 1e-5)
+    weighted_delta = (
+        standardized.unsqueeze(1) * deltas
+    ).mean(dim=0) * population_size**0.5
+    unweighted_delta = deltas.mean(dim=0)
+    top_centroid = deltas[top_indices].mean(dim=0)
+    best_index = int(fitnesses.argmax())
+
+    def cosine(left: Tensor, right: Tensor) -> float:
+        denominator = left.norm() * right.norm()
+        if float(denominator) <= 1e-12:
+            return 0.0
+        return float((left @ right) / denominator)
+
+    def rms(value: Tensor) -> float:
+        return float(value.square().mean().sqrt())
+
+    summary = {
+        "backward/function_delta_rms_mean": float(
+            deltas.square().mean(dim=1).sqrt().mean()
+        ),
+        "backward/best_fitness_function_delta_rms": rms(
+            deltas[best_index]
+        ),
+        "backward/robust_candidate_function_delta_rms": rms(
+            deltas[robust_index]
+        ),
+        "backward/top_function_pairwise_cosine_mean": float(
+            top_pairwise.mean()
+        ),
+        "backward/top_function_pairwise_cosine_abs_mean": float(
+            top_pairwise.abs().mean()
+        ),
+        "backward/top_function_centroid_rms": rms(top_centroid),
+        "backward/fitness_weighted_function_delta_rms": rms(
+            weighted_delta
+        ),
+        "backward/unweighted_function_delta_rms": rms(unweighted_delta),
+        "backward/fitness_weighted_cosine_with_best": cosine(
+            weighted_delta,
+            deltas[best_index],
+        ),
+        "backward/fitness_weighted_cosine_with_robust": cosine(
+            weighted_delta,
+            deltas[robust_index],
+        ),
+    }
+    summary.update(
+        {
+            f"backward/top_function_candidate_{rank}_index": float(index)
+            for rank, index in enumerate(top_indices.tolist())
+        }
+    )
+    return summary
+
+
+@torch.inference_mode()
+def routing_population_function_summary(
+    center_rule: AttentionRoutingRule,
+    center_parameters: dict[str, Tensor],
+    directions: tuple[EggrollDirection, ...],
+    fitnesses: Tensor,
+    clean_metrics: list[ShortcutMetrics],
+    *,
+    token_ids: Tensor,
+    sigma: float,
+) -> dict[str, float]:
+    """Measure candidate agreement in backward-routing function space."""
+
+    center_gates = center_rule.attention_gates(token_ids)[0]
+    sequence_length = token_ids.shape[1]
+    causal = torch.ones(
+        sequence_length,
+        sequence_length,
+        dtype=torch.bool,
+        device=center_gates.device,
+    ).tril()
+    center_vector = center_gates[..., causal].flatten().float()
+    candidate_deltas = []
+    work_rule = initialize_backward_rule(
+        center_rule.config,
+        device=token_ids.device,
+    )
+    for direction in directions:
+        for sign in (1, -1):
+            apply_eggroll_direction(
+                work_rule,
+                center_parameters,
+                direction,
+                sigma=sigma,
+                sign=sign,
+            )
+            candidate_vector = (
+                work_rule.attention_gates(token_ids)[0][..., causal]
+                .flatten()
+                .float()
+            )
+            candidate_deltas.append(
+                (candidate_vector - center_vector).cpu()
+            )
+    robust_index = max(
+        range(len(clean_metrics)),
+        key=lambda index: min(
+            clean_metrics[index].mode_accuracy["masked"],
+            clean_metrics[index].mode_accuracy["incorrect"],
+        ),
+    )
+    return function_delta_alignment_summary(
+        torch.stack(candidate_deltas),
+        fitnesses.detach().cpu(),
+        robust_index=robust_index,
+    )
+
+
 def center_update_summary(
     backward_rule: BackwardRule,
     previous_parameters: dict[str, Tensor],
@@ -1473,14 +1671,41 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         assert masked_training_heldout_clean is not None
         assert masked_training_heldout_correct is not None
         fitness_tensor = torch.tensor(fitness_values, device=device)
-        outer_learning_rate = linear_outer_learning_rate(config, generation)
-        standardized = paper_eggroll_update(
-            center_rule,
-            directions,
-            fitness_tensor,
-            sigma=config.sigma,
-            learning_rate=outer_learning_rate,
+        function_space_summary = (
+            routing_population_function_summary(
+                center_rule,
+                center_parameters,
+                directions,
+                fitness_tensor,
+                clean_results,
+                token_ids=inner_batches[-1].input_ids,
+                sigma=config.sigma,
+            )
+            if isinstance(center_rule, AttentionRoutingRule)
+            else {}
         )
+        outer_learning_rate = linear_outer_learning_rate(config, generation)
+        standardized = (
+            fitness_tensor - fitness_tensor.mean()
+        ) / torch.sqrt(fitness_tensor.var(unbiased=False) + 1e-5)
+        if config.outer_update_rule == "paper_standardized":
+            standardized = paper_eggroll_update(
+                center_rule,
+                directions,
+                fitness_tensor,
+                sigma=config.sigma,
+                learning_rate=outer_learning_rate,
+            )
+            elite_indices = None
+        else:
+            elite_indices = elite_centroid_update(
+                center_rule,
+                directions,
+                fitness_tensor,
+                sigma=config.sigma,
+                elite_count=config.elite_count,
+                interpolation=config.elite_interpolation,
+            )
         if isinstance(center_rule, AttentionRoutingRule):
             center_rule.project_parameters_()
         summary = candidate_summary(
@@ -1594,6 +1819,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     candidate_statistics,
                 )
             )
+        summary.update(function_space_summary)
         summary.update(center_update_summary(center_rule, center_parameters))
         summary.update(
             center_routing_summary(
@@ -1609,6 +1835,11 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "search/sigma": config.sigma,
                 "candidate_device_count": len(candidate_devices),
                 "outer_learning_rate": outer_learning_rate,
+                "outer/update_rule_elite_centroid": float(
+                    config.outer_update_rule == "elite_centroid"
+                ),
+                "outer/elite_count": float(config.elite_count),
+                "outer/elite_interpolation": config.elite_interpolation,
                 "fitness/standardized_mean": float(standardized.mean()),
                 "fitness/standardized_std": float(
                     standardized.std(unbiased=False)
@@ -1637,6 +1868,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 summary[f"backward/{metric_key}_mean"] = sum(
                     item[key] for item in captured_statistics
                 ) / len(captured_statistics)
+        if elite_indices is not None:
+            for rank, index in enumerate(elite_indices.tolist()):
+                summary[f"outer/elite_candidate_{rank}_index"] = float(index)
 
         # Mean fitness cannot be compared across generations because each
         # generation starts from a different model and initial clean loss.
@@ -1735,6 +1969,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--forward-learning-rate", type=float, default=3e-4)
     parser.add_argument("--sigma", type=float, default=0.08)
     parser.add_argument("--outer-learning-rate", type=float, default=0.1)
+    parser.add_argument(
+        "--outer-update-rule",
+        choices=("paper_standardized", "elite_centroid"),
+        default="paper_standardized",
+    )
+    parser.add_argument("--elite-count", type=int, default=8)
+    parser.add_argument("--elite-interpolation", type=float, default=0.5)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--backward-d-model", type=int, default=128)
     parser.add_argument(
