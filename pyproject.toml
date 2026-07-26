@@ -33,6 +33,7 @@ sort-compiled-pointer-compare = "list_sorting_transformer.compiled_pointer_compa
 sort-residual-pointer-compare = "list_sorting_transformer.residual_pointer_compare:main"
 sort-rasp-transfer = "list_sorting_transformer.rasp_transfer:main"
 sort-language-model-transfer = "list_sorting_transformer.language_model_transfer:main"
+sort-shortcut-credit = "list_sorting_transformer.shortcut_credit_experiment:main"
 
 [build-system]
 requires = ["setuptools>=68"]
