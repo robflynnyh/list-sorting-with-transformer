@@ -74,7 +74,8 @@ Before interpreting learned-backward results:
 - [x] Focused tests.
 - [x] CPU smoke.
 - [x] GPU smoke.
-- [ ] First population-64 research run.
+- [x] First population-64 research run launched and validated.
+- [ ] Analyze learning dynamics and horizon progression.
 
 ## Sources
 
@@ -138,3 +139,23 @@ The task exposes the intended failure cleanly: ordinary Adam learns the fixed
 leak perfectly by step 80, while performance with an incorrect leak falls to
 zero and clean loss continues worsening. The horizon curriculum should
 therefore eventually reach at least 80 updates.
+
+### 2026-07-26: first population-64 research run
+
+- Run: [`learned-backward-p64-curriculum-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/yupx3qo8)
+- Configuration: population 64, `sigma=0.08`, initial horizon 10, maximum
+  horizon 160, 300 generations, and outer learning rate linearly decayed from
+  `0.1`.
+- Generation 0 completed in `24.4s`.
+- Candidate clean-loss improvement had mean `0.3372`, standard deviation
+  `0.0839`, and maximum `0.4678`. The nontrivial standard deviation confirms
+  that the initial population produces a usable EGGROLL ranking signal.
+- Mean correction/original gradient RMS was `0.1078`, with gradient cosine
+  `0.9903`. This is consistent with the preceding calibration rather than an
+  ineffective or unstable perturbation.
+- Initial post-training diagnostic accuracy was close to chance at horizon 10:
+  `9.0%` with a correct leak, `11.8%` with a masked leak, and `9.6%` with an
+  incorrect leak. This is expected before the inner horizon reaches the point
+  where ordinary Adam learns the shortcut.
+- The detached run writes checkpoints every 10 generations under
+  `artifacts/learned_backward_shortcuts/learned-backward-p64-curriculum-seed7/`.
