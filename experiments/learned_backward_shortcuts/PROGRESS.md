@@ -164,3 +164,19 @@ therefore eventually reach at least 80 updates.
   centre update RMS, and centre gate magnitudes. Those diagnostics distinguish
   a useful directional EGGROLL signal from candidate spread caused only by
   perturbation size.
+
+#### Generation-10 estimator probe
+
+The generation-10 checkpoint was replayed for one generation with the expanded
+diagnostics:
+
+- Antithetic pair fitness-difference RMS: `0.0853`.
+- Whole-population fitness standard deviation: `0.0752`.
+- Mean absolute antithetic pair difference: `0.0697`.
+- Centre gate absolute mean / maximum: `0.0120 / 0.0158`.
+
+The paired difference is at least as large as the broad candidate spread, so
+the `+/-` comparisons contain a material directional ranking signal. The
+centre itself is still close to ordinary backpropagation after 10 generations;
+the larger correction statistics in the main run measure one perturbed probe
+candidate rather than the centre.
