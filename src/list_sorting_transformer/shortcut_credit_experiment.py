@@ -639,7 +639,7 @@ def routing_population_summary(
         not statistics for statistics in candidate_statistics
     ):
         return {}
-    relative_gates = torch.tensor(
+    query_relative_gates = torch.tensor(
         [
             sum(
                 item["routing_leak_relative_gate"]
@@ -650,7 +650,18 @@ def routing_population_summary(
         ],
         dtype=torch.float32,
     )
-    selectivity = 1.0 - relative_gates
+    hint_source_relative_gates = torch.tensor(
+        [
+            sum(
+                item["routing_hint_source_relative_gate"]
+                for item in statistics
+            )
+            / len(statistics)
+            for statistics in candidate_statistics
+        ],
+        dtype=torch.float32,
+    )
+    selectivity = 1.0 - query_relative_gates
     centered_fitness = fitnesses.float().cpu() - fitnesses.float().cpu().mean()
     centered_selectivity = selectivity - selectivity.mean()
     denominator = (
@@ -665,6 +676,25 @@ def routing_population_summary(
         if float(denominator) > 0
         else 0.0
     )
+    hint_source_selectivity = 1.0 - hint_source_relative_gates
+    centered_hint_source_selectivity = (
+        hint_source_selectivity - hint_source_selectivity.mean()
+    )
+    hint_source_denominator = (
+        centered_fitness.square().sum()
+        * centered_hint_source_selectivity.square().sum()
+    ).sqrt()
+    hint_source_correlation = (
+        float(
+            (
+                centered_fitness
+                * centered_hint_source_selectivity
+            ).sum()
+            / hint_source_denominator
+        )
+        if float(hint_source_denominator) > 0
+        else 0.0
+    )
     best_index = int(fitnesses.argmax())
     robust_index = max(
         range(len(clean_metrics)),
@@ -675,23 +705,44 @@ def routing_population_summary(
     )
     return {
         "backward/population_leak_relative_gate_min": float(
-            relative_gates.min()
+            query_relative_gates.min()
         ),
         "backward/population_leak_relative_gate_mean": float(
-            relative_gates.mean()
+            query_relative_gates.mean()
         ),
         "backward/population_leak_relative_gate_max": float(
-            relative_gates.max()
+            query_relative_gates.max()
         ),
         "backward/population_selective_fraction": float(
-            (relative_gates < 0.9).float().mean()
+            (query_relative_gates < 0.9).float().mean()
         ),
         "backward/selectivity_fitness_correlation": correlation,
         "backward/best_fitness_leak_relative_gate": float(
-            relative_gates[best_index]
+            query_relative_gates[best_index]
         ),
         "backward/robust_candidate_leak_relative_gate": float(
-            relative_gates[robust_index]
+            query_relative_gates[robust_index]
+        ),
+        "backward/population_hint_source_relative_gate_min": float(
+            hint_source_relative_gates.min()
+        ),
+        "backward/population_hint_source_relative_gate_mean": float(
+            hint_source_relative_gates.mean()
+        ),
+        "backward/population_hint_source_relative_gate_max": float(
+            hint_source_relative_gates.max()
+        ),
+        "backward/population_hint_source_selective_fraction": float(
+            (hint_source_relative_gates < 0.9).float().mean()
+        ),
+        "backward/hint_source_selectivity_fitness_correlation": (
+            hint_source_correlation
+        ),
+        "backward/best_fitness_hint_source_relative_gate": float(
+            hint_source_relative_gates[best_index]
+        ),
+        "backward/robust_candidate_hint_source_relative_gate": float(
+            hint_source_relative_gates[robust_index]
         ),
     }
 

@@ -280,8 +280,18 @@ def test_routing_population_summary_links_selectivity_to_fitness() -> None:
         ),
     ]
     statistics = [
-        [{"routing_leak_relative_gate": 0.8}],
-        [{"routing_leak_relative_gate": 1.1}],
+        [
+            {
+                "routing_leak_relative_gate": 0.8,
+                "routing_hint_source_relative_gate": 0.7,
+            }
+        ],
+        [
+            {
+                "routing_leak_relative_gate": 1.1,
+                "routing_hint_source_relative_gate": 1.2,
+            }
+        ],
     ]
 
     summary = routing_population_summary(
@@ -295,6 +305,22 @@ def test_routing_population_summary_links_selectivity_to_fitness() -> None:
     assert summary["backward/selectivity_fitness_correlation"] > 0.99
     assert abs(
         summary["backward/best_fitness_leak_relative_gate"] - 0.8
+    ) < 1e-6
+    assert (
+        summary["backward/population_hint_source_selective_fraction"]
+        == 0.5
+    )
+    assert (
+        summary[
+            "backward/hint_source_selectivity_fitness_correlation"
+        ]
+        > 0.99
+    )
+    assert abs(
+        summary[
+            "backward/best_fitness_hint_source_relative_gate"
+        ]
+        - 0.7
     ) < 1e-6
 
 
@@ -541,6 +567,31 @@ def test_attention_router_statistics_follow_random_leak_positions() -> None:
     expected_other_gate = gates[:, :, -1].masked_select(
         other_mask[:, None, :].expand_as(gates[:, :, -1])
     ).mean()
+    expected_hint_source = torch.cat(
+        [
+            gates[
+                row,
+                :,
+                hint_position:,
+                hint_position,
+            ].flatten()
+            for row, hint_position in enumerate(
+                (leak_positions + 1).tolist()
+            )
+        ]
+    ).mean()
+    expected_other_sources = torch.cat(
+        [
+            gates[row, :, destination, : destination + 1][
+                :,
+                torch.arange(destination + 1) != hint_position,
+            ].flatten()
+            for row, hint_position in enumerate(
+                (leak_positions + 1).tolist()
+            )
+            for destination in range(gates.shape[-1])
+        ]
+    ).mean()
 
     rule.capture_statistics = True
     rule.clear_statistics()
@@ -555,6 +606,17 @@ def test_attention_router_statistics_follow_random_leak_positions() -> None:
     )
     assert statistics["routing_leak_relative_gate"] == pytest.approx(
         float(expected_leak_gate / expected_other_gate)
+    )
+    assert statistics["routing_hint_source_gate"] == pytest.approx(
+        float(expected_hint_source)
+    )
+    assert statistics[
+        "routing_hint_source_other_gate"
+    ] == pytest.approx(float(expected_other_sources))
+    assert statistics[
+        "routing_hint_source_relative_gate"
+    ] == pytest.approx(
+        float(expected_hint_source / expected_other_sources)
     )
 
 

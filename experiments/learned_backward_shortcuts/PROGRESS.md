@@ -1204,8 +1204,14 @@ The apparent preservation of pointer-related roles in the preceding bar chart
 is almost entirely explained by where those roles occur. The learned rule is
 best described as a positional anti-recency profile: preserve early list
 positions and suppress the suffix near the output query. This is sufficient
-for the present fixed-layout shortcut, but is less general than an
-input-conditioned semantic router.
+for the present fixed-layout shortcut. That is a meaningful learned-credit
+result in its own right: EGGROLL discovered which training-time backward route
+to suppress, prevented the shortcut transition, and enabled learning of the
+actual pointer function from data that still contained the leaked answer. The
+rule does not need a semantic explanation of the leak to improve the forward
+learner. An input-conditioned semantic router would be more general, but is a
+follow-up rather than a requirement for calling the fixed-layout experiment a
+success.
 
 The same diagnostic at other lengths exposes a current generalization limit:
 
@@ -1228,10 +1234,11 @@ range; it should not assume that a longer inner horizon alone fixes this.
 
 #### Randomized leak-placement control
 
-The fixed suffix makes positional anti-recency a valid solution, so it does
-not yet demonstrate semantic identification of a shortcut. A controlled
-`random_list` task variant now inserts the two-token `<LEAK>, hint` pair after
-a uniformly sampled list value in every example:
+The fixed suffix makes positional anti-recency a valid and successful
+solution. A controlled `random_list` follow-up asks whether learned credit
+assignment can also discover a content-dependent rule when position alone is
+insufficient. It inserts the two-token `<LEAK>, hint` pair after a uniformly
+sampled list value in every example:
 
 ```text
 <BOS> ... <PTR> value ... value <LEAK> hint ... value <SEP> <QUERY>

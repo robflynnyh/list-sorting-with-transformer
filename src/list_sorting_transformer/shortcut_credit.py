@@ -731,6 +731,42 @@ class AttentionRoutingRule(nn.Module):
             other_query_gates = query_gates.masked_select(
                 other_mask[:, None, None, :].expand_as(query_gates)
             )
+            hint_source_indices = hint_positions.view(
+                batch_size,
+                1,
+                1,
+                1,
+                1,
+            ).expand(
+                batch_size,
+                self.config.forward_layers,
+                self.config.n_heads,
+                sequence_length,
+                1,
+            )
+            hint_source_by_destination = forward_gates.gather(
+                dim=-1,
+                index=hint_source_indices,
+            ).squeeze(-1)
+            valid_hint_destinations = (
+                torch.arange(
+                    sequence_length,
+                    device=hidden.device,
+                )[None, :]
+                >= hint_positions[:, None]
+            )
+            hint_source_gates = hint_source_by_destination.masked_select(
+                valid_hint_destinations[:, None, None, :].expand_as(
+                    hint_source_by_destination
+                )
+            )
+            other_valid_edges = (
+                causal[None, None, None, :, :]
+                & other_mask[:, None, None, None, :]
+            ).expand_as(forward_gates)
+            other_source_gates = forward_gates.masked_select(
+                other_valid_edges
+            )
             self.statistics.append(
                 {
                     "routing_gate": float(valid_gates.mean()),
@@ -746,6 +782,18 @@ class AttentionRoutingRule(nn.Module):
                     "routing_leak_relative_gate": float(
                         leak_gates.mean()
                         / other_query_gates.mean().clamp_min(
+                            torch.finfo(hidden.dtype).tiny
+                        )
+                    ),
+                    "routing_hint_source_gate": float(
+                        hint_source_gates.mean()
+                    ),
+                    "routing_hint_source_other_gate": float(
+                        other_source_gates.mean()
+                    ),
+                    "routing_hint_source_relative_gate": float(
+                        hint_source_gates.mean()
+                        / other_source_gates.mean().clamp_min(
                             torch.finfo(hidden.dtype).tiny
                         )
                     ),
