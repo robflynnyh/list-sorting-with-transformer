@@ -1975,3 +1975,46 @@ Checkpoint-59 horizon-matched baseline:
 [`results/random_elite_g58_h320_replications_summary.json`](results/random_elite_g58_h320_replications_summary.json)
 and
 [`results/random_elite_g58_h320_extra_replications_summary.json`](results/random_elite_g58_h320_extra_replications_summary.json).
+
+A continuous masked-only training sweep measures the underlying forward
+learning timescale without restarting the model or Adam state between
+measurements:
+
+| Updates | Weaker split | Masked | Incorrect hint | Correct hint | Clean CE |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 160 | 22.30% | 24.61% | 23.03% | 39.26% | 2.114 |
+| 320 | 94.30% | 99.92% | 94.30% | 100.0% | 0.233 |
+| 640 | 94.36% | 100.0% | 94.36% | 100.0% | 0.183 |
+| 1,280 | 92.81% | 98.03% | 92.93% | 98.28% | 0.259 |
+| 2,000 | 94.94% | 100.0% | 94.94% | 100.0% | 0.207 |
+| 3,000 | **95.08%** | **100.0%** | **95.08%** | **100.0%** | 0.222 |
+
+These are 20 continuous trajectories. The genuine pointer operation is mostly
+learned between 160 and 320 updates. Additional training does not reach the
+`98--99%` target because masked-only training never sees a value token in the
+hint slot: its masked split becomes perfect, while an unseen incorrect value
+remains mildly distracting. This is not an upper bound on learned credit
+assignment, which trains on value hints and can in principle learn to suppress
+their gradient influence.
+
+The first 320-horizon EGGROLL generation was also repeated with populations 64
+and 128. Population 128 found roughly twice the fixed-fitness improvement
+(`+0.000958` versus `+0.000454`) but took `434s` rather than `223s`. Both
+resulting checkpoints scored exactly `93.81%` on the same 20 unseen problems,
+and population 64 had marginally lower CE. Population 64 is therefore retained.
+Three further accepted population-64 updates through generation 63 also left
+the 40-problem external result effectively unchanged at `93.82%`, despite
+small fixed-fitness CE improvements. The next local-search diagnostic compares
+a four-candidate elite centroid against the current eight-candidate update.
+
+Masked-horizon outputs:
+[`results/masked_horizon_sweep_summary.json`](results/masked_horizon_sweep_summary.json)
+and
+[`results/masked_horizon_sweep.jsonl`](results/masked_horizon_sweep.jsonl).
+
+Population and continued-320 audit outputs:
+[`results/random_h320_p64_post_g59_replications_summary.json`](results/random_h320_p64_post_g59_replications_summary.json),
+[`results/random_h320_p128_post_g59_replications_summary.json`](results/random_h320_p128_post_g59_replications_summary.json),
+[`results/random_h320_post_g63_replications_summary.json`](results/random_h320_post_g63_replications_summary.json),
+and
+[`results/random_h320_post_g63_extra_replications_summary.json`](results/random_h320_post_g63_extra_replications_summary.json).

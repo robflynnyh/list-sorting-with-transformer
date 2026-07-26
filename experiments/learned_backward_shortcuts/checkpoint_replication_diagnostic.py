@@ -95,6 +95,7 @@ def main() -> None:
         max_horizon=max(horizon, saved_config.max_horizon),
         device=args.device,
         resume=None,
+        resume_horizon=None,
         wandb=False,
     )
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
