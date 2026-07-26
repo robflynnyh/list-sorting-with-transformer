@@ -1075,10 +1075,11 @@ suppressing the shortcut rather than fitting both modes independently.
 This is the first clear evidence that the evolved rule itself, rather than
 only isolated perturbations, is learning shortcut-resistant credit assignment.
 It is still early: horizon 80 only began at generation 51, and the diagnostic
-centre trajectories began at generation 80. Both branches therefore continue
-to generation 250. The conservative branch remains a delayed-learning control;
-it will not be rejected solely because it needs more generations at its
-smaller update size.
+centre trajectories began at generation 80. Both branches therefore continued
+through a long matched comparison rather than being selected from this early
+window. The conservative branch remained a delayed-learning control and was
+not rejected solely because it needed more generations at its smaller update
+size.
 
 The third matched window confirms that the separation is sustained:
 
@@ -1161,8 +1162,24 @@ Conservative has improved in every window since generations 80-89 and now uses
 all ten output values throughout the window. Medium remains more selective and
 closer to its sampled-candidate ceiling, but its advantage is primarily speed:
 the two trajectories are approaching the same suppressive horizon-80
-solution. Both continue so later windows can test whether conservative retains
-better correct-leak and diversity behavior after convergence.
+solution. Both were continued into one more matched window to test whether
+conservative retained better correct-leak and diversity behavior after
+convergence.
+
+The generations 140-149 window is effectively tied:
+
+| Generations 140-149 | Clean CE | Masked | Wrong hint | Correct leak | Minimum clean split | Robust candidate min | Centre leak ratio | Distinct predictions |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Conservative (`0.02`) | 2.3522 | 21.84% | 17.34% | 43.91% | 17.34% | 19.45% | 0.236 | 9.8 |
+| Medium (`0.05`) | 2.3162 | 21.76% | 17.54% | 33.91% | 17.38% | 20.62% | 0.103 | 9.7 |
+
+The weaker-split difference is only `0.04` percentage points. Medium reaches
+the solution faster, but no longer provides a material accuracy advantage.
+Conservative retains ten points more correct-leak accuracy and marginally
+better prediction diversity. The medium run was therefore stopped cleanly
+after generation 149 and its durable `checkpoint_000150.pt` was preserved,
+releasing GPUs 0-1 for the semantic follow-up. Conservative remains active
+through generation 250 to measure long-run stability.
 
 ![Horizon-80 centre-step comparison](results/attention_router_center_step_comparison.png)
 
@@ -1320,8 +1337,52 @@ multiple forward initializations inside each generation is a possible
 variance-reduction follow-up, but would multiply the already substantial
 horizon-160 cost and is not required for the first search.
 
-These are CPU prerequisites, not the final benchmark. They must be replicated
-on a GPU after the active fixed-suffix runs release one. If replicated, the
-first semantic search should start from a fresh shared router at fixed horizon
-160, use Q/K/V routing only, optimize worst-mode clean CE, and retain the
+All three seeds were then rerun on GPUs 0-1. Every reported accuracy, output
+count, and modal fraction matched the CPU result exactly; clean CE differed
+only at floating-point precision. The prerequisite is therefore replicated.
+The first semantic search starts from a fresh shared router at fixed horizon
+160, uses Q/K/V routing only, optimizes worst-mode clean CE, and retains the
 matched masked-training and hand-coded oracle controls.
+
+The first P64 calibration at the fixed-suffix radius `sigma=0.035` found a
+useful candidate (`87.9%` masked, `16.8%` wrong hint, and `100%` correct hint),
+but no direct semantic routing:
+
+- minimum all-hint-source gate ratio: `0.994`;
+- fittest-candidate all-hint-source ratio: `1.002`;
+- all-hint-source selectivity/fitness correlation: `-0.064`.
+
+The candidate's gain therefore came from a broader backward-routing change,
+not preferentially masking every route sourced from the hint. This is still a
+valid candidate behavior under the task objective, but the radius is too small
+to expose the oracle-like semantic rule directly.
+
+A matched P32 radius sweep used the same forward initialization, inner data,
+fitness data, and perturbation directions:
+
+| Sigma | Best masked / wrong / correct | Robust min | Minimum hint-source ratio | Hint-source selectivity/fitness correlation | Centre move at outer LR 0.05 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.07 | 22.3% / 15.6% / 57.8% | 15.6% | 0.972 | +0.797 | 7.4% |
+| 0.14 | 22.7% / 23.4% / 49.2% | 22.7% | 0.938 | +0.776 | 15.3% |
+| 0.21 | 94.9% / 60.9% / 100.0% | 60.9% | 0.954 | +0.552 | 22.8% |
+| 0.28 | 93.0% / 46.5% / 100.0% | 46.5% | 0.941 | +0.512 | 31.1% |
+
+`sigma=0.21` gives the best candidate by a large margin. Its own
+all-hint-source ratio is `0.986`, so its behavior is again broader than the
+hand-coded semantic oracle, but semantic selectivity is positively associated
+with fitness across the population. `sigma=0.28` degrades the robust result.
+
+Search radius and centre step are decoupled in the long run. Retaining outer
+learning rate `0.05` would move the centre by `22.8%` RMS in one generation,
+which is too aggressive. Scaling it to `0.007` predicts an initial move near
+`3.2%` while retaining the useful `sigma=0.21` candidate distribution.
+
+The active semantic run is:
+
+- Run:
+  [`attention-router-random-list-h160-p64-s021-outer0007-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/nd17tkbi)
+- Configuration: fresh shared router, P64, fixed horizon 160,
+  `sigma=0.21`, outer learning rate linearly decayed from `0.007`, Q/K/V
+  routing only, random-list leak placement, and worst-mode CE fitness.
+- Runtime calibration: approximately 105 seconds per generation on two
+  RTX A4500 GPUs.
