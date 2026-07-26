@@ -76,6 +76,7 @@ def main() -> None:
         ),
     )
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--gradient-clip-norm", type=float)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--run-name", required=True)
     parser.add_argument("--wandb", action="store_true")
@@ -85,6 +86,11 @@ def main() -> None:
     )
     parser.add_argument("--wandb-entity")
     args = parser.parse_args()
+    if (
+        args.gradient_clip_norm is not None
+        and args.gradient_clip_norm <= 0
+    ):
+        raise ValueError("gradient_clip_norm must be positive")
 
     device = torch.device(args.device)
     raw_checkpoint = torch.load(
@@ -162,6 +168,7 @@ def main() -> None:
         "checkpoint": str(args.checkpoint),
         "generation_seed": args.generation_seed,
         "horizons": args.horizons,
+        "gradient_clip_norm": args.gradient_clip_norm,
         "experiment_config": asdict(config),
     }
     wandb_run = maybe_initialize_wandb(
@@ -174,6 +181,7 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("")
     recent_losses: deque[float] = deque(maxlen=1_000)
+    recent_gradient_norms: deque[float] = deque(maxlen=1_000)
     completed_steps = 0
 
     for horizon in args.horizons:
@@ -189,6 +197,12 @@ def main() -> None:
             optimizer.zero_grad(set_to_none=True)
             loss = shortcut_loss(model, batch, backward_rule)
             loss.backward()
+            if args.gradient_clip_norm is not None:
+                gradient_norm = torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    args.gradient_clip_norm,
+                )
+                recent_gradient_norms.append(float(gradient_norm))
             optimizer.step()
             recent_losses.append(float(loss.detach()))
         completed_steps = horizon
@@ -199,7 +213,9 @@ def main() -> None:
             audit_correct_batches,
         )
         fixed = evaluate_shortcut_batches(model, fixed_batches)
+        last_10 = tuple(recent_losses)[-10:]
         last_100 = tuple(recent_losses)[-100:]
+        gradient_norm_last_100 = tuple(recent_gradient_norms)[-100:]
         row = {
             "horizon": float(horizon),
             "audit/clean_loss": audit.loss,
@@ -211,6 +227,11 @@ def main() -> None:
             "fixed/min_mode_accuracy": min(fixed.mode_accuracy.values()),
             "fixed/masked_accuracy": fixed.mode_accuracy["masked"],
             "fixed/incorrect_accuracy": fixed.mode_accuracy["incorrect"],
+            "train_loss/last_10_mean": (
+                sum(last_10) / len(last_10)
+                if last_10
+                else None
+            ),
             "train_loss/last_100_mean": (
                 sum(last_100) / len(last_100)
                 if last_100
@@ -219,6 +240,17 @@ def main() -> None:
             "train_loss/last_1000_mean": (
                 sum(recent_losses) / len(recent_losses)
                 if recent_losses
+                else None
+            ),
+            "gradient_norm/last_100_mean": (
+                sum(gradient_norm_last_100)
+                / len(gradient_norm_last_100)
+                if gradient_norm_last_100
+                else None
+            ),
+            "gradient_norm/last_100_max": (
+                max(gradient_norm_last_100)
+                if gradient_norm_last_100
                 else None
             ),
         }

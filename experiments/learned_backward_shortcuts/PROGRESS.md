@@ -2101,3 +2101,72 @@ The matched horizon-640 update is in
 [`results/random_h640_g67_pair_summary.json`](results/random_h640_g67_pair_summary.json).
 The combined 40-trajectory horizon-1,280 update is in
 [`results/random_h1280_g68_pair_40_summary.json`](results/random_h1280_g68_pair_40_summary.json).
+
+The horizon-2,000 generation took `1,375.0s`, improved fixed fitness by
+`+0.000867`, and was accepted. Candidate fitness correlated `0.970` with the
+held-out diagnostic. Its matched 20-trajectory audit nevertheless reproduced
+the rare-tail issue: 19 trajectories tied, one regressed, and none improved.
+The proposal reduced clean CE on 13 of 20 trajectories, but the one adverse
+trajectory made mean CE slightly worse (`0.3330 -> 0.3368`) and reduced mean
+weaker-split accuracy by `0.059` percentage points. The corresponding output
+is
+[`results/random_h2000_g69_pair_summary.json`](results/random_h2000_g69_pair_summary.json).
+
+Proposal acceptance now supports a configurable number of independent
+shortcut-training trajectories. Population candidates are still ranked using
+one shared trajectory, but the old centre and proposed centroid can then be
+trained from several additional model initializations and inner-data streams.
+All are scored on the same fixed 512-example fitness set. The default remains
+one trajectory for backward compatibility; the robust protocol uses four.
+
+### Long fixed-rule trajectory and collapse boundary
+
+The strongest observed external trajectory, generation seed `57155105`,
+scored `250/256 = 97.656%` on its weaker split. It was rerun continuously for
+50,000 forward updates with the generation-69 backward rule frozen and no
+perturbations:
+
+| Forward updates | Weaker split | Clean CE | Recent training loss |
+| ---: | ---: | ---: | ---: |
+| 320 | **97.66%** | 0.124 | 0.0793 |
+| 640 | **97.66%** | **0.098** | 0.0179 |
+| 1,280 | **97.66%** | 0.102 | 0.00456 |
+| 2,000 | **97.66%** | 0.109 | 0.00183 |
+| 3,000 | 88.28% | 0.430 | 0.1118 |
+| 5,000 | 94.53% | 0.330 | 0.000364 |
+| 10,000 | 94.92% | 0.365 | 0.0000378 |
+| 20,000 | 95.70% | 0.474 | `1.7e-7` |
+| 50,000 | 94.53% | 0.342 | `1.4e-8` |
+
+The early `97.66%` result is one example short of the `98%` threshold on this
+split, but longer training does not supply that example. Training loss becomes
+essentially zero while clean performance settles below its early peak.
+
+A dense replay localized two abrupt optimizer events:
+
+- performance is unchanged through step 2,980, then falls from `97.66%` to
+  `87.50%` by step 2,990;
+- it recovers to `97.27%` by step 3,550, then falls to `92.58%` by step 3,560.
+
+The last-ten-step training loss spikes to `0.442` and `0.0916` at those
+boundaries. This is a discrete basin transition rather than smooth
+degradation. It motivates scoring evolved rules by their worst fixed-set CE
+across checkpoints around the transition instead of only their final CE.
+
+Global gradient clipping changes the early Adam trajectory and prevents both
+observed collapses on this seed. Both clip norms `1.0` and `0.1` retain
+`97.66%` through 5,000 steps, but clip `1.0` has better clean CE (`0.149`
+versus `0.172`). Gradients near the original collapse are already much smaller
+than `1.0`, so clipping acts through the early trajectory rather than directly
+clamping the failure step. The clip-1 run is continuing to 50,000 steps at
+[W&B](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/pwesu763).
+The unmodified horizon-3,000 EGGROLL generation remains a clean comparison at
+[W&B](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/igb63vdn).
+
+Fixed-rule trajectory outputs:
+[`results/fixed_rule_best_seed_57155105_50k.jsonl`](results/fixed_rule_best_seed_57155105_50k.jsonl),
+[`results/fixed_rule_best_seed_57155105_collapse_dense.jsonl`](results/fixed_rule_best_seed_57155105_collapse_dense.jsonl),
+[`results/fixed_rule_best_seed_57155105_collapse_fine.jsonl`](results/fixed_rule_best_seed_57155105_collapse_fine.jsonl),
+[`results/fixed_rule_best_seed_57155105_clip1_5k.jsonl`](results/fixed_rule_best_seed_57155105_clip1_5k.jsonl),
+and
+[`results/fixed_rule_best_seed_57155105_clip01_5k.jsonl`](results/fixed_rule_best_seed_57155105_clip01_5k.jsonl).
