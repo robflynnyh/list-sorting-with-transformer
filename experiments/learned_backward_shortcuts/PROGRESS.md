@@ -1178,8 +1178,15 @@ the solution faster, but no longer provides a material accuracy advantage.
 Conservative retains ten points more correct-leak accuracy and marginally
 better prediction diversity. The medium run was therefore stopped cleanly
 after generation 149 and its durable `checkpoint_000150.pt` was preserved,
-releasing GPUs 0-1 for the semantic follow-up. Conservative remains active
-through generation 250 to measure long-run stability.
+releasing GPUs 0-1 for the semantic follow-up. The conservative run completed
+generation 249 and saved its durable `checkpoint_000250.pt`.
+
+In the final generations 240--249, the conservative centre averages `21.33%`
+masked, `18.13%` wrong-hint, `38.05%` correct-hint, and `17.81%` weaker-split
+accuracy. Its mean clean CE is `2.292`, and the hint-edge gate has fallen to
+`0.129` relative to other query sources. The final individual row is noisier
+(`16.02%` weaker split), so checkpoint quality is assessed below over fresh
+replications rather than from that one row.
 
 ![Horizon-80 centre-step comparison](results/attention_router_center_step_comparison.png)
 
@@ -1195,6 +1202,7 @@ values mean stronger suppression:
 | Generation 80 | 0.247 | 0.272 | 0.280 | 0.473 | 0.465 | 0.443 | 0.235 | 0.453 |
 | Conservative generation 110 | 0.153 | 0.170 | 0.180 | 0.477 | 0.464 | 0.437 | 0.150 | 0.448 |
 | Medium generation 110 | 0.087 | 0.100 | 0.114 | 0.516 | 0.497 | 0.463 | 0.088 | 0.479 |
+| Conservative generation 250 | 0.064 | 0.070 | 0.074 | 0.540 | 0.519 | 0.481 | 0.066 | 0.495 |
 
 ![Attention-router gates by token role](results/attention_router_routing_roles.png)
 
@@ -1229,6 +1237,30 @@ rule does not need a semantic explanation of the leak to improve the forward
 learner. An input-conditioned semantic router would be more general, but is a
 follow-up rather than a requirement for calling the fixed-layout experiment a
 success.
+
+That conclusion is now confirmed by 20 fresh checkpoint-250 replications with
+matched forward initializations, training examples, and evaluation examples:
+
+| 20-replication mean | Evolved centre | Ordinary training | Masked training |
+| --- | ---: | ---: | ---: |
+| Weaker-split accuracy | 17.15% | 0.0% | 16.39% |
+| Correct-hint accuracy | 39.30% | 100.0% | 27.46% |
+| Clean CE | 2.326 | 3.206 | 2.264 |
+
+The evolved centre beats ordinary training on both weaker-split accuracy and
+clean CE in all 20 replications. Its mean accuracy slightly exceeds direct
+masked training, although masked training retains a modest CE advantage.
+This is strong evidence that the learned training-only backward rule enables
+the real pointer function to be learned from shortcut-containing data. It
+also supports treating early broad or nonuniform routing as a possible
+intermediate phase rather than requiring immediate convergence to a clean
+selective mask. Behavioral advantage and routing structure should be tracked
+separately over time; the final fixed-position rule became clearly selective
+only later.
+
+Replication artifacts:
+[`raw JSONL`](results/fixed_checkpoint250_replications.jsonl) and
+[`summary`](results/fixed_checkpoint250_replications_summary.json).
 
 The same diagnostic at other lengths exposes a current generalization limit:
 
@@ -1568,7 +1600,11 @@ pointer function. Across these rows its mean gate falls to `0.661`, while the
 mean all-hint-source relative gate remains `1.000`. The present evidence is
 therefore negative for centre learning and still shows global rather than
 moving-hint-specific suppression. This remains an interim result before the
-longer horizon requested for learned credit assignment.
+longer horizon requested for learned credit assignment. In particular, the
+fixed-position trajectory shows that broad or otherwise nonuniform routing can
+precede later convergence to a selective rule. The randomized run should
+therefore be judged primarily by matched behavioral improvement while also
+tracking selectivity as an explanatory diagnostic, not as a prerequisite.
 
 From checkpoint 20 onward, every population candidate is also evaluated on the
 fresh held-out set. The metrics retain outer-set selection indices, then report
@@ -1596,3 +1632,11 @@ candidate-level link between semantic hint suppression and fresh function
 learning. The unresolved problem is now narrower: EGGROLL reliably samples
 useful, generalizing rules, but its accumulated centre still fails to capture
 them.
+
+Generations 21 and 22 replicate candidate generalization: outer-selected
+robust rules reach `52.73%` and `42.97%` fresh weaker-split accuracy, and the
+population outer/fresh objective correlations remain `0.9980` and `0.9988`.
+Their all-hint-source ratios are `1.001` and `0.994`, however. Generation 20's
+semantic suppression is therefore not the only useful candidate mechanism.
+The population can discover broader nonuniform rules before, or instead of,
+converging to a simple moving-hint mask.
