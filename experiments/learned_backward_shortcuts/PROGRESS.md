@@ -1440,6 +1440,19 @@ The matched-control semantic run is now active:
 - Measured runtime: approximately 117 seconds per generation on two
   RTX A4500 GPUs, including both controls.
 
+The tracked matched-control plot is regenerated from the live JSONL metrics:
+
+![Random-list matched controls](results/random_list_matched_controls.png)
+
+```bash
+PYTHONPATH=src python -m \
+  list_sorting_transformer.shortcut_credit_compare_plot \
+  --matched-controls \
+  artifacts/learned_backward_shortcuts/attention-router-random-list-h160-p64-s021-outer0007-baselines-seed7/metrics.jsonl \
+  --output \
+  experiments/learned_backward_shortcuts/results/random_list_matched_controls.png
+```
+
 The first two generations are:
 
 | Gen | Rule | Masked | Wrong hint | Correct hint | Weaker clean split |
