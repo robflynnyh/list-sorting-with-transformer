@@ -19,6 +19,7 @@ from .tokens import BOS, COMMA, PAD, SEP, VALUE_OFFSET, PointerNextVocabulary
 
 
 LeakMode = Literal["correct", "masked", "incorrect"]
+LeakPlacement = Literal["suffix", "random_list"]
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class ShortcutPointerVocabulary(PointerNextVocabulary):
         *,
         leak_mode: LeakMode,
         incorrect_value: int | None = None,
+        leak_value_index: int | None = None,
     ) -> tuple[list[int], int]:
         target = int(values[pointer_index + 1])
         if leak_mode == "correct":
@@ -62,12 +64,35 @@ class ShortcutPointerVocabulary(PointerNextVocabulary):
             hint_token = self.value_token(incorrect_value)
         else:
             raise ValueError(f"unknown leak mode: {leak_mode}")
-        prompt = [
-            *self.encode_prompt_with_pointer(values, pointer_index),
-            self.leak_token,
-            hint_token,
-            self.query_token,
-        ]
+        base_prompt = self.encode_prompt_with_pointer(
+            values,
+            pointer_index,
+        )
+        if leak_value_index is None:
+            prompt = [
+                *base_prompt,
+                self.leak_token,
+                hint_token,
+                self.query_token,
+            ]
+        else:
+            if not 0 <= leak_value_index < len(values):
+                raise ValueError("leak_value_index must index a list value")
+            value_positions = [
+                index
+                for index, token in enumerate(base_prompt)
+                if VALUE_OFFSET
+                <= token
+                < VALUE_OFFSET + self.symbol_count
+            ]
+            insertion = value_positions[leak_value_index] + 1
+            prompt = [
+                *base_prompt[:insertion],
+                self.leak_token,
+                hint_token,
+                *base_prompt[insertion:],
+                self.query_token,
+            ]
         return prompt, self.value_token(target)
 
     def render_tokens(self, tokens: Sequence[int]) -> str:
@@ -91,6 +116,7 @@ class ShortcutBatch:
     targets: Tensor
     length: int
     leak_mode: LeakMode
+    leak_placement: LeakPlacement = "suffix"
 
     @property
     def batch_size(self) -> int:
@@ -102,6 +128,7 @@ class ShortcutBatch:
             targets=self.targets.to(device),
             length=self.length,
             leak_mode=self.leak_mode,
+            leak_placement=self.leak_placement,
         )
 
 
@@ -112,6 +139,7 @@ def make_shortcut_batch(
     leak_mode: LeakMode,
     generator: torch.Generator,
     vocabulary: ShortcutPointerVocabulary,
+    leak_placement: LeakPlacement = "suffix",
     device: torch.device | str | None = None,
 ) -> ShortcutBatch:
     """Generate a same-length pointer batch with a controlled answer leak."""
@@ -120,6 +148,8 @@ def make_shortcut_batch(
         raise ValueError("batch_size must be positive")
     if length < 2:
         raise ValueError("length must be at least two")
+    if leak_placement not in {"suffix", "random_list"}:
+        raise ValueError("unknown leak placement")
     values = torch.randint(
         vocabulary.symbol_count,
         (batch_size, length),
@@ -145,6 +175,15 @@ def make_shortcut_batch(
         incorrect_values = (
             target_values + nonzero_offsets
         ) % vocabulary.symbol_count
+    leak_value_indices = (
+        torch.randint(
+            length,
+            (batch_size,),
+            generator=generator,
+        )
+        if leak_placement == "random_list"
+        else None
+    )
 
     prompts = []
     targets = []
@@ -159,6 +198,11 @@ def make_shortcut_batch(
             int(pointers[row_index]),
             leak_mode=leak_mode,
             incorrect_value=incorrect_value,
+            leak_value_index=(
+                None
+                if leak_value_indices is None
+                else int(leak_value_indices[row_index])
+            ),
         )
         prompts.append(prompt)
         targets.append(target)
@@ -172,6 +216,7 @@ def make_shortcut_batch(
         targets=target_tensor,
         length=length,
         leak_mode=leak_mode,
+        leak_placement=leak_placement,
     )
 
 
@@ -183,6 +228,7 @@ def make_fitness_batches(
     batch_size: int,
     generator: torch.Generator,
     vocabulary: ShortcutPointerVocabulary,
+    leak_placement: LeakPlacement = "suffix",
     device: torch.device | str | None = None,
 ) -> tuple[ShortcutBatch, ...]:
     """Create a fixed, balanced masked/incorrect fitness dataset."""
@@ -218,6 +264,7 @@ def make_fitness_batches(
                     leak_mode=leak_mode,
                     generator=generator,
                     vocabulary=vocabulary,
+                    leak_placement=leak_placement,
                     device=device,
                 )
             )

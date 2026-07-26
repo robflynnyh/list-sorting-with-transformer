@@ -1192,3 +1192,32 @@ show that the current routing network has not learned length-extrapolating
 selectivity. A later length-generalization experiment should test normalized
 relative-position inputs or explicitly train the router on a wider length
 range; it should not assume that a longer inner horizon alone fixes this.
+
+#### Randomized leak-placement control
+
+The fixed suffix makes positional anti-recency a valid solution, so it does
+not yet demonstrate semantic identification of a shortcut. A controlled
+`random_list` task variant now inserts the two-token `<LEAK>, hint` pair after
+a uniformly sampled list value in every example:
+
+```text
+<BOS> ... <PTR> value ... value <LEAK> hint ... value <SEP> <QUERY>
+```
+
+The total sequence length is unchanged and the correct target remains the
+value following `<PTR>`. The leak position varies independently across
+examples. Suppressing one fixed suffix region can no longer reliably remove
+the hint without also removing useful list positions; the router must identify
+the token following `<LEAK>`.
+
+This is an opt-in `--leak-placement random_list` setting. The default remains
+`suffix`, so existing checkpoints, seeds, and active runs are unchanged. The
+data generator, balanced masked/incorrect fitness set, correct-leak
+evaluation, checkpoint config, and dynamic hand-coded oracle all support the
+new placement. A one-generation end-to-end CPU smoke completed successfully.
+
+Before launching EGGROLL on this harder control, ordinary Adam and the dynamic
+oracle must be measured at several inner horizons. That diagnostic must first
+show that ordinary Adam learns the randomly located hint and that suppressing
+the marker-following edge prevents the shortcut. Otherwise a failed outer
+search would be uninterpretable.

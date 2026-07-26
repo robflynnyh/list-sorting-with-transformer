@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 
+from list_sorting_transformer.tokens import SEP
 from list_sorting_transformer.shortcut_credit import (
     AttentionRoutingRule,
     AttentionRoutingRuleConfig,
@@ -113,6 +114,47 @@ def test_shortcut_batch_places_correct_masked_and_incorrect_hints() -> None:
     assert not batches["incorrect"].input_ids[:, -2].eq(
         batches["incorrect"].targets
     ).any()
+
+
+def test_shortcut_batch_can_randomize_leak_within_the_list() -> None:
+    vocabulary = small_vocabulary()
+    batch = make_shortcut_batch(
+        64,
+        8,
+        leak_mode="correct",
+        leak_placement="random_list",
+        generator=torch.Generator().manual_seed(12),
+        vocabulary=vocabulary,
+    )
+
+    leak_positions = (
+        batch.input_ids.eq(vocabulary.leak_token)
+        .nonzero(as_tuple=False)[:, 1]
+    )
+    rows = torch.arange(batch.batch_size)
+    assert leak_positions.unique().numel() > 1
+    assert batch.input_ids[rows, leak_positions + 1].equal(batch.targets)
+    assert batch.input_ids[:, -1].eq(vocabulary.query_token).all()
+    assert batch.input_ids[:, -2].eq(SEP).all()
+    assert batch.leak_placement == "random_list"
+
+
+def test_fitness_data_uses_requested_leak_placement() -> None:
+    batches = make_fitness_batches(
+        32,
+        min_length=8,
+        max_length=12,
+        batch_size=4,
+        leak_placement="random_list",
+        generator=torch.Generator().manual_seed(3),
+        vocabulary=small_vocabulary(),
+    )
+
+    assert all(batch.leak_placement == "random_list" for batch in batches)
+    assert all(
+        not batch.input_ids[:, -3].eq(small_vocabulary().leak_token).all()
+        for batch in batches
+    )
 
 
 def test_fitness_data_is_exactly_balanced_and_has_requested_size() -> None:

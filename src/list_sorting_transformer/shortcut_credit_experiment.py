@@ -21,6 +21,7 @@ from .shortcut_credit import (
     BackwardRule,
     BackwardRuleConfig,
     EggrollDirection,
+    LeakPlacement,
     LearnedBackwardRule,
     ShortcutBatch,
     ShortcutDecoderTransformer,
@@ -57,6 +58,7 @@ class ShortcutCreditExperimentConfig:
     correct_eval_examples: int = 128
     min_length: int = 8
     max_length: int = 32
+    leak_placement: LeakPlacement = "suffix"
     forward_learning_rate: float = 3e-4
     sigma: float = 0.08
     outer_learning_rate: float = 0.1
@@ -113,6 +115,8 @@ class ShortcutCreditExperimentConfig:
             "worst_mode_ce",
         }:
             raise ValueError("unknown fitness_objective")
+        if self.leak_placement not in {"suffix", "random_list"}:
+            raise ValueError("unknown leak placement")
         if self.fitness_examples % 2:
             raise ValueError("fitness_examples must be even")
         if not 2 <= self.min_length <= self.max_length:
@@ -164,6 +168,7 @@ def make_mode_batches(
                     leak_mode=leak_mode,  # type: ignore[arg-type]
                     generator=generator,
                     vocabulary=vocabulary,
+                    leak_placement=config.leak_placement,
                     device=device,
                 )
             )
@@ -263,6 +268,7 @@ def make_inner_batches(
             leak_mode="correct",
             generator=generator,
             vocabulary=vocabulary,
+            leak_placement=config.leak_placement,
             device=device,
         )
         for _ in range(horizon)
@@ -853,6 +859,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         batch_size=config.fitness_batch_size,
         generator=fitness_generator,
         vocabulary=vocabulary,
+        leak_placement=config.leak_placement,
         device=device,
     )
     correct_batches = make_mode_batches(
@@ -1181,6 +1188,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--correct-eval-examples", type=int, default=128)
     parser.add_argument("--min-length", type=int, default=8)
     parser.add_argument("--max-length", type=int, default=32)
+    parser.add_argument(
+        "--leak-placement",
+        choices=("suffix", "random_list"),
+        default="suffix",
+        help="place the leak at the suffix or after a random list value",
+    )
     parser.add_argument("--forward-learning-rate", type=float, default=3e-4)
     parser.add_argument("--sigma", type=float, default=0.08)
     parser.add_argument("--outer-learning-rate", type=float, default=0.1)

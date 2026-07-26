@@ -37,6 +37,10 @@ class OracleLeakRouter(AttentionRoutingRule):
     ) -> None:
         super().__init__(config)
         self.gate_value = gate_value
+        self.leak_token = ShortcutPointerVocabulary(
+            "numbers",
+            10,
+        ).leak_token
 
     def attention_gates(self, token_ids: Tensor) -> tuple[Tensor, ...]:
         batch_size, sequence_length = token_ids.shape
@@ -48,7 +52,14 @@ class OracleLeakRouter(AttentionRoutingRule):
             device=token_ids.device,
             dtype=self.token_embedding.weight.dtype,
         )
-        gate[:, :, -1, -2] = self.gate_value
+        leak_positions = token_ids.eq(self.leak_token).nonzero(
+            as_tuple=False
+        )
+        if leak_positions.shape[0] != batch_size:
+            raise ValueError("every prompt must contain exactly one leak")
+        rows = leak_positions[:, 0]
+        hint_positions = leak_positions[:, 1] + 1
+        gate[rows, :, -1, hint_positions] = self.gate_value
         return tuple(gate.clone() for _ in range(self.config.forward_layers))
 
 
@@ -114,6 +125,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--horizons", default="40,80")
     parser.add_argument("--gate-value", type=float, default=1e-6)
+    parser.add_argument(
+        "--leak-placement",
+        choices=("suffix", "random_list"),
+        default="suffix",
+    )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--output")
@@ -129,6 +145,7 @@ def main() -> None:
         max_horizon=max(horizons),
         seed=args.seed,
         device=args.device,
+        leak_placement=args.leak_placement,
     )
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
     fitness_generator = torch.Generator().manual_seed(args.seed + 10_000)
@@ -139,6 +156,7 @@ def main() -> None:
         batch_size=config.fitness_batch_size,
         generator=fitness_generator,
         vocabulary=vocabulary,
+        leak_placement=config.leak_placement,
         device=device,
     )
     correct_batches = make_mode_batches(
