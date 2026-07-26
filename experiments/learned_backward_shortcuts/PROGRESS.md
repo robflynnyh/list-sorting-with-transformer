@@ -409,3 +409,14 @@ generations:
 The lower CE at horizon 40 is therefore still calibration without argmax
 retrieval. One-GPU runtime is approximately `50s` per generation. The next
 checkpoint will enable the validated two-GPU sharding path.
+
+Two-GPU sharding became authoritative from checkpoint 110:
+
+- Continued run:
+  [`learned-backward-p64-two-gpu-resume110-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/0zj2x13v)
+- Generation-110 runtime: `38.3s`, versus approximately `49s` immediately
+  before the switch.
+- Preserved state: horizon 40 with the corrected stale counter advancing to 8.
+- Generation-110 clean CE / pair-difference RMS: `2.5367 / 0.0691`.
+- Clean accuracy remained at chance with `1.11 / 10` distinct predicted
+  digits and a `98.8%` modal fraction.
