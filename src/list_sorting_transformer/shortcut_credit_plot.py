@@ -192,6 +192,19 @@ def plot_chained_metrics(
         drawstyle="steps-post",
         alpha=0.65,
     )
+    sigma_generations, sigma_values = _series(rows, "search/sigma")
+    previous_sigma: float | None = None
+    for generation, sigma in zip(sigma_generations, sigma_values):
+        if sigma == previous_sigma:
+            continue
+        eggroll_axis.axvline(
+            generation,
+            color="#666666",
+            linestyle="--",
+            linewidth=1.0,
+            label=f"sigma={sigma:g}",
+        )
+        previous_sigma = sigma
     eggroll_axis.set_title("Evolution and curriculum")
     eggroll_axis.set_ylabel("Magnitude")
     horizon_axis.set_ylabel("Inner updates")

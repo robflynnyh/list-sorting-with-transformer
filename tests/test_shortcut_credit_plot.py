@@ -62,6 +62,7 @@ def test_plot_accepts_metrics_added_in_later_segments(tmp_path: Path) -> None:
             "clean/incorrect_accuracy_mean": 0.11,
             "clean/unique_value_predictions_mean": 3.0,
             "clean/prediction_mode_fraction_mean": 0.7,
+            "search/sigma": 0.01,
         },
     ]
     output = tmp_path / "progress.png"

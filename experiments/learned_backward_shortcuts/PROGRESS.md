@@ -453,3 +453,58 @@ reducing antithetic pair separation by `25%` and halving the magnitude of the
 paper-style EGGROLL centre update. The `sigma=0.08` continuation was stopped
 at its durable generation-120 checkpoint; generations 121-124 after that
 checkpoint are excluded from the authoritative lineage.
+
+The local-search continuation is:
+
+- Run:
+  [`learned-backward-p64-sigma001-resume120-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/1mwbgpqh)
+- Source: the `sigma=0.08` generation-120 checkpoint.
+- First generation clean CE / accuracy: `2.3819 / 17.7%`.
+- Masked / incorrect-hint accuracy: `18.1% / 17.2%`.
+- Distinct predicted digits / modal fraction: `8.84 / 10` and `38.4%`.
+- Antithetic pair-difference RMS: `0.0214`.
+- Centre update RMS relative to centre RMS: `0.59%`.
+
+The first local generation therefore preserves a nonzero estimator and centre
+update while immediately eliminating the population-wide prediction collapse.
+Multiple generations are required before this can be called evolutionary
+progress rather than improved candidate locality.
+
+Across the first ten authoritative local-search generations, 120-129:
+
+- Mean clean CE / accuracy: `2.3794 / 15.8%`.
+- Mean masked / incorrect-hint accuracy: `16.6% / 15.0%`.
+- Mean correct-leak accuracy: `29.3%`.
+- Mean distinct predicted digits / modal fraction:
+  `7.44 / 10` and `43.1%`.
+- Mean antithetic pair-difference RMS: `0.0308`.
+- Mean centre-update/centre RMS: `0.81%` per generation.
+
+This is substantially better than the collapsed `sigma=0.08` population, but
+it does **not** yet beat ordinary biased Adam at horizon 40. The earlier
+single-run Adam diagnostic reached `18.6%` balanced clean accuracy and clean
+CE `2.3394`; the local learned-backward population reached `15.8%` and
+`2.3794`. Horizon 40 is also before the baseline's full shortcut transition,
+so the decisive comparison remains horizon 80, where ordinary Adam's
+incorrect-hint accuracy falls to zero.
+
+Changing sigma also shifted the candidate-objective distribution. Carrying
+the old `sigma=0.08` clean-loss EMA forward made its gradual relaxation look
+like repeated progress, which would delay the horizon curriculum. At the
+generation-130 checkpoint, plateau state was therefore recomputed using only
+the ten `sigma=0.01` generations:
+
+- Recomputed EMA objective: `-2.3810`.
+- Best EMA objective: `-2.3806`.
+- Stale generations: `5`.
+- Every non-plateau checkpoint field and backward-rule tensor was verified
+  identical to the source checkpoint.
+
+The corrected continuation is:
+
+- Run:
+  [`learned-backward-p64-sigma001-plateau-resume130-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/4638c6ep)
+- Migrated checkpoint:
+  `checkpoint_000130_sigma001_plateau.pt`.
+- Generations 130-132 from the pre-migration process are superseded by this
+  continuation.
