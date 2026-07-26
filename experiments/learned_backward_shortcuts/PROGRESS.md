@@ -240,10 +240,14 @@ treated as part of the continued trajectory.
 
 - Original W&B run through the checkpoint:
   <https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/yupx3qo8>
-- Continued run: `learned-backward-p64-clean-plateau-resume40-seed7`
+- Continued run:
+  [`learned-backward-p64-clean-plateau-resume40-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/fqpavj4v)
 - Migrated checkpoint:
   `checkpoint_000040_clean_plateau.pt`
 - Recomputed state at generation 40: clean-loss EMA `2.6894`, best EMA
   `2.6523`, and 39 stale generations.
 - New metrics explicitly log the curriculum objective, its EMA, stale
   generation count, and promotion events.
+- The resumed generations 40 and 41 completed successfully. Antithetic
+  pair-difference RMS remained material at `0.0811` and `0.0759`, while the
+  corrected stale counter advanced exactly from 39 to 41.
