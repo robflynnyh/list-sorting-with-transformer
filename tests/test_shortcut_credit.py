@@ -33,7 +33,9 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     center_rule_summary,
     center_routing_summary,
     apply_resume_horizon,
+    elite_acceptance_seed,
     elite_centroid_update,
+    elite_proposal_mean_improvement,
     function_delta_alignment_summary,
     heldout_candidate_summary,
     initialize_fresh_backward_rule,
@@ -459,6 +461,25 @@ def test_elite_search_sigma_grows_after_success_streak() -> None:
     state.consecutive_accepted_updates = 2
     update_elite_search_state(state, accepted=True, config=config)
     assert state.search_sigma == pytest.approx(0.2)
+
+
+def test_elite_proposal_mean_improvement_uses_matched_trajectories() -> None:
+    improvement = elite_proposal_mean_improvement(
+        [1.0, 2.0, 3.0],
+        [1.2, 1.9, 3.5],
+    )
+
+    assert improvement == pytest.approx(0.2)
+    with pytest.raises(ValueError, match="at least one"):
+        elite_proposal_mean_improvement([], [])
+    with pytest.raises(ValueError, match="counts must match"):
+        elite_proposal_mean_improvement([1.0], [1.0, 2.0])
+
+
+def test_elite_acceptance_seed_separates_extra_trajectories() -> None:
+    assert elite_acceptance_seed(123, 1) != elite_acceptance_seed(123, 2)
+    with pytest.raises(ValueError, match="must be positive"):
+        elite_acceptance_seed(123, 0)
 
 
 def test_resume_horizon_override_is_explicit() -> None:

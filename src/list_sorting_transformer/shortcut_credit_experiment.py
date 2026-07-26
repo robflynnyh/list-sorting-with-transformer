@@ -71,6 +71,7 @@ class ShortcutCreditExperimentConfig:
     elite_min_sigma: float = 1e-4
     elite_acceptance_patience: int = 3
     elite_acceptance_sigma_growth: float = 2.0
+    elite_acceptance_trajectories: int = 1
     d_model: int = 128
     backward_d_model: int = 128
     backward_rule_type: str = "gradient_transformer"
@@ -112,6 +113,7 @@ class ShortcutCreditExperimentConfig:
             self.checkpoint_interval,
             self.elite_count,
             self.elite_acceptance_patience,
+            self.elite_acceptance_trajectories,
         )
         if any(value < 1 for value in positive_integers):
             raise ValueError("integer configuration values must be positive")
@@ -693,6 +695,28 @@ def update_elite_search_state(
         state.search_sigma * config.elite_acceptance_sigma_growth,
     )
     state.consecutive_accepted_updates = 0
+
+
+def elite_proposal_mean_improvement(
+    center_fitnesses: list[float],
+    proposal_fitnesses: list[float],
+) -> float:
+    if not center_fitnesses:
+        raise ValueError("at least one acceptance trajectory is required")
+    if len(center_fitnesses) != len(proposal_fitnesses):
+        raise ValueError("center and proposal fitness counts must match")
+    return (
+        sum(proposal_fitnesses) - sum(center_fitnesses)
+    ) / len(center_fitnesses)
+
+
+def elite_acceptance_seed(
+    generation_seed: int,
+    trajectory_index: int,
+) -> int:
+    if trajectory_index < 1:
+        raise ValueError("extra acceptance trajectory index must be positive")
+    return generation_seed + trajectory_index * 1_000_000_007
 
 
 def update_plateau_state(
@@ -1794,6 +1818,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             elite_proposal_fitness = None
             elite_proposal_trajectory = None
             elite_update_accepted = None
+            elite_acceptance_center_fitnesses = None
+            elite_acceptance_proposal_fitnesses = None
         else:
             elite_indices = elite_centroid_update(
                 center_rule,
@@ -1825,8 +1851,94 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 initial_clean_metrics,
                 elite_proposal_trajectory.clean,
             )
+            elite_acceptance_center_fitnesses = [center_fitness]
+            elite_acceptance_proposal_fitnesses = [
+                elite_proposal_fitness
+            ]
+            proposal_parameters = clone_center_parameters(center_rule)
+            for acceptance_index in range(
+                1,
+                config.elite_acceptance_trajectories,
+            ):
+                acceptance_seed = elite_acceptance_seed(
+                    generation_seed,
+                    acceptance_index,
+                )
+                acceptance_model = initialize_forward_model(
+                    config,
+                    vocabulary,
+                    initialization_seed=acceptance_seed + 1,
+                    device=device,
+                )
+                acceptance_base_state = {
+                    name: tensor.detach().clone()
+                    for name, tensor in acceptance_model.state_dict().items()
+                }
+                acceptance_initial = evaluate_shortcut_batches(
+                    acceptance_model,
+                    fitness_batches,
+                )
+                del acceptance_model
+                acceptance_inner_batches = make_inner_batches(
+                    config,
+                    horizon=horizon,
+                    vocabulary=vocabulary,
+                    generator=torch.Generator().manual_seed(
+                        acceptance_seed + 2
+                    ),
+                    device=device,
+                )
+
+                restore_center_parameters(
+                    center_rule,
+                    center_parameters,
+                )
+                acceptance_center = train_forward_trajectory(
+                    config,
+                    base_state=acceptance_base_state,
+                    backward_rule=center_rule,
+                    inner_batches=acceptance_inner_batches,
+                    fitness_batches=fitness_batches,
+                    correct_batches=correct_batches,
+                    device=device,
+                )
+                restore_center_parameters(
+                    center_rule,
+                    proposal_parameters,
+                )
+                acceptance_proposal = train_forward_trajectory(
+                    config,
+                    base_state=acceptance_base_state,
+                    backward_rule=center_rule,
+                    inner_batches=acceptance_inner_batches,
+                    fitness_batches=fitness_batches,
+                    correct_batches=correct_batches,
+                    device=device,
+                )
+                elite_acceptance_center_fitnesses.append(
+                    candidate_fitness(
+                        config.fitness_objective,
+                        acceptance_initial,
+                        acceptance_center.clean,
+                    )
+                )
+                elite_acceptance_proposal_fitnesses.append(
+                    candidate_fitness(
+                        config.fitness_objective,
+                        acceptance_initial,
+                        acceptance_proposal.clean,
+                    )
+                )
+            restore_center_parameters(
+                center_rule,
+                proposal_parameters,
+            )
             elite_update_accepted = (
-                elite_proposal_fitness > center_fitness
+                elite_proposal_mean_improvement(
+                    elite_acceptance_center_fitnesses,
+                    elite_acceptance_proposal_fitnesses,
+                )
+                > 0
             )
             if not elite_update_accepted:
                 restore_center_parameters(center_rule, center_parameters)
@@ -1841,6 +1953,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             elite_proposal_fitness = None
             elite_proposal_trajectory = None
             elite_update_accepted = True
+            elite_acceptance_center_fitnesses = None
+            elite_acceptance_proposal_fitnesses = None
         summary = candidate_summary(
             fitness_tensor.cpu(),
             clean_results,
@@ -2014,6 +2128,34 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             summary[
                 "outer/proposal_fitness_minus_center"
             ] = elite_proposal_fitness - center_fitness
+        if (
+            elite_acceptance_center_fitnesses is not None
+            and elite_acceptance_proposal_fitnesses is not None
+        ):
+            summary["outer/acceptance_trajectory_count"] = float(
+                len(elite_acceptance_center_fitnesses)
+            )
+            summary[
+                "outer/proposal_mean_fitness_minus_center"
+            ] = elite_proposal_mean_improvement(
+                elite_acceptance_center_fitnesses,
+                elite_acceptance_proposal_fitnesses,
+            )
+            for acceptance_index, (
+                acceptance_center_fitness,
+                acceptance_proposal_fitness,
+            ) in enumerate(
+                zip(
+                    elite_acceptance_center_fitnesses,
+                    elite_acceptance_proposal_fitnesses,
+                )
+            ):
+                summary[
+                    f"outer/acceptance_trajectory_{acceptance_index}_delta"
+                ] = (
+                    acceptance_proposal_fitness
+                    - acceptance_center_fitness
+                )
         if captured_statistics:
             for key in captured_statistics[0]:
                 if key == "layer":
@@ -2159,6 +2301,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--elite-acceptance-sigma-growth",
         type=float,
         default=2.0,
+    )
+    parser.add_argument(
+        "--elite-acceptance-trajectories",
+        type=int,
+        default=1,
+        help=(
+            "number of independent shortcut-training trajectories used "
+            "to accept or reject an elite centroid"
+        ),
     )
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--backward-d-model", type=int, default=128)

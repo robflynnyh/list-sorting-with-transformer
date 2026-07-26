@@ -65,3 +65,7 @@ def test_backtracking_config_rejects_invalid_sigma_bounds() -> None:
         ShortcutCreditExperimentConfig(
             elite_acceptance_sigma_growth=1.0,
         )
+    with pytest.raises(ValueError, match="integer configuration"):
+        ShortcutCreditExperimentConfig(
+            elite_acceptance_trajectories=0,
+        )
