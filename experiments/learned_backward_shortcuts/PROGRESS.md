@@ -2252,3 +2252,60 @@ Generation 71 is now running with population 64 across four GPUs:
 
 Live run:
 [W&B](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/wr74mcwg).
+
+#### Generation 71 result and acceptance correction
+
+Generation 71 finished in `3,427s`. The transition objective found a coherent
+population signal: candidate fitness had `0.992` correlation with fresh
+held-out endpoint fitness. The strongest candidate, index 45, improved the
+population-ranking trajectory at every transition checkpoint:
+
+| Rule | Worst checkpoint mode CE | Final weaker split |
+| --- | ---: | ---: |
+| Old centre | 0.4879 | 95.31% |
+| Candidate 45 | **0.4212** | **95.70%** |
+
+This is one additional correct fixed-set example at update 3,600, while also
+reducing the worst CE observed from updates 2,800 through 3,600. The
+transition-aware objective therefore selects in the intended direction.
+
+The first implementation of robust acceptance nevertheless contained a
+selection-bias error. It averaged the population-ranking trajectory together
+with three independently seeded trajectories. Candidate 45's deltas were:
+
+| Trajectory role | Proposal fitness minus centre |
+| --- | ---: |
+| Population ranking/selection | `+0.06662` |
+| Independent 1 | `+0.00665` |
+| Independent 2 | `-0.02840` |
+| Independent 3 | `-0.00829` |
+
+Including the selected trajectory gives `+0.00915` and caused the logged run
+to accept. The three independent trajectories instead average `-0.01001`.
+The selected trajectory is optimistically biased by construction and must not
+vote on its own proposal. Candidate 45 is therefore retrospectively rejected.
+
+`elite_acceptance_trajectories` now means that many additional independent
+trajectories. Population-ranking fitness remains visible in
+`outer/proposal_fitness_minus_center`, but only independent seeds determine
+acceptance. Focused tests and an end-to-end acceptance smoke confirm the new
+semantics.
+
+A corrected generation-72 checkpoint restores the accepted generation-70
+centre rule, preserves generation-71 plateau statistics, resets the
+accepted-update streak, and applies rejection to the search radius:
+`sigma 0.013125 -> 0.0065625`. This avoids rerunning the completed population
+while ensuring future evolution does not inherit candidate 45.
+
+Tracked outputs:
+[`results/random_transition_h3600_g71_summary.json`](results/random_transition_h3600_g71_summary.json)
+and
+[`results/random_transition_h3600_g71_metrics.jsonl`](results/random_transition_h3600_g71_metrics.jsonl).
+
+The run also exposed an engineering bottleneck. Four candidate shards used
+four GPUs but shared one Python process and completed the population phase in
+about 52 minutes; the small model is dominated by Python/launch overhead and
+the threads provide little wall-clock scaling. Before running many more
+transition generations, candidate shards should move to separate processes
+and the centre/control/independent-acceptance trajectories should be
+distributed across the GPUs as well.

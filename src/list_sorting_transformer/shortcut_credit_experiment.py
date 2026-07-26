@@ -859,6 +859,18 @@ def elite_acceptance_seed(
     return generation_seed + trajectory_index * 1_000_000_007
 
 
+def independent_elite_acceptance_seeds(
+    generation_seed: int,
+    trajectory_count: int,
+) -> tuple[int, ...]:
+    if trajectory_count < 1:
+        raise ValueError("acceptance trajectory count must be positive")
+    return tuple(
+        elite_acceptance_seed(generation_seed, trajectory_index)
+        for trajectory_index in range(1, trajectory_count + 1)
+    )
+
+
 def update_plateau_state(
     state: PlateauState,
     *,
@@ -1998,19 +2010,16 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     elite_proposal_trajectory.checkpoint_clean
                 ),
             )
-            elite_acceptance_center_fitnesses = [center_fitness]
-            elite_acceptance_proposal_fitnesses = [
-                elite_proposal_fitness
-            ]
+            # The trajectory used to rank the population is optimistically
+            # biased toward the selected proposal. Keep its result separate
+            # and accept only on independently seeded trajectories.
+            elite_acceptance_center_fitnesses = []
+            elite_acceptance_proposal_fitnesses = []
             proposal_parameters = clone_center_parameters(center_rule)
-            for acceptance_index in range(
-                1,
+            for acceptance_seed in independent_elite_acceptance_seeds(
+                generation_seed,
                 config.elite_acceptance_trajectories,
             ):
-                acceptance_seed = elite_acceptance_seed(
-                    generation_seed,
-                    acceptance_index,
-                )
                 acceptance_model = initialize_forward_model(
                     config,
                     vocabulary,
@@ -2492,8 +2501,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help=(
-            "number of independent shortcut-training trajectories used "
-            "to accept or reject an elite centroid"
+            "number of independently seeded shortcut-training trajectories "
+            "used to accept or reject an elite centroid; the population-"
+            "ranking trajectory is excluded"
         ),
     )
     parser.add_argument("--d-model", type=int, default=128)

@@ -38,6 +38,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     elite_proposal_mean_improvement,
     function_delta_alignment_summary,
     heldout_candidate_summary,
+    independent_elite_acceptance_seeds,
     initialize_fresh_backward_rule,
     load_checkpoint,
     make_inner_batches,
@@ -480,8 +481,17 @@ def test_elite_proposal_mean_improvement_uses_matched_trajectories() -> None:
 
 def test_elite_acceptance_seed_separates_extra_trajectories() -> None:
     assert elite_acceptance_seed(123, 1) != elite_acceptance_seed(123, 2)
+    seeds = independent_elite_acceptance_seeds(123, 3)
+    assert seeds == (
+        elite_acceptance_seed(123, 1),
+        elite_acceptance_seed(123, 2),
+        elite_acceptance_seed(123, 3),
+    )
+    assert 123 not in seeds
     with pytest.raises(ValueError, match="must be positive"):
         elite_acceptance_seed(123, 0)
+    with pytest.raises(ValueError, match="count must be positive"):
+        independent_elite_acceptance_seeds(123, 0)
 
 
 def test_resume_horizon_override_is_explicit() -> None:
