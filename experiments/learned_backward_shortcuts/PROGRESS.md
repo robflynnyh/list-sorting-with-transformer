@@ -350,3 +350,15 @@ A focused test also compares packed query logits against separate unpadded
 forwards across different lengths. The optimization will be adopted from the
 next durable checkpoint; it does not alter the training batches or EGGROLL
 estimator.
+
+The generation-80 checkpoint was replayed end to end after adopting the packed
+evaluator:
+
+- Original generation time: `35.9s`.
+- Packed-evaluation generation time: `27.1s` (`24.6%` faster).
+- Fitness mean changed by only `3e-8`.
+- Clean CE and all reported accuracies were identical at displayed precision.
+- Continued run:
+  [`learned-backward-p64-packed-resume80-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/hhw7gu1w)
+
+The packed run is therefore the authoritative trajectory from generation 80.
