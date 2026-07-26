@@ -32,6 +32,22 @@ def parse_indices(value: str) -> tuple[int, ...]:
     return indices
 
 
+def checkpoint_search_sigma(
+    checkpoint: dict[str, object],
+    config: ShortcutCreditExperimentConfig,
+) -> float:
+    plateau_state = checkpoint.get("plateau_state", {})
+    if not isinstance(plateau_state, dict):
+        raise ValueError("checkpoint plateau state must be a mapping")
+    sigma = plateau_state.get("search_sigma")
+    if sigma is None:
+        return config.sigma
+    sigma = float(sigma)
+    if sigma <= 0:
+        raise ValueError("checkpoint search sigma must be positive")
+    return sigma
+
+
 def elite_parameter_delta(
     directions: Sequence[EggrollDirection],
     candidate_indices: Sequence[int],
@@ -77,6 +93,7 @@ def main() -> None:
         weights_only=False,
     )
     config = ShortcutCreditExperimentConfig(**checkpoint["config"])
+    search_sigma = checkpoint_search_sigma(checkpoint, config)
     if max(args.elite_indices) >= config.population_size:
         raise ValueError("elite index exceeds saved population size")
     center_rule = load_attention_router(args.checkpoint)
@@ -97,7 +114,7 @@ def main() -> None:
                     directions,
                     args.elite_indices,
                     parameter_name=name,
-                    sigma=config.sigma,
+                    sigma=search_sigma,
                 )
                 parameter.copy_(center_parameters[name] + alpha * delta)
             rule.project_parameters_()
@@ -114,6 +131,7 @@ def main() -> None:
             "generation": args.generation,
             "candidate_indices": list(args.elite_indices),
             "alpha": alpha,
+            "search_sigma": search_sigma,
         }
         torch.save(derived, output)
         print(output)

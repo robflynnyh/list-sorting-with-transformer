@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from experiments.learned_backward_shortcuts.elite_router_checkpoint import (
+    checkpoint_search_sigma,
     elite_parameter_delta,
     parse_indices,
 )
@@ -40,6 +41,16 @@ def test_elite_parameter_delta_respects_antithetic_signs() -> None:
     )
 
 
+def test_checkpoint_search_sigma_prefers_adaptive_state() -> None:
+    config = ShortcutCreditExperimentConfig(sigma=0.2)
+
+    assert checkpoint_search_sigma({}, config) == pytest.approx(0.2)
+    assert checkpoint_search_sigma(
+        {"plateau_state": {"search_sigma": 0.05}},
+        config,
+    ) == pytest.approx(0.05)
+
+
 def test_backtracking_config_rejects_invalid_sigma_bounds() -> None:
     with pytest.raises(ValueError, match="sigma_decay"):
         ShortcutCreditExperimentConfig(
@@ -49,4 +60,8 @@ def test_backtracking_config_rejects_invalid_sigma_bounds() -> None:
         ShortcutCreditExperimentConfig(
             sigma=0.1,
             elite_min_sigma=0.2,
+        )
+    with pytest.raises(ValueError, match="sigma_growth"):
+        ShortcutCreditExperimentConfig(
+            elite_acceptance_sigma_growth=1.0,
         )

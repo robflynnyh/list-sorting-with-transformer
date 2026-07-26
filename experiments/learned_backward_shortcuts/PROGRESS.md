@@ -45,6 +45,11 @@ generations, so the chart represents the actual checkpoint lineage.
 - Forward reset: every EGGROLL generation samples a new forward initialization;
   no forward parameters persist between generations.
 - Fitness: reduction in cross-entropy on all 512 clean fitness examples.
+- Data-scarcity boundary: those 512 clean fitness examples are sampled once
+  and deliberately reused across every EGGROLL generation. The
+  shortcut-containing inner-training stream is effectively unlimited and is
+  resampled each generation. Fresh clean examples are evaluation-only; they
+  must not affect candidate ranking, centre updates, or proposal acceptance.
 - Initial population: 32 rank-one antithetic directions, giving 64 candidates.
   The implementation must support population growth through 1,024 candidates
   using chunks.
@@ -1881,3 +1886,34 @@ proposal.
 
 Backtracking replay:
 [`results/random_g41_elite_backtracking_summary.json`](results/random_g41_elite_backtracking_summary.json).
+
+Matched external audits show that the subsequently accepted updates improve
+generalization beyond the fixed 512-example fitness set:
+
+| Fixed-fitness checkpoint | Fresh weaker-split accuracy | Correct-hint accuracy | Clean CE | Wins over ordinary |
+| --- | ---: | ---: | ---: | ---: |
+| Before adaptive updates | 87.17% | 96.52% | 0.562 | 20/20 |
+| After generation 42 | 90.64% | 98.12% | 0.497 | 20/20 |
+| After generation 45 | **92.19%** | **98.83%** | **0.451** | 20/20 |
+
+All rows use the same 20 unseen model initializations, shortcut-training
+streams, and clean evaluation sets. The limited fitness set remained fixed
+throughout evolution and none of these audit examples affected candidate
+ranking or update acceptance. One particularly difficult live generation
+gave roughly `30%` accuracy both before and after the generation-42 update;
+the matched audit showed that this was problem variance, not a collapse caused
+by the update. Current evidence therefore does not indicate problematic
+overfitting to the fixed fitness set.
+
+Sigma adaptation is now bidirectional. A rejected proposal restores the centre,
+resets the success streak, and halves sigma. Three consecutive accepted
+fitness improvements double sigma, capped at the original configured radius.
+This lets search become local around a strong centre without becoming trapped
+at a permanently tiny radius. The current sigma and accepted-update streak are
+checkpointed and logged; no manual per-generation sigma changes are required.
+
+Matched audit outputs:
+[`results/random_elite_pre_adaptive_replications_summary.json`](results/random_elite_pre_adaptive_replications_summary.json),
+[`results/random_elite_post_g42_replications_summary.json`](results/random_elite_post_g42_replications_summary.json),
+and
+[`results/random_elite_post_g45_replications_summary.json`](results/random_elite_post_g45_replications_summary.json).

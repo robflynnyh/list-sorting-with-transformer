@@ -45,6 +45,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     shard_candidate_specs,
     train_forward_trajectory,
     trajectory_summary,
+    update_elite_search_state,
     update_plateau_state,
 )
 
@@ -416,6 +417,46 @@ def test_restore_center_parameters_reverts_elite_update() -> None:
 
     for name, parameter in rule.named_parameters():
         torch.testing.assert_close(parameter, center[name], rtol=0, atol=0)
+
+
+def test_elite_search_sigma_shrinks_on_rejection() -> None:
+    config = ShortcutCreditExperimentConfig(
+        sigma=0.2,
+        elite_min_sigma=0.025,
+        elite_rejection_sigma_decay=0.5,
+    )
+    state = PlateauState(
+        search_sigma=0.1,
+        consecutive_accepted_updates=2,
+    )
+
+    update_elite_search_state(state, accepted=False, config=config)
+
+    assert state.search_sigma == pytest.approx(0.05)
+    assert state.consecutive_accepted_updates == 0
+
+
+def test_elite_search_sigma_grows_after_success_streak() -> None:
+    config = ShortcutCreditExperimentConfig(
+        sigma=0.2,
+        elite_acceptance_patience=3,
+        elite_acceptance_sigma_growth=2.0,
+    )
+    state = PlateauState(search_sigma=0.05)
+
+    update_elite_search_state(state, accepted=True, config=config)
+    update_elite_search_state(state, accepted=True, config=config)
+    assert state.search_sigma == pytest.approx(0.05)
+    assert state.consecutive_accepted_updates == 2
+
+    update_elite_search_state(state, accepted=True, config=config)
+    assert state.search_sigma == pytest.approx(0.1)
+    assert state.consecutive_accepted_updates == 0
+
+    state.search_sigma = 0.15
+    state.consecutive_accepted_updates = 2
+    update_elite_search_state(state, accepted=True, config=config)
+    assert state.search_sigma == pytest.approx(0.2)
 
 
 def test_center_rule_summary_reports_unperturbed_training_metrics() -> None:
@@ -1259,6 +1300,7 @@ def test_attention_router_checkpoint_round_trip(tmp_path: Path) -> None:
         plateau_state=PlateauState(
             stale_generations=3,
             search_sigma=0.025,
+            consecutive_accepted_updates=2,
         ),
     )
 
@@ -1272,6 +1314,7 @@ def test_attention_router_checkpoint_round_trip(tmp_path: Path) -> None:
     assert horizon == 20
     assert plateau.stale_generations == 3
     assert plateau.search_sigma == 0.025
+    assert plateau.consecutive_accepted_updates == 2
     for expected, actual in zip(rule.parameters(), loaded.parameters()):
         torch.testing.assert_close(expected, actual, rtol=0, atol=0)
 

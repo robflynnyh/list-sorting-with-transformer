@@ -69,6 +69,8 @@ class ShortcutCreditExperimentConfig:
     elite_backtracking: bool = False
     elite_rejection_sigma_decay: float = 0.5
     elite_min_sigma: float = 1e-4
+    elite_acceptance_patience: int = 3
+    elite_acceptance_sigma_growth: float = 2.0
     d_model: int = 128
     backward_d_model: int = 128
     backward_rule_type: str = "gradient_transformer"
@@ -108,6 +110,7 @@ class ShortcutCreditExperimentConfig:
             self.heads,
             self.checkpoint_interval,
             self.elite_count,
+            self.elite_acceptance_patience,
         )
         if any(value < 1 for value in positive_integers):
             raise ValueError("integer configuration values must be positive")
@@ -141,6 +144,10 @@ class ShortcutCreditExperimentConfig:
             )
         if not 0 < self.elite_min_sigma <= self.sigma:
             raise ValueError("elite_min_sigma must be in (0, sigma]")
+        if self.elite_acceptance_sigma_growth <= 1:
+            raise ValueError(
+                "elite_acceptance_sigma_growth must be greater than 1"
+            )
         if self.leak_placement not in {"suffix", "random_list"}:
             raise ValueError("unknown leak placement")
         if self.fitness_examples % 2:
@@ -165,6 +172,7 @@ class PlateauState:
     best_ema_fitness: float = float("-inf")
     stale_generations: int = 0
     search_sigma: float | None = None
+    consecutive_accepted_updates: int = 0
 
 
 @dataclass(frozen=True)
@@ -648,6 +656,35 @@ def restore_center_parameters(
 ) -> None:
     for name, parameter in module.named_parameters():
         parameter.copy_(center_parameters[name])
+
+
+def update_elite_search_state(
+    state: PlateauState,
+    *,
+    accepted: bool,
+    config: ShortcutCreditExperimentConfig,
+) -> None:
+    if state.search_sigma is None:
+        raise ValueError("search sigma must be initialized")
+    if not accepted:
+        state.consecutive_accepted_updates = 0
+        state.search_sigma = max(
+            config.elite_min_sigma,
+            state.search_sigma * config.elite_rejection_sigma_decay,
+        )
+        return
+
+    state.consecutive_accepted_updates += 1
+    if (
+        state.consecutive_accepted_updates
+        < config.elite_acceptance_patience
+    ):
+        return
+    state.search_sigma = min(
+        config.sigma,
+        state.search_sigma * config.elite_acceptance_sigma_growth,
+    )
+    state.consecutive_accepted_updates = 0
 
 
 def update_plateau_state(
@@ -1766,11 +1803,11 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 restore_center_parameters(center_rule, center_parameters)
                 if isinstance(center_rule, AttentionRoutingRule):
                     center_rule.project_parameters_()
-                plateau_state.search_sigma = max(
-                    config.elite_min_sigma,
-                    generation_sigma
-                    * config.elite_rejection_sigma_decay,
-                )
+            update_elite_search_state(
+                plateau_state,
+                accepted=elite_update_accepted,
+                config=config,
+            )
         elif config.outer_update_rule == "elite_centroid":
             elite_proposal_fitness = None
             elite_proposal_trajectory = None
@@ -1901,6 +1938,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "population_size": config.population_size,
                 "search/sigma": generation_sigma,
                 "search/next_sigma": plateau_state.search_sigma,
+                "search/consecutive_accepted_updates": float(
+                    plateau_state.consecutive_accepted_updates
+                ),
                 "candidate_device_count": len(candidate_devices),
                 "outer_learning_rate": outer_learning_rate,
                 "outer/update_rule_elite_centroid": float(
@@ -1993,11 +2033,19 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
 
         if promote_horizon and horizon < config.max_horizon:
             search_sigma = plateau_state.search_sigma
+            consecutive_accepted_updates = (
+                plateau_state.consecutive_accepted_updates
+            )
             horizon = min(
                 config.max_horizon,
                 horizon * config.horizon_multiplier,
             )
-            plateau_state = PlateauState(search_sigma=search_sigma)
+            plateau_state = PlateauState(
+                search_sigma=search_sigma,
+                consecutive_accepted_updates=(
+                    consecutive_accepted_updates
+                ),
+            )
             print(f"Increasing evolved horizon to {horizon}", flush=True)
 
         if (
@@ -2077,6 +2125,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="multiply sigma by this factor after rejecting a proposal",
     )
     parser.add_argument("--elite-min-sigma", type=float, default=1e-4)
+    parser.add_argument("--elite-acceptance-patience", type=int, default=3)
+    parser.add_argument(
+        "--elite-acceptance-sigma-growth",
+        type=float,
+        default=2.0,
+    )
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--backward-d-model", type=int, default=128)
     parser.add_argument(
