@@ -288,12 +288,16 @@ def test_routing_population_summary_links_selectivity_to_fitness() -> None:
             {
                 "routing_leak_relative_gate": 0.8,
                 "routing_hint_source_relative_gate": 0.7,
+                "routing_input_conditioned_rms": 0.4,
+                "routing_position_profile_std": 0.2,
             }
         ],
         [
             {
                 "routing_leak_relative_gate": 1.1,
                 "routing_hint_source_relative_gate": 1.2,
+                "routing_input_conditioned_rms": 0.1,
+                "routing_position_profile_std": 0.3,
             }
         ],
     ]
@@ -326,6 +330,18 @@ def test_routing_population_summary_links_selectivity_to_fitness() -> None:
         ]
         - 0.7
     ) < 1e-6
+    assert (
+        summary["backward/input_conditioning_fitness_correlation"]
+        > 0.99
+    )
+    assert (
+        summary["backward/robust_candidate_input_conditioned_rms"]
+        == pytest.approx(0.4)
+    )
+    assert (
+        summary["backward/position_profile_fitness_correlation"]
+        < -0.99
+    )
 
 
 def test_center_rule_summary_reports_unperturbed_training_metrics() -> None:
@@ -894,6 +910,9 @@ def test_attention_router_statistics_follow_random_leak_positions() -> None:
     ] == pytest.approx(
         float(expected_hint_source / expected_other_sources)
     )
+    assert statistics["routing_gate_std"] > 0
+    assert statistics["routing_position_profile_std"] > 0
+    assert statistics["routing_input_conditioned_rms"] > 0
 
 
 def test_shared_attention_router_reuses_one_map_everywhere() -> None:

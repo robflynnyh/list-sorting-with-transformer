@@ -1,0 +1,18 @@
+{
+  "generation": 40,
+  "population_size": 64,
+  "robust_candidate_index": 36,
+  "robust_fresh_min_mode_accuracy": 0.9296875,
+  "center_input_conditioned_rms": 0.0073549323715269566,
+  "population_input_conditioned_rms_mean": 0.16919656097888947,
+  "population_input_conditioned_rms_min": 0.0,
+  "population_input_conditioned_rms_max": 0.4220000207424164,
+  "robust_candidate_input_conditioned_rms": 0.07706481963396072,
+  "input_conditioning_fitness_correlation": 0.022183479741215706,
+  "center_position_profile_std": 0.09523288160562515,
+  "population_position_profile_std_mean": 0.1895579695701599,
+  "population_position_profile_std_min": 0.0,
+  "population_position_profile_std_max": 0.3547382056713104,
+  "robust_candidate_position_profile_std": 0.25904497504234314,
+  "position_profile_fitness_correlation": 0.12309025228023529
+}

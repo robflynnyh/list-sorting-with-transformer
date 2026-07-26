@@ -690,6 +690,14 @@ class AttentionRoutingRule(nn.Module):
                 device=hidden.device,
             ).tril()
             valid_gates = forward_gates[..., causal]
+            position_profile = forward_gates.mean(dim=0)
+            position_profile_values = position_profile[..., causal]
+            input_conditioned_residual = (
+                forward_gates - position_profile.unsqueeze(0)
+            )[..., causal]
+            per_example_gate_mean = valid_gates.flatten(start_dim=1).mean(
+                dim=1
+            )
             leak_token = self.config.vocab_size - 3
             leak_mask = token_ids.eq(leak_token)
             if not bool(leak_mask.sum(dim=1).eq(1).all()):
@@ -770,6 +778,18 @@ class AttentionRoutingRule(nn.Module):
             self.statistics.append(
                 {
                     "routing_gate": float(valid_gates.mean()),
+                    "routing_gate_std": float(
+                        valid_gates.std(unbiased=False)
+                    ),
+                    "routing_position_profile_std": float(
+                        position_profile_values.std(unbiased=False)
+                    ),
+                    "routing_input_conditioned_rms": float(
+                        input_conditioned_residual.square().mean().sqrt()
+                    ),
+                    "routing_per_example_mean_std": float(
+                        per_example_gate_mean.std(unbiased=False)
+                    ),
                     "routing_min_gate": float(valid_gates.min()),
                     "routing_suppressed_fraction": float(
                         (valid_gates < 0.99).float().mean()

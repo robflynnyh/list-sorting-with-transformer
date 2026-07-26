@@ -1753,3 +1753,42 @@ Checkpoint-40 outputs:
 [`results/random_checkpoint40_replications_matched30.jsonl`](results/random_checkpoint40_replications_matched30.jsonl),
 and
 [`results/random_checkpoint40_replications_matched30_summary.json`](results/random_checkpoint40_replications_matched30_summary.json).
+
+The robust candidates were reconstructed deterministically from each centre,
+generation seed, antithetic direction index, and sign. Replaying all 160 inner
+batches reproduces the live candidate hint-source and query-hint ratios to
+better than `1e-6`, validating the reconstruction. On a shared 512-example
+random-list probe:
+
+| Generation | Robust fresh weaker-split accuracy | Centre input-conditioned RMS | Robust candidate input-conditioned RMS | Robust fixed-position SD |
+| --- | ---: | ---: | ---: | ---: |
+| 20 | 39.84% | 0.0059 | 0.276 | 0.294 |
+| 30 | 79.69% | 0.0071 | 0.129 | 0.393 |
+| 40 | 92.97% | 0.0072 | 0.082 | 0.254 |
+
+Useful sampled rules contain substantially more input-conditioned structure
+than the centre, even when their mean semantic-role ratios are close to one:
+
+![Robust random-list candidate routing](results/random_list_robust_candidate_routing_roles.png)
+
+However, a full deterministic replay of all 64 generation-40 candidates rules
+out a simpler claim that more conditional or more positional variation is
+automatically better:
+
+| Generation-40 structure | Centre | Population mean | Robust candidate | Fitness correlation |
+| --- | ---: | ---: | ---: | ---: |
+| Input-conditioned RMS | 0.0074 | 0.169 | 0.077 | +0.022 |
+| Fixed-position profile SD | 0.095 | 0.190 | 0.259 | +0.123 |
+
+The robust candidate is below the population mean in conditional magnitude,
+and neither scalar structure measure meaningfully predicts fitness. Its
+`92.97%` fresh weaker-split accuracy therefore comes from the particular
+routing pattern, not merely from being more input dependent, more positional,
+or more nonuniform. The centre update has so far retained a low-dimensional
+positional average while failing to accumulate the useful pattern shared by
+high-fitness perturbations.
+
+Candidate outputs:
+[`results/random_list_robust_candidate_routing.json`](results/random_list_robust_candidate_routing.json)
+and
+[`results/random_g40_population_structure_summary.json`](results/random_g40_population_structure_summary.json).

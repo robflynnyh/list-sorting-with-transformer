@@ -890,7 +890,7 @@ def routing_population_summary(
             clean_metrics[index].mode_accuracy["incorrect"],
         ),
     )
-    return {
+    summary = {
         "backward/population_leak_relative_gate_min": float(
             query_relative_gates.min()
         ),
@@ -932,6 +932,105 @@ def routing_population_summary(
             hint_source_relative_gates[robust_index]
         ),
     }
+    if all(
+        "routing_input_conditioned_rms" in item
+        and "routing_position_profile_std" in item
+        for statistics in candidate_statistics
+        for item in statistics
+    ):
+        input_conditioned_rms = torch.tensor(
+            [
+                sum(
+                    item["routing_input_conditioned_rms"]
+                    for item in statistics
+                )
+                / len(statistics)
+                for statistics in candidate_statistics
+            ],
+            dtype=torch.float32,
+        )
+        position_profile_std = torch.tensor(
+            [
+                sum(
+                    item["routing_position_profile_std"]
+                    for item in statistics
+                )
+                / len(statistics)
+                for statistics in candidate_statistics
+            ],
+            dtype=torch.float32,
+        )
+        centered_conditioning = (
+            input_conditioned_rms - input_conditioned_rms.mean()
+        )
+        conditioning_denominator = (
+            centered_fitness.square().sum()
+            * centered_conditioning.square().sum()
+        ).sqrt()
+        conditioning_correlation = (
+            float(
+                (centered_fitness * centered_conditioning).sum()
+                / conditioning_denominator
+            )
+            if float(conditioning_denominator) > 0
+            else 0.0
+        )
+        centered_position_profile = (
+            position_profile_std - position_profile_std.mean()
+        )
+        position_profile_denominator = (
+            centered_fitness.square().sum()
+            * centered_position_profile.square().sum()
+        ).sqrt()
+        position_profile_correlation = (
+            float(
+                (centered_fitness * centered_position_profile).sum()
+                / position_profile_denominator
+            )
+            if float(position_profile_denominator) > 0
+            else 0.0
+        )
+        summary.update(
+            {
+                "backward/population_input_conditioned_rms_mean": float(
+                    input_conditioned_rms.mean()
+                ),
+                "backward/population_input_conditioned_rms_min": float(
+                    input_conditioned_rms.min()
+                ),
+                "backward/population_input_conditioned_rms_max": float(
+                    input_conditioned_rms.max()
+                ),
+                "backward/input_conditioning_fitness_correlation": (
+                    conditioning_correlation
+                ),
+                "backward/best_fitness_input_conditioned_rms": float(
+                    input_conditioned_rms[best_index]
+                ),
+                "backward/robust_candidate_input_conditioned_rms": float(
+                    input_conditioned_rms[robust_index]
+                ),
+                "backward/population_position_profile_std_mean": float(
+                    position_profile_std.mean()
+                ),
+                "backward/population_position_profile_std_min": float(
+                    position_profile_std.min()
+                ),
+                "backward/population_position_profile_std_max": float(
+                    position_profile_std.max()
+                ),
+                "backward/position_profile_fitness_correlation": (
+                    position_profile_correlation
+                ),
+                "backward/best_fitness_position_profile_std": float(
+                    position_profile_std[best_index]
+                ),
+                "backward/robust_candidate_position_profile_std": float(
+                    position_profile_std[robust_index]
+                ),
+            }
+        )
+    return summary
 
 
 def center_update_summary(
