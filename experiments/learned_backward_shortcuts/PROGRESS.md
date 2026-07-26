@@ -1057,3 +1057,27 @@ does not reduce masked accuracy. Its updates remain moderate rather than
 obviously nonlocal. However, centre wrong-hint accuracy is still low and
 varies by generation (`0-3.12%`), so both branches continue through a second
 matched window before one is selected.
+
+The second matched window shows a larger separation:
+
+| Generations 90-99 | Clean CE | Masked | Wrong hint | Correct leak | Minimum clean split | Fittest candidate wrong | Robust candidate min | Centre update / RMS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Conservative (`0.02`) | 2.8716 | 20.86% | 2.11% | 94.30% | 2.11% | 16.80% | 16.99% | 1.03% |
+| Medium (`0.05`) | 2.4387 | 22.03% | 13.79% | 64.92% | 13.79% | 17.46% | 18.83% | 2.45% |
+
+The two populations expose similarly strong candidates, but the medium outer
+step moves the unperturbed centre much closer to them. Its shortcut-free
+accuracy rises above chance without sacrificing masked accuracy, clean CE
+falls, and all ten output values remain represented. The accompanying decline
+in correct-leak accuracy is expected if the backward rule is genuinely
+suppressing the shortcut rather than fitting both modes independently.
+
+This is the first clear evidence that the evolved rule itself, rather than
+only isolated perturbations, is learning shortcut-resistant credit assignment.
+It is still early: horizon 80 only began at generation 51, and the diagnostic
+centre trajectories began at generation 80. Both branches therefore continue
+to generation 250. The conservative branch remains a delayed-learning control;
+it will not be rejected solely because it needs more generations at its
+smaller update size.
+
+![Horizon-80 centre-step comparison](results/attention_router_center_step_comparison.png)
