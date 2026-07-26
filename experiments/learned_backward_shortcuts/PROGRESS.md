@@ -1514,3 +1514,29 @@ relative gate of `1.000`: the centre has so far learned broad suppression,
 not preferential suppression of the moving hint. This is an early diagnostic,
 not a terminal result; the run continues so that later generations can show
 whether input-conditioned selectivity emerges.
+
+A matched uniform-routing diagnostic isolates what the broad suppression can
+do by itself. It uses the same random-list task, horizon 160, forward
+initialization, training batches, and evaluation batches for every condition,
+with gate value `0.72`:
+
+| Backward condition | Masked | Wrong hint | Correct hint | Clean CE |
+| --- | ---: | ---: | ---: | ---: |
+| Ordinary Adam | 19.53% | 0.0% | 100.0% | 3.6322 |
+| Uniform `0.72` Q/K/V gate | 19.53% | 0.0% | 100.0% | 3.6322 |
+| Semantic hint-source Q/K/V gate | 94.92% | 83.59% | 100.0% | 0.5640 |
+| Semantic complete-attention gate | 96.09% | 82.03% | 99.22% | 0.5921 |
+| Masked training | 80.86% | 76.17% | 87.50% | 1.2708 |
+
+The ordinary and uniform conditions have identical predictions and accuracies;
+their CE differs by only `1.2e-7`. This is consistent with Adam cancelling a
+uniform positive rescaling of each parameter's gradient. The centre's broad
+gate reduction is therefore not evidence of useful credit assignment by
+itself. Relative routing is the behavior that matters, and modest semantic
+suppression at the same `0.72` gate is sufficient for strong function
+learning. The evolving centre may still contain other nonuniform structure,
+but its all-hint-source relative gate near `1.0` shows that the desired
+moving-hint selectivity has not yet emerged.
+
+Raw output:
+[`results/uniform_routing_g072_seed7.jsonl`](results/uniform_routing_g072_seed7.jsonl).

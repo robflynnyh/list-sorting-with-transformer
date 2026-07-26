@@ -74,6 +74,34 @@ class OracleLeakRouter(AttentionRoutingRule):
         return tuple(gate.clone() for _ in range(self.config.forward_layers))
 
 
+class UniformAttentionRouter(AttentionRoutingRule):
+    """Apply the same backward gate to every attention edge."""
+
+    def __init__(
+        self,
+        config: AttentionRoutingRuleConfig,
+        *,
+        gate_value: float,
+    ) -> None:
+        super().__init__(config)
+        self.gate_value = gate_value
+
+    def attention_gates(self, token_ids: Tensor) -> tuple[Tensor, ...]:
+        batch_size, sequence_length = token_ids.shape
+        gate = torch.full(
+            (
+                batch_size,
+                self.config.n_heads,
+                sequence_length,
+                sequence_length,
+            ),
+            self.gate_value,
+            device=token_ids.device,
+            dtype=self.token_embedding.weight.dtype,
+        )
+        return tuple(gate.clone() for _ in range(self.config.forward_layers))
+
+
 def train_condition(
     *,
     config: ShortcutCreditExperimentConfig,
@@ -84,6 +112,7 @@ def train_condition(
     route_output_projection: bool | None,
     gate_value: float,
     oracle_scope: str,
+    uniform_routing: bool,
     device: torch.device,
 ) -> dict[str, float]:
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
@@ -95,7 +124,20 @@ def train_condition(
     )
     model.load_state_dict(deepcopy(base_state))
     rule = None
-    if route_output_projection is not None:
+    if uniform_routing:
+        if route_output_projection is None:
+            raise ValueError("uniform routing requires a projection setting")
+        rule = UniformAttentionRouter(
+            AttentionRoutingRuleConfig(
+                vocab_size=vocabulary.size,
+                d_model=config.backward_d_model,
+                n_heads=config.heads,
+                forward_layers=config.forward_layers,
+                route_output_projection=route_output_projection,
+            ),
+            gate_value=gate_value,
+        ).to(device)
+    elif route_output_projection is not None:
         rule = OracleLeakRouter(
             AttentionRoutingRuleConfig(
                 vocab_size=vocabulary.size,
@@ -153,6 +195,11 @@ def main() -> None:
         "--include-masked-training",
         action="store_true",
         help="include ordinary Adam trained on otherwise matched masked hints",
+    )
+    parser.add_argument(
+        "--include-uniform-routing",
+        action="store_true",
+        help="include Q/K/V routing with one gate shared by every edge",
     )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--device", default="cuda:0")
@@ -224,11 +271,16 @@ def main() -> None:
             if args.include_masked_training
             else None
         )
-        for name, route_projection in (
-            ("ordinary", None),
-            ("qkv_only", False),
-            ("complete_attention", True),
-        ):
+        conditions = [("ordinary", None, False)]
+        if args.include_uniform_routing:
+            conditions.append(("uniform_qkv", False, True))
+        conditions.extend(
+            (
+                ("qkv_only", False, False),
+                ("complete_attention", True, False),
+            )
+        )
+        for name, route_projection, uniform_routing in conditions:
             metrics = train_condition(
                 config=config,
                 base_state=base_state,
@@ -238,6 +290,7 @@ def main() -> None:
                 route_output_projection=route_projection,
                 gate_value=args.gate_value,
                 oracle_scope=args.oracle_scope,
+                uniform_routing=uniform_routing,
                 device=device,
             )
             row = {
@@ -258,6 +311,7 @@ def main() -> None:
                     route_output_projection=None,
                     gate_value=args.gate_value,
                     oracle_scope=args.oracle_scope,
+                    uniform_routing=False,
                     device=device,
                 )
                 masked_row = {
