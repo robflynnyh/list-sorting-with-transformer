@@ -302,6 +302,16 @@ def candidate_summary(
     correct_accuracies = torch.tensor(
         [metrics.accuracy for metrics in correct_metrics]
     )
+    clean_unique_values = torch.tensor(
+        [
+            metrics.unique_value_prediction_count
+            for metrics in clean_metrics
+        ],
+        dtype=torch.float32,
+    )
+    clean_mode_fractions = torch.tensor(
+        [metrics.prediction_mode_fraction for metrics in clean_metrics]
+    )
     return {
         "fitness/mean": float(fitnesses.mean()),
         "fitness/std": float(fitnesses.std(unbiased=False)),
@@ -312,6 +322,12 @@ def candidate_summary(
         "clean/accuracy_mean": float(clean_accuracies.mean()),
         "clean/masked_accuracy_mean": float(masked_accuracies.mean()),
         "clean/incorrect_accuracy_mean": float(incorrect_accuracies.mean()),
+        "clean/unique_value_predictions_mean": float(
+            clean_unique_values.mean()
+        ),
+        "clean/prediction_mode_fraction_mean": float(
+            clean_mode_fractions.mean()
+        ),
         "correct_leak/accuracy_mean": float(correct_accuracies.mean()),
     }
 
@@ -555,6 +571,12 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 ),
                 "initial_clean/loss": initial_clean_metrics.loss,
                 "initial_clean/accuracy": initial_clean_metrics.accuracy,
+                "initial_clean/unique_value_predictions": (
+                    initial_clean_metrics.unique_value_prediction_count
+                ),
+                "initial_clean/prediction_mode_fraction": (
+                    initial_clean_metrics.prediction_mode_fraction
+                ),
                 "timing/generation_seconds": (
                     time.monotonic() - generation_started_at
                 ),

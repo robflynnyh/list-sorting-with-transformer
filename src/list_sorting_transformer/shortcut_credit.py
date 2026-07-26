@@ -557,6 +557,9 @@ class ShortcutMetrics:
     loss: float
     accuracy: float
     mode_accuracy: dict[str, float]
+    unique_prediction_count: int
+    unique_value_prediction_count: int
+    prediction_mode_fraction: float
 
 
 @torch.inference_mode()
@@ -570,6 +573,10 @@ def evaluate_shortcut_batches(
     total_examples = 0
     mode_correct: dict[str, int] = defaultdict(int)
     mode_examples: dict[str, int] = defaultdict(int)
+    prediction_counts = torch.zeros(
+        model.config.vocab_size,
+        dtype=torch.long,
+    )
     for batch in batches:
         logits = model(batch.input_ids)[:, -1]
         losses = F.cross_entropy(logits, batch.targets, reduction="none")
@@ -580,6 +587,10 @@ def evaluate_shortcut_batches(
         total_examples += batch.batch_size
         mode_correct[batch.leak_mode] += int(correct.sum())
         mode_examples[batch.leak_mode] += batch.batch_size
+        prediction_counts += torch.bincount(
+            predictions.detach().cpu(),
+            minlength=model.config.vocab_size,
+        )
     if total_examples == 0:
         raise ValueError("evaluation requires at least one example")
     return ShortcutMetrics(
@@ -589,6 +600,13 @@ def evaluate_shortcut_batches(
             mode: mode_correct[mode] / count
             for mode, count in mode_examples.items()
         },
+        unique_prediction_count=int(prediction_counts.count_nonzero()),
+        unique_value_prediction_count=int(
+            prediction_counts[
+                VALUE_OFFSET : VALUE_OFFSET + model.config.symbol_count
+            ].count_nonzero()
+        ),
+        prediction_mode_fraction=float(prediction_counts.max()) / total_examples,
     )
 
 

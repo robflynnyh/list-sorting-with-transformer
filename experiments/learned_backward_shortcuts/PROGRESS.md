@@ -64,6 +64,20 @@ Before interpreting learned-backward results:
    examples, while biased-only training should expose shortcut reliance.
 6. Report correct-leak, masked-leak, and incorrect-leak accuracy separately.
 
+### Interpretation thresholds
+
+- Random digit accuracy is `10%`.
+- Because an incorrect hint is sampled uniformly from the nine values other
+  than the target, a model that only learns "do not predict the hint" can reach
+  `1/9 = 11.1%` incorrect-leak accuracy without reading the pointer.
+- Averaged over the balanced masked/incorrect fitness set, this exclusion rule
+  can improve CE by approximately
+  `(log(10) - log(9)) / 2 = 0.0527` without learning retrieval.
+- Consequently, neither a small positive fitness nor incorrect-leak accuracy
+  near `11.1%` is evidence of shortcut resistance. A successful learned
+  backward rule must drive masked accuracy above `10%` and incorrect-leak
+  accuracy materially above `11.1%`, with broad prediction diversity.
+
 ## Implementation status
 
 - [x] Design agreed.

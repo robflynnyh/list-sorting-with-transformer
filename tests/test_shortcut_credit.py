@@ -11,6 +11,7 @@ from list_sorting_transformer.shortcut_credit import (
     ShortcutPointerVocabulary,
     apply_eggroll_direction,
     clone_center_parameters,
+    evaluate_shortcut_batches,
     make_fitness_batches,
     make_forward_model_config,
     make_shortcut_batch,
@@ -97,6 +98,24 @@ def test_fitness_data_is_exactly_balanced_and_has_requested_size() -> None:
         counts[batch.leak_mode] += batch.batch_size
         assert 8 <= batch.length <= 12
     assert counts == {"masked": 16, "incorrect": 16}
+
+
+def test_evaluation_reports_prediction_diversity() -> None:
+    model = small_model()
+    batches = make_fitness_batches(
+        32,
+        min_length=8,
+        max_length=12,
+        batch_size=4,
+        generator=torch.Generator().manual_seed(31),
+        vocabulary=small_vocabulary(),
+    )
+
+    metrics = evaluate_shortcut_batches(model, batches)
+
+    assert 1 <= metrics.unique_prediction_count <= model.config.vocab_size
+    assert 0 <= metrics.unique_value_prediction_count <= 10
+    assert 1 / 32 <= metrics.prediction_mode_fraction <= 1
 
 
 def test_zero_gate_is_exactly_ordinary_backpropagation() -> None:
