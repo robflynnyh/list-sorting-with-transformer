@@ -1027,3 +1027,19 @@ Thus the local population contains useful horizon-80 rules, but the learned
 centre has not yet incorporated them. Sustained centre-rule accuracy, rather
 than isolated candidate accuracy or routing selectivity alone, is now the
 success criterion.
+
+A matched medium-step branch tests whether the conservative centre update is
+the bottleneck:
+
+- Run:
+  [`attention-router-shared-h80-outer005-center-eval-resume80-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/5irws448)
+- It starts from the same checkpoint 80 and changes only configured outer
+  learning rate from `0.02` to `0.05`. At generation 80 this corresponds to
+  an actual linearly decayed rate of approximately `0.034`, versus `0.0136`
+  in the conservative branch.
+- Both branches retain P64, `sigma=0.035`, fixed horizon 80, identical
+  generation seeds, and unperturbed-centre evaluation.
+
+This branch will be stopped at a matched durable checkpoint if its centre
+updates become nonlocal or if it does not convert candidate gains into centre
+accuracy.
