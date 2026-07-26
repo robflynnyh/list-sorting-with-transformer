@@ -120,6 +120,14 @@ def plot_chained_metrics(
             label=label,
             color=color,
         )
+    _plot_series(
+        accuracy_axis,
+        rows,
+        "best/clean_accuracy",
+        label="fittest candidate clean",
+        color="#222222",
+        linestyle="--",
+    )
     accuracy_axis.axhline(
         0.1,
         color="#555555",

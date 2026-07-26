@@ -60,6 +60,7 @@ def test_plot_accepts_metrics_added_in_later_segments(tmp_path: Path) -> None:
             "correct_leak/accuracy_mean": 0.2,
             "clean/masked_accuracy_mean": 0.12,
             "clean/incorrect_accuracy_mean": 0.11,
+            "best/clean_accuracy": 0.25,
             "clean/unique_value_predictions_mean": 3.0,
             "clean/prediction_mode_fraction_mean": 0.7,
             "search/sigma": 0.01,

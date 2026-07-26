@@ -509,7 +509,56 @@ The corrected continuation is:
 - Generations 130-132 from the pre-migration process are superseded by this
   continuation.
 
+#### Horizon-40 saturation and horizon-80 test
+
+The local gradient-transformer rule continued to improve slowly at horizon 40,
+but did not improve the diagnostic most relevant to shortcut resistance:
+
+| Window | Clean CE | Clean acc. | Masked | Wrong hint | Distinct digits |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Generations 120-139 | 2.3738 | 16.8% | 18.2% | 15.5% | 8.00 |
+| Generations 166-185 | 2.3662 | 17.5% | 19.4% | 15.5% | 8.90 |
+
+After 88 horizon-40 generations, balanced accuracy had gained only `0.64`
+percentage points and wrong-hint accuracy was unchanged. Small noisy CE
+changes continued resetting the generic plateau counter, so the durable
+generation-190 checkpoint was manually promoted to horizon 80. Every model,
+backward-rule, and configuration tensor was verified unchanged; only the
+horizon and its plateau state were reset. Generation 190 from the interrupted
+horizon-40 process is superseded.
+
+The diagnostic-enabled horizon-80 continuation is:
+
+- Run:
+  [`learned-backward-p64-h80-bestdiag-resume190-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/274oryb1)
+- Migrated checkpoint: `checkpoint_000190_horizon80.pt`.
+- Generation-190 runtime: `70.2s`.
+
+The first horizon-80 population reproduces the ordinary shortcut transition:
+
+| Measurement | Correct leak | Masked | Wrong hint | Balanced clean |
+| --- | ---: | ---: | ---: | ---: |
+| Population mean | 97.7% | 16.1% | 0.23% | 8.18% |
+| Fittest candidate | 66.4% | 20.3% | 4.69% | 12.5% |
+| Ordinary-Adam reference | 100.0% | 21.5% | 0.0% | 10.75% |
+
+The evolved centre is not yet shortcut resistant: its surrounding population
+mean is worse than ordinary Adam. However, the fittest local perturbation
+already exceeds the ordinary balanced-clean reference and preserves nonzero
+wrong-hint accuracy. Its lower correct-leak accuracy also shows that the gain
+comes from partially blocking shortcut acquisition, rather than merely
+improving calibration. Fitness spread is now large (`0.166` SD, `0.620`
+maximum clean-CE improvement), providing a strong EGGROLL signal for testing
+whether repeated centre updates can capture this behavior.
+
+This candidate is promising but not a success under the predefined threshold:
+its `4.69%` wrong-hint accuracy remains below both chance and the `11.1%`
+wrong-hint-exclusion baseline. Subsequent generations must improve wrong-hint
+accuracy without collapsing masked accuracy toward chance.
+
 ### 2026-07-26: parallel suppress-only attention router
+
+![Suppress-only attention-router progress](results/attention_router_progress.png)
 
 A second backward-rule family tests a narrower credit-assignment hypothesis.
 It cannot synthesize gradient vectors or create new attention edges. Instead,
@@ -575,3 +624,24 @@ Thus the full population retains a directional, nonzero estimator without
 prediction collapse or an excessive first update. As with the main rule,
 multiple generations are needed to separate evolution from the randomly reset
 forward model.
+
+Across its first two ten-generation windows:
+
+| Window | Clean CE | Clean acc. | Masked | Wrong hint | Centre gate magnitude |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Generations 0-9 | 2.3535 | 17.8% | 20.8% | 14.8% | 0.0112 |
+| Generations 10-19 | 2.3302 | 18.6% | 20.5% | 16.8% | 0.0258 |
+
+The router therefore improved balanced clean accuracy by `0.84` percentage
+points while retaining all ten output classes. Its second window approximately
+matches the earlier one-run ordinary-Adam horizon-40 accuracy (`18.6%`) and
+slightly improves CE (`2.3302` versus `2.3394`), but this is not yet a
+matched-seed baseline comparison.
+
+Best-candidate diagnostics were added at checkpoint 20. The diagnostic
+continuation is:
+
+- Run:
+  [`attention-router-p64-resume20-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/331xexyu)
+- Source checkpoint: `attention-router-p64-h40-seed7/checkpoint_000020.pt`.
+- Generations 20-26 from the original process are superseded.
