@@ -14,6 +14,122 @@ from .tokens import EOS, PAD, VALUE_OFFSET
 KeyValueCache = tuple[Tensor, Tensor]
 
 
+class _RoutedAttentionBackward(torch.autograd.Function):
+    """Keep the normal forward output but use routed attention in backward."""
+
+    @staticmethod
+    def forward(
+        ctx: object,
+        attended: Tensor,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        backward_gate: Tensor,
+        attention_mask: Tensor | None,
+        is_causal: bool,
+    ) -> Tensor:
+        scores = query @ key.transpose(-2, -1) / query.shape[-1] ** 0.5
+        if is_causal:
+            query_length = query.shape[-2]
+            key_length = key.shape[-2]
+            causal_mask = torch.ones(
+                query_length,
+                key_length,
+                dtype=torch.bool,
+                device=query.device,
+            ).tril(diagonal=key_length - query_length)
+            scores = scores.masked_fill(~causal_mask, float("-inf"))
+        if attention_mask is not None:
+            scores = scores.masked_fill(~attention_mask, float("-inf"))
+
+        weights = scores.softmax(dim=-1)
+        routed_weights = weights * backward_gate.to(
+            device=weights.device,
+            dtype=weights.dtype,
+        )
+        routed_weights = routed_weights / routed_weights.sum(
+            dim=-1,
+            keepdim=True,
+        ).clamp_min(torch.finfo(routed_weights.dtype).tiny)
+        ctx.save_for_backward(query, key, value, routed_weights)
+        return attended
+
+    @staticmethod
+    def backward(
+        ctx: object,
+        output_gradient: Tensor,
+    ) -> tuple[
+        None,
+        Tensor,
+        Tensor,
+        Tensor,
+        None,
+        None,
+        None,
+    ]:
+        query, key, value, routed_weights = ctx.saved_tensors
+        scale = query.shape[-1] ** -0.5
+
+        value_gradient = routed_weights.transpose(-2, -1) @ output_gradient
+        weight_gradient = output_gradient @ value.transpose(-2, -1)
+        score_gradient = routed_weights * (
+            weight_gradient
+            - (weight_gradient * routed_weights).sum(dim=-1, keepdim=True)
+        )
+        query_gradient = (score_gradient @ key) * scale
+        key_gradient = (
+            score_gradient.transpose(-2, -1) @ query
+        ) * scale
+        return (
+            None,
+            query_gradient,
+            key_gradient,
+            value_gradient,
+            None,
+            None,
+            None,
+        )
+
+
+def routed_scaled_dot_product_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    *,
+    backward_gate: Tensor,
+    attention_mask: Tensor | None = None,
+    is_causal: bool = False,
+) -> Tensor:
+    """Run normal attention forward with a suppress-only backward routing map."""
+
+    if backward_gate.shape != (
+        query.shape[0],
+        query.shape[1],
+        query.shape[-2],
+        key.shape[-2],
+    ):
+        raise ValueError("backward gate must match the attention map")
+    if bool((backward_gate <= 0).any()) or bool((backward_gate > 1).any()):
+        raise ValueError("backward gate values must be in (0, 1]")
+    attended = F.scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attention_mask,
+        dropout_p=0.0,
+        is_causal=is_causal,
+    )
+    return _RoutedAttentionBackward.apply(
+        attended.detach(),
+        query,
+        key,
+        value,
+        backward_gate.detach(),
+        attention_mask,
+        is_causal,
+    )
+
+
 @dataclass(frozen=True)
 class ModelConfig:
     vocab_size: int
@@ -211,10 +327,13 @@ class CausalSelfAttention(nn.Module):
         *,
         cache: KeyValueCache | None = None,
         attention_mask: Tensor | None = None,
+        backward_attention_gate: Tensor | None = None,
     ) -> tuple[Tensor, KeyValueCache]:
         batch_size, sequence_length, model_dim = hidden.shape
         if cache is not None and attention_mask is not None:
             raise ValueError("custom attention masks are not supported with a cache")
+        if cache is not None and backward_attention_gate is not None:
+            raise ValueError("backward attention routing is not cacheable")
         query, key, value = self.qkv(hidden).chunk(3, dim=-1)
         query = self._split_heads(query)
         key = self._split_heads(key)
@@ -256,7 +375,24 @@ class CausalSelfAttention(nn.Module):
                 dtype=torch.bool,
             ).tril()
             combined_mask = combined_mask.to(device=hidden.device) & causal_mask
-        if self.top_k is None:
+        if backward_attention_gate is not None:
+            if self.top_k is not None:
+                raise ValueError(
+                    "backward attention routing does not support top-k attention"
+                )
+            if self.dropout and self.training:
+                raise ValueError(
+                    "backward attention routing requires zero attention dropout"
+                )
+            attended = routed_scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                backward_gate=backward_attention_gate,
+                attention_mask=combined_mask,
+                is_causal=combined_mask is None,
+            )
+        elif self.top_k is None:
             attended = F.scaled_dot_product_attention(
                 query,
                 key,
@@ -285,10 +421,12 @@ class CausalSelfAttention(nn.Module):
         hidden: Tensor,
         *,
         attention_mask: Tensor | None = None,
+        backward_attention_gate: Tensor | None = None,
     ) -> Tensor:
         attended, _ = self.forward_with_cache(
             hidden,
             attention_mask=attention_mask,
+            backward_attention_gate=backward_attention_gate,
         )
         return attended
 
@@ -320,11 +458,13 @@ class TransformerBlock(nn.Module):
         hidden: Tensor,
         *,
         attention_mask: Tensor | None = None,
+        backward_attention_gate: Tensor | None = None,
     ) -> Tensor:
         hidden = hidden + self.dropout(
             self.attention(
                 self.attention_norm(hidden),
                 attention_mask=attention_mask,
+                backward_attention_gate=backward_attention_gate,
             )
         )
         hidden = hidden + self.dropout(self.ffn(self.ffn_norm(hidden)))

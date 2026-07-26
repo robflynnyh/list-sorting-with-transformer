@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Union
 
 import torch
 import torch.nn.functional as F
@@ -418,18 +418,246 @@ class LearnedBackwardRule(nn.Module):
         return modified
 
 
+class BidirectionalRoutingBlock(nn.Module):
+    """A bidirectional context layer for input-dependent credit routing."""
+
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        ffn_multiplier: float,
+    ) -> None:
+        super().__init__()
+        self.attention_norm = nn.LayerNorm(d_model)
+        self.attention = nn.MultiheadAttention(
+            d_model,
+            n_heads,
+            dropout=0.0,
+            bias=False,
+            batch_first=True,
+        )
+        self.ffn_norm = nn.LayerNorm(d_model)
+        self.ffn = BackwardSwiGLU(d_model, ffn_multiplier)
+
+    def forward(self, hidden: Tensor) -> Tensor:
+        normalized = self.attention_norm(hidden)
+        attended, _ = self.attention(
+            normalized,
+            normalized,
+            normalized,
+            need_weights=False,
+        )
+        hidden = hidden + attended
+        return hidden + self.ffn(self.ffn_norm(hidden))
+
+
+@dataclass(frozen=True)
+class AttentionRoutingRuleConfig:
+    vocab_size: int
+    d_model: int = 128
+    n_heads: int = 4
+    forward_layers: int = 3
+    ffn_multiplier: float = 4.0
+    routing_temperature: float = 0.1
+    max_log_suppression: float = 8.0
+
+    def __post_init__(self) -> None:
+        if min(
+            self.vocab_size,
+            self.d_model,
+            self.n_heads,
+            self.forward_layers,
+        ) < 1:
+            raise ValueError("routing-rule dimensions must be positive")
+        if self.d_model % self.n_heads:
+            raise ValueError("routing d_model must be divisible by n_heads")
+        if min(
+            self.ffn_multiplier,
+            self.routing_temperature,
+            self.max_log_suppression,
+        ) <= 0:
+            raise ValueError("routing-rule scaling must be positive")
+
+
+class AttentionRoutingRule(nn.Module):
+    """Input-conditioned, suppress-only routing for attention backward maps."""
+
+    def __init__(self, config: AttentionRoutingRuleConfig) -> None:
+        super().__init__()
+        self.config = config
+        self.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
+        self.context = BidirectionalRoutingBlock(
+            config.d_model,
+            config.n_heads,
+            config.ffn_multiplier,
+        )
+        self.routing_norm = nn.LayerNorm(config.d_model)
+        routing_width = config.forward_layers * config.d_model
+        self.routing_query = nn.Linear(
+            config.d_model,
+            routing_width,
+            bias=False,
+        )
+        self.routing_key = nn.Linear(
+            config.d_model,
+            routing_width,
+            bias=False,
+        )
+        self.gates = nn.Parameter(
+            torch.zeros(config.forward_layers, config.n_heads)
+        )
+        self.capture_statistics = False
+        self.statistics: list[dict[str, float]] = []
+        self.apply(DecoderTransformer._initialize)
+        nn.init.zeros_(self.gates)
+        self.requires_grad_(False)
+
+    def clear_statistics(self) -> None:
+        self.statistics.clear()
+
+    def _position_encoding(
+        self,
+        sequence_length: int,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Tensor:
+        half_width = (self.config.d_model + 1) // 2
+        inverse_frequency = torch.exp(
+            -math.log(10_000.0)
+            * torch.arange(
+                half_width,
+                device=device,
+                dtype=torch.float32,
+            )
+            / max(half_width - 1, 1)
+        )
+        angles = torch.outer(
+            torch.arange(
+                sequence_length,
+                device=device,
+                dtype=torch.float32,
+            ),
+            inverse_frequency,
+        )
+        encoding = torch.stack((angles.sin(), angles.cos()), dim=-1).flatten(
+            start_dim=-2
+        )
+        return encoding[:, : self.config.d_model].to(dtype=dtype)
+
+    def attention_gates(self, token_ids: Tensor) -> tuple[Tensor, ...]:
+        """Return one existing-edge suppression map per forward layer."""
+
+        batch_size, sequence_length = token_ids.shape
+        hidden = self.token_embedding(token_ids)
+        hidden = hidden + self._position_encoding(
+            sequence_length,
+            device=hidden.device,
+            dtype=hidden.dtype,
+        )
+        hidden = self.context(hidden)
+        hidden = self.routing_norm(hidden)
+
+        head_dim = self.config.d_model // self.config.n_heads
+        routing_shape = (
+            batch_size,
+            sequence_length,
+            self.config.forward_layers,
+            self.config.n_heads,
+            head_dim,
+        )
+        query = self.routing_query(hidden).view(routing_shape).permute(
+            0, 2, 3, 1, 4
+        )
+        key = self.routing_key(hidden).view(routing_shape).permute(
+            0, 2, 3, 1, 4
+        )
+        scores = (
+            query @ key.transpose(-2, -1)
+            / head_dim**0.5
+            / self.config.routing_temperature
+        )
+        reverse_causal = torch.ones(
+            sequence_length,
+            sequence_length,
+            dtype=torch.bool,
+            device=hidden.device,
+        ).triu()
+        reverse_weights = scores.masked_fill(
+            ~reverse_causal,
+            float("-inf"),
+        ).softmax(dim=-1)
+        valid_destinations = torch.arange(
+            sequence_length,
+            0,
+            -1,
+            device=hidden.device,
+            dtype=hidden.dtype,
+        ).view(1, 1, 1, sequence_length, 1)
+        routing_priority = reverse_weights * valid_destinations
+        active_strength = F.relu(self.gates).view(
+            1,
+            self.config.forward_layers,
+            self.config.n_heads,
+            1,
+            1,
+        )
+        log_suppression = (
+            active_strength * routing_priority
+        ).clamp(max=self.config.max_log_suppression)
+        forward_gates = (-log_suppression).exp().transpose(-2, -1)
+
+        if self.capture_statistics:
+            causal = torch.ones(
+                sequence_length,
+                sequence_length,
+                dtype=torch.bool,
+                device=hidden.device,
+            ).tril()
+            valid_gates = forward_gates[..., causal]
+            self.statistics.append(
+                {
+                    "routing_gate": float(valid_gates.mean()),
+                    "routing_min_gate": float(valid_gates.min()),
+                    "routing_suppressed_fraction": float(
+                        (valid_gates < 0.99).float().mean()
+                    ),
+                    "routing_strength": float(active_strength.mean()),
+                }
+            )
+        return tuple(forward_gates.unbind(dim=1))
+
+
+BackwardRule = Union[LearnedBackwardRule, AttentionRoutingRule]
+
+
 class ShortcutDecoderTransformer(DecoderTransformer):
     """Decoder Transformer that can install training-only backward hooks."""
 
     def forward_with_backward_rule(
         self,
         token_ids: Tensor,
-        backward_rule: LearnedBackwardRule | None,
+        backward_rule: BackwardRule | None,
     ) -> Tensor:
         hidden = self.embed(token_ids)
+        attention_gates = (
+            backward_rule.attention_gates(token_ids)
+            if isinstance(backward_rule, AttentionRoutingRule)
+            else None
+        )
         for layer_index, block in enumerate(self.blocks):
-            hidden = block(hidden)
-            if backward_rule is not None and hidden.requires_grad:
+            hidden = block(
+                hidden,
+                backward_attention_gate=(
+                    None
+                    if attention_gates is None
+                    else attention_gates[layer_index]
+                ),
+            )
+            if (
+                isinstance(backward_rule, LearnedBackwardRule)
+                and hidden.requires_grad
+            ):
                 activation = hidden.detach()
 
                 def transform_gradient(
@@ -559,7 +787,7 @@ def paper_eggroll_update(
 def shortcut_loss(
     model: ShortcutDecoderTransformer,
     batch: ShortcutBatch,
-    backward_rule: LearnedBackwardRule | None = None,
+    backward_rule: BackwardRule | None = None,
 ) -> Tensor:
     logits = model.forward_with_backward_rule(batch.input_ids, backward_rule)
     return F.cross_entropy(logits[:, -1], batch.targets)

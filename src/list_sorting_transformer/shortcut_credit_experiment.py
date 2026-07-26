@@ -9,13 +9,16 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
 import torch
 from torch import Tensor
 
 from .evaluate import resolve_device
 from .shortcut_credit import (
+    AttentionRoutingRule,
+    AttentionRoutingRuleConfig,
+    BackwardRule,
     BackwardRuleConfig,
     EggrollDirection,
     LearnedBackwardRule,
@@ -59,6 +62,7 @@ class ShortcutCreditExperimentConfig:
     outer_learning_rate: float = 0.1
     d_model: int = 128
     backward_d_model: int = 128
+    backward_rule_type: str = "gradient_transformer"
     forward_layers: int = 3
     backward_layers: int = 2
     heads: int = 4
@@ -96,6 +100,11 @@ class ShortcutCreditExperimentConfig:
             raise ValueError("integer configuration values must be positive")
         if self.population_size % 2:
             raise ValueError("population_size must be even for antithetic pairs")
+        if self.backward_rule_type not in {
+            "gradient_transformer",
+            "attention_router",
+        }:
+            raise ValueError("unknown backward_rule_type")
         if self.fitness_examples % 2:
             raise ValueError("fitness_examples must be even")
         if not 2 <= self.min_length <= self.max_length:
@@ -174,6 +183,54 @@ def initialize_forward_model(
     return ShortcutDecoderTransformer(model_config).to(device)
 
 
+RuleConfig = Union[BackwardRuleConfig, AttentionRoutingRuleConfig]
+
+
+def make_rule_config(
+    config: ShortcutCreditExperimentConfig,
+    vocabulary: ShortcutPointerVocabulary,
+) -> RuleConfig:
+    if config.backward_rule_type == "gradient_transformer":
+        return BackwardRuleConfig(
+            d_model=config.backward_d_model,
+            forward_d_model=config.d_model,
+            n_layers=config.backward_layers,
+            n_heads=config.heads,
+            forward_layers=config.forward_layers,
+        )
+    return AttentionRoutingRuleConfig(
+        vocab_size=vocabulary.size,
+        d_model=config.backward_d_model,
+        n_heads=config.heads,
+        forward_layers=config.forward_layers,
+    )
+
+
+def initialize_backward_rule(
+    config: RuleConfig,
+    *,
+    device: torch.device,
+) -> BackwardRule:
+    if isinstance(config, AttentionRoutingRuleConfig):
+        return AttentionRoutingRule(config).to(device)
+    return LearnedBackwardRule(config).to(device)
+
+
+def initialize_fresh_backward_rule(
+    config: ShortcutCreditExperimentConfig,
+    vocabulary: ShortcutPointerVocabulary,
+    *,
+    device: torch.device,
+) -> BackwardRule:
+    torch.manual_seed(config.seed + 20_000)
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(config.seed + 20_000)
+    return initialize_backward_rule(
+        make_rule_config(config, vocabulary),
+        device=device,
+    )
+
+
 def make_inner_batches(
     config: ShortcutCreditExperimentConfig,
     *,
@@ -206,7 +263,7 @@ def train_candidate(
     config: ShortcutCreditExperimentConfig,
     *,
     base_state: dict[str, Tensor],
-    center_rule: LearnedBackwardRule,
+    center_rule: BackwardRule,
     center_parameters: dict[str, Tensor],
     direction: EggrollDirection,
     sign: int,
@@ -224,7 +281,10 @@ def train_candidate(
         device=device,
     )
     model.load_state_dict(base_state)
-    backward_rule = LearnedBackwardRule(center_rule.config).to(device)
+    backward_rule = initialize_backward_rule(
+        center_rule.config,
+        device=device,
+    )
     apply_eggroll_direction(
         backward_rule,
         center_parameters,
@@ -299,7 +359,7 @@ def train_candidate_shard(
     candidate_specs: tuple[tuple[int, int, int], ...],
     device: torch.device,
     base_state: dict[str, Tensor],
-    center_rule_config: BackwardRuleConfig,
+    center_rule_config: RuleConfig,
     center_parameters: dict[str, Tensor],
     directions: tuple[EggrollDirection, ...],
     inner_batches: tuple[ShortcutBatch, ...],
@@ -318,7 +378,10 @@ def train_candidate_shard(
     """Evaluate one deterministic subset of candidates on one CUDA device."""
 
     torch.cuda.set_device(device)
-    worker_center_rule = LearnedBackwardRule(center_rule_config).to(device)
+    worker_center_rule = initialize_backward_rule(
+        center_rule_config,
+        device=device,
+    )
     worker_center_parameters = {
         name: tensor.to(device)
         for name, tensor in center_parameters.items()
@@ -443,7 +506,7 @@ def candidate_summary(
 
 
 def center_update_summary(
-    backward_rule: LearnedBackwardRule,
+    backward_rule: BackwardRule,
     previous_parameters: dict[str, Tensor],
 ) -> dict[str, float]:
     """Summarize the actual EGGROLL center displacement."""
@@ -471,7 +534,7 @@ def center_update_summary(
 def save_checkpoint(
     path: Path,
     *,
-    backward_rule: LearnedBackwardRule,
+    backward_rule: BackwardRule,
     config: ShortcutCreditExperimentConfig,
     generation: int,
     horizon: int,
@@ -480,6 +543,11 @@ def save_checkpoint(
     torch.save(
         {
             "experiment": "learned_backward_shortcuts",
+            "backward_rule_type": (
+                "attention_router"
+                if isinstance(backward_rule, AttentionRoutingRule)
+                else "gradient_transformer"
+            ),
             "config": asdict(config),
             "backward_rule_config": asdict(backward_rule.config),
             "backward_rule_state": backward_rule.state_dict(),
@@ -495,13 +563,25 @@ def load_checkpoint(
     path: Path,
     *,
     device: torch.device,
-) -> tuple[LearnedBackwardRule, int, int, PlateauState]:
+) -> tuple[BackwardRule, int, int, PlateauState]:
     checkpoint = torch.load(path, map_location=device)
     if checkpoint.get("experiment") != "learned_backward_shortcuts":
         raise ValueError("checkpoint belongs to a different experiment")
-    backward_rule = LearnedBackwardRule(
-        BackwardRuleConfig(**checkpoint["backward_rule_config"])
-    ).to(device)
+    rule_type = checkpoint.get(
+        "backward_rule_type",
+        "gradient_transformer",
+    )
+    if rule_type == "attention_router":
+        rule_config: RuleConfig = AttentionRoutingRuleConfig(
+            **checkpoint["backward_rule_config"]
+        )
+    elif rule_type == "gradient_transformer":
+        rule_config = BackwardRuleConfig(
+            **checkpoint["backward_rule_config"]
+        )
+    else:
+        raise ValueError(f"unknown checkpoint backward rule: {rule_type}")
+    backward_rule = initialize_backward_rule(rule_config, device=device)
     backward_rule.load_state_dict(checkpoint["backward_rule_state"])
     plateau_state = PlateauState(**checkpoint["plateau_state"])
     return (
@@ -544,15 +624,13 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
     config_path.write_text(json.dumps(asdict(config), indent=2) + "\n")
 
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
-    backward_config = BackwardRuleConfig(
-        d_model=config.backward_d_model,
-        forward_d_model=config.d_model,
-        n_layers=config.backward_layers,
-        n_heads=config.heads,
-        forward_layers=config.forward_layers,
-    )
+    backward_config = make_rule_config(config, vocabulary)
     if config.resume is None:
-        center_rule = LearnedBackwardRule(backward_config).to(device)
+        center_rule = initialize_fresh_backward_rule(
+            config,
+            vocabulary,
+            device=device,
+        )
         start_generation = 0
         horizon = config.horizon
         plateau_state = PlateauState()
@@ -752,13 +830,15 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             }
         )
         if captured_statistics:
-            summary["backward/gradient_cosine_mean"] = sum(
-                item["cosine"] for item in captured_statistics
-            ) / len(captured_statistics)
-            summary["backward/correction_rms_ratio_mean"] = sum(
-                item["correction_rms_ratio"]
-                for item in captured_statistics
-            ) / len(captured_statistics)
+            for key in captured_statistics[0]:
+                if key == "layer":
+                    continue
+                metric_key = (
+                    "gradient_cosine" if key == "cosine" else key
+                )
+                summary[f"backward/{metric_key}_mean"] = sum(
+                    item[key] for item in captured_statistics
+                ) / len(captured_statistics)
 
         # Mean fitness cannot be compared across generations because each
         # generation starts from a different model and initial clean loss.
@@ -847,6 +927,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--outer-learning-rate", type=float, default=0.1)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--backward-d-model", type=int, default=128)
+    parser.add_argument(
+        "--backward-rule-type",
+        choices=("gradient_transformer", "attention_router"),
+        default="gradient_transformer",
+    )
     parser.add_argument("--forward-layers", type=int, default=3)
     parser.add_argument("--backward-layers", type=int, default=2)
     parser.add_argument("--heads", type=int, default=4)

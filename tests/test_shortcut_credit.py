@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import torch
 
 from list_sorting_transformer.shortcut_credit import (
+    AttentionRoutingRule,
+    AttentionRoutingRuleConfig,
     BackwardRuleConfig,
     LearnedBackwardRule,
     ShortcutDecoderTransformer,
@@ -22,7 +25,10 @@ from list_sorting_transformer.shortcut_credit import (
 from list_sorting_transformer.shortcut_credit_experiment import (
     PlateauState,
     ShortcutCreditExperimentConfig,
+    initialize_fresh_backward_rule,
+    load_checkpoint,
     parse_candidate_devices,
+    save_checkpoint,
     shard_candidate_specs,
     update_plateau_state,
 )
@@ -50,6 +56,18 @@ def small_rule() -> LearnedBackwardRule:
             d_model=32,
             forward_d_model=32,
             n_layers=1,
+            n_heads=4,
+            forward_layers=2,
+            ffn_multiplier=2.0,
+        )
+    )
+
+
+def small_routing_rule() -> AttentionRoutingRule:
+    return AttentionRoutingRule(
+        AttentionRoutingRuleConfig(
+            vocab_size=small_vocabulary().size,
+            d_model=32,
             n_heads=4,
             forward_layers=2,
             ffn_multiplier=2.0,
@@ -191,6 +209,78 @@ def test_zero_gate_is_exactly_ordinary_backpropagation() -> None:
         )
 
 
+def test_zero_routing_gate_preserves_forward_and_ordinary_gradients() -> None:
+    torch.manual_seed(51)
+    ordinary = small_model()
+    modified = deepcopy(ordinary)
+    rule = small_routing_rule()
+    batch = make_shortcut_batch(
+        4,
+        8,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(52),
+        vocabulary=small_vocabulary(),
+    )
+
+    ordinary_loss = shortcut_loss(ordinary, batch)
+    ordinary_loss.backward()
+    modified_loss = shortcut_loss(modified, batch, rule)
+    modified_loss.backward()
+
+    torch.testing.assert_close(modified_loss, ordinary_loss, rtol=0, atol=0)
+    for ordinary_parameter, modified_parameter in zip(
+        ordinary.parameters(),
+        modified.parameters(),
+    ):
+        assert ordinary_parameter.grad is not None
+        assert modified_parameter.grad is not None
+        torch.testing.assert_close(
+            modified_parameter.grad,
+            ordinary_parameter.grad,
+            rtol=1e-5,
+            atol=1e-7,
+        )
+
+
+def test_attention_router_only_suppresses_existing_routes() -> None:
+    torch.manual_seed(53)
+    ordinary = small_model()
+    modified = deepcopy(ordinary)
+    rule = small_routing_rule()
+    with torch.no_grad():
+        rule.gates.fill_(0.2)
+    batch = make_shortcut_batch(
+        4,
+        8,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(54),
+        vocabulary=small_vocabulary(),
+    )
+
+    attention_gates = rule.attention_gates(batch.input_ids)
+    for gate in attention_gates:
+        assert bool((gate > 0).all())
+        assert bool((gate <= 1).all())
+        assert bool((gate < 1).any())
+
+    ordinary_loss = shortcut_loss(ordinary, batch)
+    ordinary_loss.backward()
+    modified_loss = shortcut_loss(modified, batch, rule)
+    modified_loss.backward()
+
+    torch.testing.assert_close(modified_loss, ordinary_loss, rtol=0, atol=0)
+    assert any(
+        not torch.allclose(
+            ordinary_parameter.grad,
+            modified_parameter.grad,
+        )
+        for ordinary_parameter, modified_parameter in zip(
+            ordinary.parameters(),
+            modified.parameters(),
+        )
+    )
+
+
 def test_modified_gradient_preserves_per_example_rms() -> None:
     torch.manual_seed(8)
     rule = small_rule()
@@ -295,6 +385,109 @@ def test_candidate_device_parser_preserves_explicit_shard_order() -> None:
         torch.device("cuda:0"),
         torch.device("cuda:1"),
     )
+
+
+def test_fresh_backward_rule_initialization_uses_experiment_seed() -> None:
+    config = ShortcutCreditExperimentConfig(
+        backward_rule_type="attention_router",
+        backward_d_model=32,
+        forward_layers=2,
+        heads=4,
+        seed=61,
+    )
+    first = initialize_fresh_backward_rule(
+        config,
+        small_vocabulary(),
+        device=torch.device("cpu"),
+    )
+    torch.manual_seed(999)
+    _ = torch.randn(100)
+    second = initialize_fresh_backward_rule(
+        config,
+        small_vocabulary(),
+        device=torch.device("cpu"),
+    )
+
+    for first_parameter, second_parameter in zip(
+        first.parameters(),
+        second.parameters(),
+    ):
+        torch.testing.assert_close(
+            first_parameter,
+            second_parameter,
+            rtol=0,
+            atol=0,
+        )
+
+
+def test_attention_router_checkpoint_round_trip(tmp_path: Path) -> None:
+    config = ShortcutCreditExperimentConfig(
+        backward_rule_type="attention_router",
+        backward_d_model=32,
+        forward_layers=2,
+        heads=4,
+    )
+    rule = initialize_fresh_backward_rule(
+        config,
+        small_vocabulary(),
+        device=torch.device("cpu"),
+    )
+    checkpoint_path = tmp_path / "router.pt"
+    save_checkpoint(
+        checkpoint_path,
+        backward_rule=rule,
+        config=config,
+        generation=4,
+        horizon=20,
+        plateau_state=PlateauState(stale_generations=3),
+    )
+
+    loaded, generation, horizon, plateau = load_checkpoint(
+        checkpoint_path,
+        device=torch.device("cpu"),
+    )
+
+    assert isinstance(loaded, AttentionRoutingRule)
+    assert generation == 5
+    assert horizon == 20
+    assert plateau.stale_generations == 3
+    for expected, actual in zip(rule.parameters(), loaded.parameters()):
+        torch.testing.assert_close(expected, actual, rtol=0, atol=0)
+
+
+def test_legacy_gradient_checkpoint_defaults_to_transformer_rule(
+    tmp_path: Path,
+) -> None:
+    config = ShortcutCreditExperimentConfig(
+        backward_d_model=32,
+        forward_layers=2,
+        backward_layers=1,
+        heads=4,
+    )
+    rule = small_rule()
+    checkpoint_path = tmp_path / "current.pt"
+    legacy_path = tmp_path / "legacy.pt"
+    save_checkpoint(
+        checkpoint_path,
+        backward_rule=rule,
+        config=config,
+        generation=7,
+        horizon=40,
+        plateau_state=PlateauState(stale_generations=6),
+    )
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint.pop("backward_rule_type")
+    torch.save(checkpoint, legacy_path)
+
+    loaded, generation, horizon, plateau = load_checkpoint(
+        legacy_path,
+        device=torch.device("cpu"),
+    )
+
+    assert isinstance(loaded, LearnedBackwardRule)
+    assert generation == 8
+    assert horizon == 40
+    assert plateau.stale_generations == 6
 
 
 def test_candidate_shards_keep_antithetic_pairs_together() -> None:

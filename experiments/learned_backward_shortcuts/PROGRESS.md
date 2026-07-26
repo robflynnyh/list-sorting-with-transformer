@@ -508,3 +508,52 @@ The corrected continuation is:
   `checkpoint_000130_sigma001_plateau.pt`.
 - Generations 130-132 from the pre-migration process are superseded by this
   continuation.
+
+### 2026-07-26: parallel suppress-only attention router
+
+A second backward-rule family tests a narrower credit-assignment hypothesis.
+It cannot synthesize gradient vectors or create new attention edges. Instead,
+it can only suppress existing token-to-token routes in attention backward:
+
+1. The side rule receives the same token IDs as the forward model, using its
+   own persistent embeddings and fixed sinusoidal positions.
+2. A bidirectional Transformer block contextualizes the complete input.
+3. A reverse-causal attention scorer produces a separate routing map for every
+   forward layer and attention head.
+4. Nonnegative, identity-initialized strengths turn those maps into
+   multiplicative gates in `(0, 1]`.
+5. Each gate multiplies the transpose of the normal forward-attention map.
+   The remaining weights are renormalized, so the intervention changes
+   relative credit routing rather than overall gradient scale.
+6. The routed map is used consistently for the value gradient and the
+   surrogate softmax backward that produces query and key gradients.
+
+The normal PyTorch SDPA result is retained exactly in the forward pass. At the
+zero-strength centre, every routing gate is exactly one and model gradients
+match ordinary backpropagation to numerical precision. With active strengths,
+the forward loss remains bit-identical while model gradients change. Tests
+also verify that all gates remain positive and at most one, router checkpoints
+round-trip, and legacy gradient-transformer checkpoints still load.
+
+The implementation exposed one reproducibility bug in the shared harness:
+fresh backward-rule centres were constructed before the configured seed was
+applied. This did not affect candidate sharing within a generation or the
+checkpoint-resumed main lineage, but nominally identical fresh runs could
+start from different centres. Fresh centres are now seeded explicitly.
+After the fix, scalar and two-GPU horizon-40 replays matched exactly across
+every reported metric and centre update.
+
+Full-width horizon-40 calibration from the same seeded centre:
+
+| Sigma | Mean route gate | Suppressed fraction | Pair delta RMS | Standardized fitness SD | Centre update / centre RMS |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.10 | 0.9870 | 11.7% | 0.00050 | 0.128 | 2.53% |
+| 0.20 | 0.9827 | 10.0% | 0.00177 | 0.394 | 17.31% |
+
+`sigma=0.1` is selected. The larger radius provides more fitness separation
+but makes a single centre update too large. The parallel run starts directly
+at horizon 40: the established ordinary-Adam diagnostics and the main
+experiment both show that horizons 10 and 20 precede shortcut learning, and
+router fitness separation there is correspondingly negligible. This keeps
+the side experiment focused on the first informative regime without changing
+the task, model, population, or clean fitness set.
