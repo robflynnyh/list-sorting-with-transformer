@@ -1377,7 +1377,7 @@ learning rate `0.05` would move the centre by `22.8%` RMS in one generation,
 which is too aggressive. Scaling it to `0.007` predicts an initial move near
 `3.2%` while retaining the useful `sigma=0.21` candidate distribution.
 
-The active semantic run is:
+The initial semantic run was:
 
 - Run:
   [`attention-router-random-list-h160-p64-s021-outer0007-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/nd17tkbi)
@@ -1386,3 +1386,47 @@ The active semantic run is:
   routing only, random-list leak placement, and worst-mode CE fitness.
 - Runtime calibration: approximately 105 seconds per generation on two
   RTX A4500 GPUs.
+
+Generation 0 confirms that the P64 search and centre step are calibrated:
+
+| Rule at generation 0 | Masked | Wrong hint | Correct hint | Weaker clean split | Distinct values |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Unperturbed pre-update centre | 27.34% | 0.0% | 100.0% | 0.0% | 10 |
+| Fittest/robust candidate | 98.05% | 86.72% | 100.0% | 86.72% | 10 |
+
+The candidate's clean accuracy is `92.38%`, substantially above both the
+three-seed masked-training and hand-coded-oracle means. Its all-hint-source
+gate ratio is `0.968`, and population hint-source selectivity correlates
+`+0.629` with fitness. Thus modest semantic selectivity is useful, although
+the candidate's near-perfect behavior must involve broader routing changes as
+well.
+
+The actual first centre move is `3.11%` RMS, close to the predicted `3.2%`.
+This row is candidate evidence only: centre evaluation precedes the current
+generation's EGGROLL update. Subsequent generations must show the
+unperturbed-centre trajectory acquiring the behavior.
+
+The run was deliberately stopped after generation 1, rather than treated as
+a failed result. At generation 1 the centre reached `47.66%` masked,
+`3.91%` wrong-hint, and `100%` correct-hint accuracy, while the best candidate
+reached `98.05%`, `94.53%`, and `100%`. However, each generation uses a new
+forward initialization, so those centre rows cannot be compared fairly
+without same-generation controls.
+
+The harness now trains two additional forward trajectories from the exact same
+initial weights and examples in every generation:
+
+- ordinary Adam training with the correct leak present;
+- ordinary Adam training with that same leak replaced by `<MASK>`.
+
+The lists, pointer locations, targets, and randomized leak positions are
+identical between the two control trajectories. The learned centre is compared
+against ordinary shortcut training, while masked training measures how well
+the real task can be learned when the shortcut is unavailable. A GPU smoke
+test also confirms that a zero routing rule exactly matches the ordinary
+trajectory. This makes the central claim direct: a useful learned backward
+mask is one that beats ordinary training on masked and wrong-hint data while
+preserving correct-hint performance. For the fixed-position task, learning to
+mask that position is already a meaningful success because it enables the
+forward network to learn the actual pointer function; randomized leak
+placement is the stronger generality follow-up.

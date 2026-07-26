@@ -34,10 +34,12 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     center_routing_summary,
     initialize_fresh_backward_rule,
     load_checkpoint,
+    make_inner_batches,
     parse_candidate_devices,
     routing_population_summary,
     save_checkpoint,
     shard_candidate_specs,
+    trajectory_summary,
     update_plateau_state,
 )
 
@@ -351,6 +353,77 @@ def test_center_rule_summary_reports_unperturbed_training_metrics() -> None:
     assert summary["center_rule/incorrect_accuracy"] == 0.4
     assert summary["center_rule/min_mode_accuracy"] == 0.4
     assert summary["center_rule/correct_leak_accuracy"] == 0.8
+
+
+def test_trajectory_summary_supports_matched_baseline_prefixes() -> None:
+    clean = ShortcutMetrics(
+        2.0,
+        0.5,
+        {"masked": 0.6, "incorrect": 0.4},
+        {"masked": 1.9, "incorrect": 2.1},
+        8,
+        7,
+        0.2,
+    )
+    correct = ShortcutMetrics(
+        1.2,
+        0.8,
+        {"correct": 0.8},
+        {"correct": 1.2},
+        9,
+        8,
+        0.2,
+    )
+
+    summary = trajectory_summary("ordinary_rule", 0.7, clean, correct)
+
+    assert summary["ordinary_rule/fitness"] == 0.7
+    assert summary["ordinary_rule/min_mode_accuracy"] == 0.4
+    assert summary["ordinary_rule/correct_leak_accuracy"] == 0.8
+
+
+def test_masked_inner_batches_match_correct_batch_content_and_positions() -> None:
+    config = ShortcutCreditExperimentConfig(
+        population_size=2,
+        horizon=3,
+        max_horizon=3,
+        batch_size=8,
+        min_length=4,
+        max_length=7,
+        leak_placement="random_list",
+    )
+    vocabulary = small_vocabulary()
+    correct = make_inner_batches(
+        config,
+        horizon=3,
+        vocabulary=vocabulary,
+        generator=torch.Generator().manual_seed(91),
+        device=torch.device("cpu"),
+    )
+    masked = make_inner_batches(
+        config,
+        horizon=3,
+        vocabulary=vocabulary,
+        generator=torch.Generator().manual_seed(91),
+        device=torch.device("cpu"),
+        leak_mode="masked",
+    )
+
+    for correct_batch, masked_batch in zip(correct, masked):
+        assert correct_batch.length == masked_batch.length
+        assert correct_batch.targets.equal(masked_batch.targets)
+        leak_positions = (
+            correct_batch.input_ids.eq(vocabulary.leak_token)
+            .nonzero(as_tuple=False)[:, 1]
+        )
+        assert leak_positions.equal(
+            masked_batch.input_ids.eq(vocabulary.leak_token)
+            .nonzero(as_tuple=False)[:, 1]
+        )
+        reconstructed = masked_batch.input_ids.clone()
+        rows = torch.arange(masked_batch.batch_size)
+        reconstructed[rows, leak_positions + 1] = correct_batch.targets
+        assert reconstructed.equal(correct_batch.input_ids)
 
 
 def test_worst_mode_fitness_uses_the_weaker_clean_split() -> None:
