@@ -1430,3 +1430,38 @@ preserving correct-hint performance. For the fixed-position task, learning to
 mask that position is already a meaningful success because it enables the
 forward network to learn the actual pointer function; randomized leak
 placement is the stronger generality follow-up.
+
+The matched-control semantic run is now active:
+
+- Run:
+  [`attention-router-random-list-h160-p64-s021-outer0007-baselines-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/59hmyzv3)
+- Configuration: identical to the initial semantic run, with two extra
+  no-routing forward trajectories per generation for the matched controls.
+- Measured runtime: approximately 117 seconds per generation on two
+  RTX A4500 GPUs, including both controls.
+
+The first two generations are:
+
+| Gen | Rule | Masked | Wrong hint | Correct hint | Weaker clean split |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 0 | Ordinary training | 27.34% | 0.0% | 100.0% | 0.0% |
+| 0 | Masked training | 35.16% | 30.47% | 54.69% | 30.47% |
+| 0 | Neutral centre | 27.34% | 0.0% | 100.0% | 0.0% |
+| 0 | Best candidate | 98.05% | 86.72% | 100.0% | 86.72% |
+| 1 | Ordinary training | 47.27% | 3.52% | 100.0% | 3.52% |
+| 1 | Masked training | 21.88% | 20.31% | 43.75% | 20.31% |
+| 1 | Evolved centre | 47.66% | 3.91% | 100.0% | 3.91% |
+| 1 | Best candidate | 98.05% | 94.53% | 100.0% | 94.53% |
+
+Generation 0 exactly reproduces the initial search and confirms that the
+neutral centre equals ordinary training. More importantly, the best sampled
+rule substantially exceeds even matched masked training while preserving
+perfect correct-hint accuracy. The rule is therefore doing more than merely
+removing the shortcut from the training examples.
+
+After one EGGROLL update, the centre exceeds ordinary training by only `0.39`
+percentage points on the weaker split. This is a real matched difference but
+far too small and early to establish centre learning. The near-perfect
+candidates show that a strong search signal remains available; later
+generations must establish whether the conservative outer updates can
+accumulate it.
