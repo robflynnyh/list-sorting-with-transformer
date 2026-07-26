@@ -11,6 +11,12 @@ optimizes a shared learned backward rule using fitness measured on 512 clean
 examples. The forward model is reset to a newly sampled initialization every
 EGGROLL generation; only the backward rule persists.
 
+![Learned-backward experiment progress](results/progress.png)
+
+The figure is regenerated from all chained `metrics.jsonl` segments with
+`sort-shortcut-credit-plot`. Later segments replace duplicate resume
+generations, so the chart represents the actual checkpoint lineage.
+
 ## Confirmed design
 
 - Task: retrieve the list value immediately following `<PTR>`.
