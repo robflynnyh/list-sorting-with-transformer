@@ -2018,3 +2018,71 @@ Population and continued-320 audit outputs:
 [`results/random_h320_post_g63_replications_summary.json`](results/random_h320_post_g63_replications_summary.json),
 and
 [`results/random_h320_post_g63_extra_replications_summary.json`](results/random_h320_post_g63_extra_replications_summary.json).
+
+### Staged long-horizon evolution
+
+The 320-update local-search diagnostic compared elite centroids containing
+four and eight candidates from the same checkpoint-66 centre. Both proposals
+were accepted on the fixed fitness set:
+
+| Update | Fixed-fitness gain | Mean unseen weaker split | Clean CE |
+| --- | ---: | ---: | ---: |
+| Pre-update checkpoint 66 | -- | **93.50%** | 0.2564 |
+| Elite 4 | **+0.001440** | **93.50%** | **0.2558** |
+| Elite 8 | +0.000761 | 93.38% | 0.2560 |
+
+The external values use the same 20 model initializations, shortcut-training
+batches, and clean evaluation batches for all three rules. Elite 4 changed
+weaker-split accuracy on none of those 20 trajectories; it only made a small
+confidence improvement. Elite 8 was also effectively tied. This confirms that
+the 320-update search had reached an accuracy plateau rather than merely being
+measured on unmatched noisy runs. Elite 4 was retained because it produced the
+larger fixed-fitness improvement at the same compute cost, not because of the
+fresh audit.
+
+The accepted elite-4 rule scored `93.69%` on a separate 20-trajectory
+horizon-640 baseline. The first horizon-640 EGGROLL generation then:
+
+- took `444.5s` on two RTX A4500 GPUs;
+- improved the fixed-set objective by `+0.000589`;
+- was accepted by backtracking;
+- had `0.901` correlation between fixed-set and held-out candidate fitness;
+- retained search radius `sigma=0.013125`.
+
+The matched 20-trajectory audit confirms that the update was safe but still
+small. Mean weaker-split accuracy changed from `93.691%` to `93.711%`: one
+trajectory improved, none degraded, and 19 tied. Mean clean CE improved more
+clearly, from `0.2658` to `0.2538`. The longer horizon therefore found another
+confidence improvement but did not yet produce the desired jump in solved
+examples.
+
+This accepted checkpoint is being carried into a staged horizon curriculum:
+`640 -> 1,280 -> 2,000 -> 3,000`. Changing horizon resets the consecutive
+acceptance streak but preserves the learned rule and search radius. Each stage
+uses the same fixed 512-example fitness set; fresh trajectory audits remain
+report-only and do not rank candidates or accept updates.
+
+The horizon-1,280 generation took `888.0s`. It was accepted, but its
+fixed-fitness gain was only `+0.0000336`, so this was nearly a no-op. The
+fixed-to-held-out candidate-fitness correlation remained high at `0.931`;
+the population still contains a coherent ranking signal even though the
+four-elite centroid produced little gain. The accepted checkpoint is now
+evolving at horizon 2,000 in
+[W&B](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/h112pijo),
+while its horizon-1,280 before/after audit runs independently.
+
+Long-horizon audits now use
+[`checkpoint_pair_diagnostic.py`](checkpoint_pair_diagnostic.py). It evaluates
+the before and after rules on exactly matched model initializations, inner
+batches, and clean examples without redundantly retraining the ordinary and
+masked controls for every checkpoint. This reduces a paired audit from six to
+two forward trajectories per seed.
+
+Elite-count and pre-640 audit outputs:
+[`results/random_h320_pre_g66_replications_summary.json`](results/random_h320_pre_g66_replications_summary.json),
+[`results/random_h320_elite4_post_g66_replications_summary.json`](results/random_h320_elite4_post_g66_replications_summary.json),
+[`results/random_h320_elite8_post_g66_replications_summary.json`](results/random_h320_elite8_post_g66_replications_summary.json),
+and
+[`results/random_h640_pre_g67_replications_summary.json`](results/random_h640_pre_g67_replications_summary.json).
+The matched horizon-640 update is in
+[`results/random_h640_g67_pair_summary.json`](results/random_h640_g67_pair_summary.json).
