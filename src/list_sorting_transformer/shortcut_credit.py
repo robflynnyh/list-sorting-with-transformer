@@ -12,9 +12,10 @@ from typing import Literal
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from torch.nn.utils.rnn import pad_sequence
 
 from .model import DecoderTransformer, ModelConfig
-from .tokens import BOS, COMMA, SEP, VALUE_OFFSET, PointerNextVocabulary
+from .tokens import BOS, COMMA, PAD, SEP, VALUE_OFFSET, PointerNextVocabulary
 
 
 LeakMode = Literal["correct", "masked", "incorrect"]
@@ -566,7 +567,11 @@ class ShortcutMetrics:
 def evaluate_shortcut_batches(
     model: ShortcutDecoderTransformer,
     batches: Iterable[ShortcutBatch],
+    *,
+    evaluation_batch_size: int = 64,
 ) -> ShortcutMetrics:
+    if evaluation_batch_size < 1:
+        raise ValueError("evaluation_batch_size must be positive")
     model.eval()
     total_loss = 0.0
     total_correct = 0
@@ -577,16 +582,45 @@ def evaluate_shortcut_batches(
         model.config.vocab_size,
         dtype=torch.long,
     )
+    examples: list[tuple[Tensor, Tensor, LeakMode]] = []
     for batch in batches:
-        logits = model(batch.input_ids)[:, -1]
-        losses = F.cross_entropy(logits, batch.targets, reduction="none")
+        examples.extend(
+            (input_ids, target, batch.leak_mode)
+            for input_ids, target in zip(batch.input_ids, batch.targets)
+        )
+    for start in range(0, len(examples), evaluation_batch_size):
+        chunk = examples[start : start + evaluation_batch_size]
+        input_rows = [example[0] for example in chunk]
+        query_positions = torch.tensor(
+            [row.shape[0] - 1 for row in input_rows],
+            device=input_rows[0].device,
+        )
+        input_ids = pad_sequence(
+            input_rows,
+            batch_first=True,
+            padding_value=PAD,
+        )
+        targets = torch.stack([example[1] for example in chunk])
+        all_logits = model(input_ids)
+        logits = all_logits[
+            torch.arange(len(chunk), device=input_ids.device),
+            query_positions,
+        ]
+        losses = F.cross_entropy(logits, targets, reduction="none")
         predictions = logits.argmax(dim=-1)
-        correct = predictions.eq(batch.targets)
+        correct = predictions.eq(targets)
         total_loss += float(losses.sum())
         total_correct += int(correct.sum())
-        total_examples += batch.batch_size
-        mode_correct[batch.leak_mode] += int(correct.sum())
-        mode_examples[batch.leak_mode] += batch.batch_size
+        total_examples += len(chunk)
+        chunk_modes = [example[2] for example in chunk]
+        for leak_mode in set(chunk_modes):
+            indices = [
+                index
+                for index, mode in enumerate(chunk_modes)
+                if mode == leak_mode
+            ]
+            mode_correct[leak_mode] += int(correct[indices].sum())
+            mode_examples[leak_mode] += len(indices)
         prediction_counts += torch.bincount(
             predictions.detach().cpu(),
             minlength=model.config.vocab_size,

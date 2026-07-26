@@ -329,3 +329,24 @@ mass on the digit vocabulary rather than retrieving the pointed value. This
 does not invalidate CE as the EGGROLL fitness, but it prevents interpreting
 the early CE gain as task learning. Prediction diversity must expand before
 accuracy changes can be meaningful.
+
+#### Packed evaluation optimization
+
+Candidate evaluation originally grouped the variable-length fitness examples
+by exact length, resulting in approximately 50 small Transformer calls per
+candidate. Evaluation now right-pads mixed-length examples and reads logits at
+each example's original `<QUERY>` position. Causal masking guarantees that
+padding after the query cannot affect that query.
+
+On the full architecture and all 512 fitness examples:
+
+- Original grouped evaluation: `109.9 ms`.
+- Packed evaluation: `37.7 ms`.
+- Speedup: `2.9x` for the evaluation portion.
+- CE difference: `1.9e-8`.
+- Accuracy: exactly identical.
+
+A focused test also compares packed query logits against separate unpadded
+forwards across different lengths. The optimization will be adopted from the
+next durable checkpoint; it does not alter the training batches or EGGROLL
+estimator.

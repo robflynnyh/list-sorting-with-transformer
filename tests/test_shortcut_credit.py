@@ -118,6 +118,44 @@ def test_evaluation_reports_prediction_diversity() -> None:
     assert 1 / 32 <= metrics.prediction_mode_fraction <= 1
 
 
+def test_right_padded_evaluation_preserves_query_logits() -> None:
+    torch.manual_seed(34)
+    model = small_model().eval()
+    vocabulary = small_vocabulary()
+    short = make_shortcut_batch(
+        3,
+        8,
+        leak_mode="masked",
+        generator=torch.Generator().manual_seed(35),
+        vocabulary=vocabulary,
+    )
+    long = make_shortcut_batch(
+        2,
+        12,
+        leak_mode="incorrect",
+        generator=torch.Generator().manual_seed(36),
+        vocabulary=vocabulary,
+    )
+    expected_short = model(short.input_ids)[:, -1]
+    expected_long = model(long.input_ids)[:, -1]
+
+    rows = [*short.input_ids, *long.input_ids]
+    padded = torch.nn.utils.rnn.pad_sequence(
+        rows,
+        batch_first=True,
+        padding_value=0,
+    )
+    positions = torch.tensor([row.shape[0] - 1 for row in rows])
+    packed_logits = model(padded)[torch.arange(len(rows)), positions]
+
+    torch.testing.assert_close(
+        packed_logits,
+        torch.cat((expected_short, expected_long)),
+        atol=1e-6,
+        rtol=1e-5,
+    )
+
+
 def test_zero_gate_is_exactly_ordinary_backpropagation() -> None:
     torch.manual_seed(5)
     ordinary = small_model()
