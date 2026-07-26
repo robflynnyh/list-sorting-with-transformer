@@ -906,3 +906,19 @@ This is not evidence that horizon 80 is intrinsically hopeless; it establishes
 that the independent router had not escaped the shortcut after 20 generations
 there. The shared router will receive a substantially longer horizon-80 phase
 before it is assessed.
+
+A population replay from the independent generation-70 checkpoint clarifies
+why simply extending that particular run was unlikely to help:
+
+| Horizon-80 independent population diagnostic | Value |
+| --- | ---: |
+| Candidate leak-ratio range | 0.953-0.979 |
+| Candidate fraction below 0.9 | 0.0% |
+| Fitness/selectivity correlation | +0.027 |
+| Fittest candidate leak ratio | 0.961 |
+
+Unlike the shared router at horizon 40, this local independent-map population
+contains no strongly selective candidate and fitness is effectively unrelated
+to the small selectivity differences that remain. The corresponding shared-map
+diagnostic must be measured after its horizon transition; it should not be
+inferred from this failed independent centre.
