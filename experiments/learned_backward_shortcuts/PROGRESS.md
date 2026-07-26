@@ -284,3 +284,29 @@ The corrected curriculum promoted exactly at the configured boundary:
 
 This verifies that the curriculum advances deterministically on the corrected
 objective and preserves a usable EGGROLL signal after the objective changes.
+
+#### Horizon-20 early behavior
+
+Across generations 51-60:
+
+- Mean post-training clean CE: `2.6428`.
+- Mean antithetic pair-difference RMS: `0.0636`.
+- Mean correct-leak / masked-leak / incorrect-leak accuracy:
+  `10.3% / 10.2% / 10.1%`.
+- Mean centre gate magnitude remained small and ended at `0.0104`.
+- Runtime averaged approximately `32s` per generation.
+
+There is no evidence of retrieval or shortcut use at 20 updates. The useful
+result at this point is that directional signal persists while the centre
+remains close to its ordinary-backprop anchor.
+
+The evaluator now also records the number of distinct value predictions and
+the modal prediction fraction. The run was resumed from the unchanged
+generation-60 checkpoint so those diagnostics are present before reaching the
+shortcut-learning horizons:
+
+- Continued run:
+  `learned-backward-p64-diversity-resume60-seed7`
+- Source checkpoint:
+  `learned-backward-p64-clean-plateau-resume40-seed7/checkpoint_000060.pt`
+- Preserved curriculum state: horizon 20 with 9 stale generations.
