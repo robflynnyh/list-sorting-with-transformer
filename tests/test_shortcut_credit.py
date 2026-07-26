@@ -32,6 +32,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     candidate_summary,
     center_rule_summary,
     center_routing_summary,
+    apply_resume_horizon,
     elite_centroid_update,
     function_delta_alignment_summary,
     heldout_candidate_summary,
@@ -470,6 +471,17 @@ def test_resume_horizon_override_is_explicit() -> None:
         max_horizon=640,
     )
     assert resolve_resume_horizon(override_config, 160) == 320
+    state = PlateauState(consecutive_accepted_updates=2)
+    assert apply_resume_horizon(override_config, 160, state) == 320
+    assert state.consecutive_accepted_updates == 0
+
+    unchanged_state = PlateauState(consecutive_accepted_updates=2)
+    assert apply_resume_horizon(
+        default_config,
+        160,
+        unchanged_state,
+    ) == 160
+    assert unchanged_state.consecutive_accepted_updates == 2
 
     with pytest.raises(ValueError, match="requires a resume"):
         ShortcutCreditExperimentConfig(resume_horizon=20)

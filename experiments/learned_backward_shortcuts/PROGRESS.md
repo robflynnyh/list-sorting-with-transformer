@@ -1952,6 +1952,13 @@ from checkpoint 59 and evolves the backward rule with a 320-update inner
 horizon. The resume path has an explicit, tested horizon override so this
 transition preserves checkpoint lineage and adaptive-search state.
 
+The exact checkpoint-59 starting rule scores `93.83%` across 40 unseen
+problems at 320 updates (`93.81%` and `93.85%` on two independent
+20-problem suites). This is the horizon-matched baseline for the new phase.
+Changing horizon preserves the learned rule and current sigma but resets the
+consecutive-acceptance streak: improvements measured at 160 and 320 updates
+cannot jointly trigger a sigma increase.
+
 Continued-audit outputs:
 [`results/random_elite_post_g49_replications_summary.json`](results/random_elite_post_g49_replications_summary.json),
 [`results/random_elite_post_g49_extra_replications_summary.json`](results/random_elite_post_g49_extra_replications_summary.json),
@@ -1963,3 +1970,8 @@ Horizon-audit outputs:
 [`results/random_elite_g49_h320_replications_summary.json`](results/random_elite_g49_h320_replications_summary.json)
 and
 [`results/random_elite_g49_h640_replications_summary.json`](results/random_elite_g49_h640_replications_summary.json).
+
+Checkpoint-59 horizon-matched baseline:
+[`results/random_elite_g58_h320_replications_summary.json`](results/random_elite_g58_h320_replications_summary.json)
+and
+[`results/random_elite_g58_h320_extra_replications_summary.json`](results/random_elite_g58_h320_extra_replications_summary.json).

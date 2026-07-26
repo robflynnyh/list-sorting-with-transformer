@@ -1413,6 +1413,17 @@ def resolve_resume_horizon(
     return config.resume_horizon
 
 
+def apply_resume_horizon(
+    config: ShortcutCreditExperimentConfig,
+    checkpoint_horizon: int,
+    state: PlateauState,
+) -> int:
+    horizon = resolve_resume_horizon(config, checkpoint_horizon)
+    if horizon != checkpoint_horizon:
+        state.consecutive_accepted_updates = 0
+    return horizon
+
+
 def maybe_initialize_wandb(
     config: ShortcutCreditExperimentConfig,
 ) -> Any | None:
@@ -1460,7 +1471,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             Path(config.resume),
             device=device,
         )
-        horizon = resolve_resume_horizon(config, horizon)
+        horizon = apply_resume_horizon(config, horizon, plateau_state)
         if center_rule.config != backward_config:
             raise ValueError("resume checkpoint architecture differs from config")
     if plateau_state.search_sigma is None:
