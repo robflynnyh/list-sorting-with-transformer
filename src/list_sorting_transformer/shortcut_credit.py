@@ -461,6 +461,7 @@ class AttentionRoutingRuleConfig:
     routing_temperature: float = 0.1
     max_log_suppression: float = 8.0
     route_output_projection: bool = False
+    shared_routing_map: bool = False
 
     def __post_init__(self) -> None:
         if min(
@@ -493,7 +494,18 @@ class AttentionRoutingRule(nn.Module):
             config.ffn_multiplier,
         )
         self.routing_norm = nn.LayerNorm(config.d_model)
-        routing_width = config.forward_layers * config.d_model
+        self.routing_layer_count = (
+            1 if config.shared_routing_map else config.forward_layers
+        )
+        self.routing_head_count = (
+            1 if config.shared_routing_map else config.n_heads
+        )
+        self.routing_head_dim = config.d_model // self.routing_head_count
+        routing_width = (
+            self.routing_layer_count
+            * self.routing_head_count
+            * self.routing_head_dim
+        )
         self.routing_query = nn.Linear(
             config.d_model,
             routing_width,
@@ -505,7 +517,7 @@ class AttentionRoutingRule(nn.Module):
             bias=False,
         )
         self.gates = nn.Parameter(
-            torch.zeros(config.forward_layers, config.n_heads)
+            torch.zeros(self.routing_layer_count, self.routing_head_count)
         )
         self.capture_statistics = False
         self.statistics: list[dict[str, float]] = []
@@ -515,6 +527,12 @@ class AttentionRoutingRule(nn.Module):
 
     def clear_statistics(self) -> None:
         self.statistics.clear()
+
+    @torch.no_grad()
+    def project_parameters_(self) -> None:
+        """Keep suppression strengths in their nonnegative domain."""
+
+        self.gates.clamp_(min=0)
 
     def _position_encoding(
         self,
@@ -559,13 +577,12 @@ class AttentionRoutingRule(nn.Module):
         hidden = self.context(hidden)
         hidden = self.routing_norm(hidden)
 
-        head_dim = self.config.d_model // self.config.n_heads
         routing_shape = (
             batch_size,
             sequence_length,
-            self.config.forward_layers,
-            self.config.n_heads,
-            head_dim,
+            self.routing_layer_count,
+            self.routing_head_count,
+            self.routing_head_dim,
         )
         query = self.routing_query(hidden).view(routing_shape).permute(
             0, 2, 3, 1, 4
@@ -575,7 +592,7 @@ class AttentionRoutingRule(nn.Module):
         )
         scores = (
             query @ key.transpose(-2, -1)
-            / head_dim**0.5
+            / self.routing_head_dim**0.5
             / self.config.routing_temperature
         )
         reverse_causal = torch.ones(
@@ -600,8 +617,8 @@ class AttentionRoutingRule(nn.Module):
             self.config.max_log_suppression * F.relu(self.gates)
         ).view(
             1,
-            self.config.forward_layers,
-            self.config.n_heads,
+            self.routing_layer_count,
+            self.routing_head_count,
             1,
             1,
         )
@@ -609,6 +626,14 @@ class AttentionRoutingRule(nn.Module):
             active_strength * routing_priority
         ).clamp(max=self.config.max_log_suppression)
         forward_gates = (-log_suppression).exp().transpose(-2, -1)
+        if self.config.shared_routing_map:
+            forward_gates = forward_gates.expand(
+                batch_size,
+                self.config.forward_layers,
+                self.config.n_heads,
+                sequence_length,
+                sequence_length,
+            )
 
         if self.capture_statistics:
             causal = torch.ones(

@@ -731,6 +731,42 @@ centre update. The corrected run is:
   final-query gates, so broad suppression is not mistaken for selective
   shortcut blocking.
 
+Its first two windows were:
+
+| Window | Clean CE | Masked | Wrong hint | Correct leak | Robust min split |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Generations 0-9 | 2.3520 | 20.8% | 14.8% | 35.2% | 16.1% |
+| Generations 10-19 | 2.3266 | 20.4% | 16.7% | 36.0% | 17.8% |
+
+This is balanced horizon-40 behavior, and the second window improves clean CE
+and wrong-hint accuracy. The original leak-relative gate metric came from the
+first perturbed candidate, however, so its apparent change from `0.992` to
+`0.964` does not prove that the centre became selective. A post-update
+unperturbed-centre routing diagnostic was added at checkpoint 20. It measured
+a leak/other gate ratio of `0.977`: the centre had learned a real but still
+modest preference amid broad suppression.
+
+The fixed `sigma=0.05` again became nonlocal as the router centre evolved.
+A matched generation-20 replay gave:
+
+| Sigma | Pair delta RMS | Standardized fitness SD | Centre update / RMS |
+| ---: | ---: | ---: | ---: |
+| 0.050 | 0.00779 | 0.867 | 8.75% |
+| 0.025 | 0.00571 | 0.745 | 4.32% |
+| 0.010 | 0.00317 | 0.466 | 1.27% |
+
+`sigma=0.01` retains a clear directional estimator while restoring a local
+centre update. The checkpoint-20 continuation is:
+
+- Run:
+  [`attention-router-complete-p64-sigma001-centerdiag-resume20-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/vk98n352)
+- Source:
+  `attention-router-complete-p64-h40-seed7/checkpoint_000020.pt`.
+- The one-generation centre-diagnostic and radius-probe branches are excluded
+  from the authoritative lineage.
+
+![Complete attention-router progress](results/attention_router_complete_progress.png)
+
 ### 2026-07-26: robust fitness continuation
 
 The unrestricted gradient-transformer rule's first two horizon-80
@@ -755,3 +791,63 @@ collapsed (`1.28` and `1.45 / 10` distinct predicted digits). The controlled
 continuation therefore starts from the pre-collapse generation-190
 horizon-80 checkpoint; its result will be compared against the existing
 mean-CE lineage from the same centre.
+
+- Run:
+  [`learned-backward-p64-h80-worstce-resume190-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/cnn6e8jz)
+- Source:
+  `learned-backward-p64-sigma001-plateau-resume130-seed7/checkpoint_000190_horizon80.pt`.
+
+Across the matched generations 190-199:
+
+| Objective | Clean CE | Masked | Wrong hint | Correct leak | Distinct digits |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Mean clean CE | 2.9751 | 17.4% | 0.87% | 92.7% | 9.55 |
+| Worst-split CE | 2.9673 | 17.2% | 0.93% | 92.1% | 9.55 |
+
+The alternative ranking objective made no material difference. The population
+did not contain sufficiently shortcut-resistant local directions for either
+objective to select, so this branch was stopped at its generation-200
+checkpoint.
+
+### 2026-07-26: one shared backward suppression map
+
+The intended constrained router uses one input-conditioned suppression map
+and applies that same map to every head in every forward layer. It does not
+change forward attention: the ordinary shortcut-containing forward pass and
+loss remain exact, while only the backward attention routes are suppressed.
+Forward suppression is therefore out of scope because it would change the
+training data path rather than the learned credit-assignment rule.
+
+The implementation now supports both architectures:
+
+- Shared map, the default for new routing experiments: one query/key map and
+  one suppression strength expanded across all three layers and four heads.
+- Independent maps, retained as the existing control and for loading old
+  checkpoints.
+
+The suppression strength is projected to the nonnegative domain after each
+EGGROLL update. This matters more in the shared model because it has one scalar
+strength: a negative centre is functionally identical to zero under the
+suppress-only `ReLU`, leaving evolution in a flat inactive region.
+
+Fresh full-population calibration gave:
+
+| Horizon | Sigma | Pair delta RMS | Standardized fitness SD | Centre update / RMS | Masked | Wrong hint |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 40 | 0.020 | 0.00018 | 0.040 | 0.17% | 19.7% | 14.5% |
+| 40 | 0.035 | 0.00074 | 0.162 | 1.19% | 19.7% | 14.5% |
+| 40 | 0.050 | 0.00174 | 0.362 | 3.77% | 19.7% | 14.6% |
+| 80 | 0.010 | 0.00124 | 0.261 | 0.55% | 16.4% | 0.0% |
+| 80 | 0.050 | 0.05145 | 0.996 | 11.06% | 17.0% | 0.0% |
+
+The `sigma=0.05` horizon-40 row predates projection and moved its sole
+suppression strength negative, making the updated centre inactive. The
+projected `sigma=0.035` probe is local while retaining measurable ranking
+signal, so it is selected for the main shared-map lineage:
+
+- Run:
+  [`attention-router-shared-p64-s0035-worstce-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/czkit9uv)
+- Configuration: population 64, horizon 40, complete attention-gradient
+  routing, one shared map, `sigma=0.035`, and worst-split CE fitness.
+- GPUs 2-3 run this lineage while the independent-map control continues on
+  GPUs 0-1.

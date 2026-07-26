@@ -64,6 +64,7 @@ class ShortcutCreditExperimentConfig:
     backward_d_model: int = 128
     backward_rule_type: str = "gradient_transformer"
     route_output_projection: bool = False
+    shared_routing_map: bool = True
     fitness_objective: str = "mean_clean_ce"
     forward_layers: int = 3
     backward_layers: int = 2
@@ -211,6 +212,7 @@ def make_rule_config(
         n_heads=config.heads,
         forward_layers=config.forward_layers,
         route_output_projection=config.route_output_projection,
+        shared_routing_map=config.shared_routing_map,
     )
 
 
@@ -611,6 +613,26 @@ def center_update_summary(
     }
 
 
+@torch.inference_mode()
+def center_routing_summary(
+    backward_rule: BackwardRule,
+    token_ids: Tensor,
+) -> dict[str, float]:
+    if not isinstance(backward_rule, AttentionRoutingRule):
+        return {}
+    capture_statistics = backward_rule.capture_statistics
+    backward_rule.capture_statistics = True
+    backward_rule.clear_statistics()
+    backward_rule.attention_gates(token_ids)
+    statistics = backward_rule.statistics.pop()
+    backward_rule.capture_statistics = capture_statistics
+    return {
+        f"backward/center_{key}": value
+        for key, value in statistics.items()
+        if key != "layer"
+    }
+
+
 def save_checkpoint(
     path: Path,
     *,
@@ -877,12 +899,20 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             sigma=config.sigma,
             learning_rate=outer_learning_rate,
         )
+        if isinstance(center_rule, AttentionRoutingRule):
+            center_rule.project_parameters_()
         summary = candidate_summary(
             fitness_tensor.cpu(),
             clean_results,
             correct_results,
         )
         summary.update(center_update_summary(center_rule, center_parameters))
+        summary.update(
+            center_routing_summary(
+                center_rule,
+                inner_batches[-1].input_ids,
+            )
+        )
         summary.update(
             {
                 "generation": generation,
@@ -1024,6 +1054,12 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "apply attention routing to output-projection parameter gradients"
         ),
+    )
+    parser.add_argument(
+        "--shared-routing-map",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="reuse one backward suppression map across all layers and heads",
     )
     parser.add_argument(
         "--fitness-objective",

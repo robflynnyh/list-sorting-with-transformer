@@ -28,6 +28,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     candidate_fitness,
     candidate_summary,
+    center_routing_summary,
     initialize_fresh_backward_rule,
     load_checkpoint,
     parse_candidate_devices,
@@ -69,6 +70,7 @@ def small_rule() -> LearnedBackwardRule:
 def small_routing_rule(
     *,
     route_output_projection: bool = False,
+    shared_routing_map: bool = False,
 ) -> AttentionRoutingRule:
     return AttentionRoutingRule(
         AttentionRoutingRuleConfig(
@@ -78,6 +80,7 @@ def small_routing_rule(
             forward_layers=2,
             ffn_multiplier=2.0,
             route_output_projection=route_output_projection,
+            shared_routing_map=shared_routing_map,
         )
     )
 
@@ -387,6 +390,47 @@ def test_attention_router_only_suppresses_existing_routes() -> None:
     )
 
 
+def test_shared_attention_router_reuses_one_map_everywhere() -> None:
+    torch.manual_seed(59)
+    rule = small_routing_rule(shared_routing_map=True)
+    with torch.no_grad():
+        rule.gates.fill_(0.2)
+    batch = make_shortcut_batch(
+        4,
+        8,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(60),
+        vocabulary=small_vocabulary(),
+    )
+
+    attention_gates = rule.attention_gates(batch.input_ids)
+
+    assert len(attention_gates) == 2
+    sequence_length = batch.input_ids.shape[1]
+    assert attention_gates[0].shape == (
+        4,
+        4,
+        sequence_length,
+        sequence_length,
+    )
+    torch.testing.assert_close(attention_gates[0], attention_gates[1])
+    for head_index in range(1, 4):
+        torch.testing.assert_close(
+            attention_gates[0][:, 0],
+            attention_gates[0][:, head_index],
+        )
+
+
+def test_attention_router_projects_suppression_strength_nonnegative() -> None:
+    rule = small_routing_rule(shared_routing_map=True)
+    with torch.no_grad():
+        rule.gates.fill_(-0.2)
+
+    rule.project_parameters_()
+
+    torch.testing.assert_close(rule.gates, torch.zeros_like(rule.gates))
+
+
 def test_attention_router_can_route_output_projection_credit() -> None:
     torch.manual_seed(55)
     ordinary = small_model()
@@ -434,6 +478,25 @@ def test_attention_router_can_route_output_projection_credit() -> None:
         atol=0,
     )
     assert not torch.allclose(projection_gradient, ordinary_gradient)
+
+
+def test_center_routing_summary_reports_the_unperturbed_rule() -> None:
+    rule = small_routing_rule()
+    with torch.no_grad():
+        rule.gates.fill_(0.2)
+    batch = make_shortcut_batch(
+        4,
+        8,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(57),
+        vocabulary=small_vocabulary(),
+    )
+
+    summary = center_routing_summary(rule, batch.input_ids)
+
+    assert 0 < summary["backward/center_routing_gate"] <= 1
+    assert 0 < summary["backward/center_routing_leak_relative_gate"]
+    assert rule.statistics == []
 
 
 def test_modified_gradient_preserves_per_example_rms() -> None:

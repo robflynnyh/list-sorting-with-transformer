@@ -201,7 +201,7 @@ def plot_chained_metrics(
     _plot_series(
         eggroll_axis,
         rows,
-        "backward/routing_leak_relative_gate_mean",
+        "backward/center_routing_leak_relative_gate",
         label="leak/other routing gate",
         color="#8c564b",
     )
