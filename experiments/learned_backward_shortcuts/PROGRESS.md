@@ -140,6 +140,21 @@ leak perfectly by step 80, while performance with an incorrect leak falls to
 zero and clean loss continues worsening. The horizon curriculum should
 therefore eventually reach at least 80 updates.
 
+For the complementary learnability check, ordinary Adam was trained on masked
+leak examples, which force it to use the pointer:
+
+| Step | Correct leak | Masked leak | Incorrect leak |
+| ---: | ---: | ---: | ---: |
+| 80 | 20.3% | 17.6% | 15.7% |
+| 160 | 34.7% | 21.9% | 19.9% |
+| 320 | 99.5% | 99.1% | 98.7% |
+| 640 | 100.0% | 100.0% | 99.4% |
+| 1,000 | 100.0% | 100.0% | 96.1% |
+
+The genuine task is therefore learnable by this architecture and optimizer.
+It learns more slowly than the shortcut: clean training reaches near-perfect
+retrieval around step 320, whereas biased training learns the leak by step 80.
+
 ### 2026-07-26: first population-64 research run
 
 - Run: [`learned-backward-p64-curriculum-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/yupx3qo8)
