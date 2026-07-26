@@ -1431,7 +1431,7 @@ mask that position is already a meaningful success because it enables the
 forward network to learn the actual pointer function; randomized leak
 placement is the stronger generality follow-up.
 
-The matched-control semantic run is now active:
+The matched-control semantic run reached checkpoint 10:
 
 - Run:
   [`attention-router-random-list-h160-p64-s021-outer0007-baselines-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/59hmyzv3)
@@ -1439,6 +1439,24 @@ The matched-control semantic run is now active:
   no-routing forward trajectories per generation for the matched controls.
 - Measured runtime: approximately 117 seconds per generation on two
   RTX A4500 GPUs, including both controls.
+
+It was stopped cleanly at
+`checkpoint_000010.pt` to add an outer-loop-unseen evaluation stream. The
+outer optimization repeatedly uses the same balanced fitness set, so reporting
+only that set would not distinguish genuine distribution-level learning from
+eventual adaptation to those examples. From generation 10 onward, every
+generation therefore also samples fresh balanced masked, wrong-hint, and
+correct-hint evaluation examples. The learned centre, ordinary training, and
+masked training all use the exact same fresh examples.
+
+The active continuation is:
+
+- Run:
+  [`attention-router-random-list-h160-p64-s021-outer0007-heldout-resume10-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/n1xq8tsr)
+- Resume source:
+  `attention-router-random-list-h160-p64-s021-outer0007-baselines-seed7/checkpoint_000010.pt`.
+- All search and training settings are unchanged; only the extra held-out
+  measurements were added.
 
 The tracked matched-control plot is regenerated from the live JSONL metrics:
 
@@ -1448,7 +1466,7 @@ The tracked matched-control plot is regenerated from the live JSONL metrics:
 PYTHONPATH=src python -m \
   list_sorting_transformer.shortcut_credit_compare_plot \
   --matched-controls \
-  artifacts/learned_backward_shortcuts/attention-router-random-list-h160-p64-s021-outer0007-baselines-seed7/metrics.jsonl \
+  artifacts/learned_backward_shortcuts/attention-router-random-list-h160-p64-s021-outer0007-heldout-resume10-seed7/metrics.jsonl \
   --output \
   experiments/learned_backward_shortcuts/results/random_list_matched_controls.png
 ```
@@ -1478,3 +1496,21 @@ far too small and early to establish centre learning. The near-perfect
 candidates show that a strong search signal remains available; later
 generations must establish whether the conservative outer updates can
 accumulate it.
+
+The first fresh held-out row, generation 10, confirms checkpoint continuity
+and does not yet show centre learning:
+
+| Rule | Outer-set masked / wrong / correct | Fresh held-out masked / wrong / correct |
+| --- | ---: | ---: |
+| Ordinary training | 17.97% / 0.0% / 100.0% | 15.23% / 0.0% / 100.0% |
+| Masked training | 19.92% / 18.36% / 41.41% | 23.05% / 21.09% / 39.84% |
+| Evolved centre | 18.75% / 0.0% / 99.22% | 12.89% / 0.0% / 100.0% |
+| Most robust candidate | 42.97% / 22.27% / 87.50% | not measured |
+
+On fresh data, the centre and ordinary training both have `0%` weaker-split
+accuracy, while the centre's clean CE is worse by `0.060`. The routing
+diagnostic also shows mean backward gate `0.716` but an all-hint-source
+relative gate of `1.000`: the centre has so far learned broad suppression,
+not preferential suppression of the moving hint. This is an early diagnostic,
+not a terminal result; the run continues so that later generations can show
+whether input-conditioned selectivity emerges.

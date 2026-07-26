@@ -65,6 +65,8 @@ def _plot(
         if key in row
     ]
     if points:
+        if len(points) == 1 and "marker" not in kwargs:
+            kwargs["marker"] = "o"
         axis.plot(
             [generation for generation, _ in points],
             [value for _, value in points],
