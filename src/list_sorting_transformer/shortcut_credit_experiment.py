@@ -53,7 +53,7 @@ class ShortcutCreditExperimentConfig:
     min_length: int = 8
     max_length: int = 32
     forward_learning_rate: float = 3e-4
-    sigma: float = 0.02
+    sigma: float = 0.08
     outer_learning_rate: float = 0.1
     d_model: int = 128
     backward_d_model: int = 128
@@ -608,7 +608,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-length", type=int, default=8)
     parser.add_argument("--max-length", type=int, default=32)
     parser.add_argument("--forward-learning-rate", type=float, default=3e-4)
-    parser.add_argument("--sigma", type=float, default=0.02)
+    parser.add_argument("--sigma", type=float, default=0.08)
     parser.add_argument("--outer-learning-rate", type=float, default=0.1)
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--backward-d-model", type=int, default=128)

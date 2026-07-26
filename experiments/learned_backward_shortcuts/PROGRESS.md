@@ -73,7 +73,7 @@ Before interpreting learned-backward results:
 - [x] Resetting inner rollout and horizon curriculum.
 - [x] Focused tests.
 - [x] CPU smoke.
-- [ ] GPU smoke.
+- [x] GPU smoke.
 - [ ] First population-64 research run.
 
 ## Sources
@@ -103,3 +103,38 @@ Before interpreting learned-backward results:
   candidate's mean gradient cosine was about `0.9999998` and its correction RMS
   was only about `0.0005` of the ordinary gradient. Do not launch the real run
   with this value; calibrate on GPU toward approximately `0.99` cosine first.
+
+### 2026-07-26: full-width GPU calibration
+
+- Hardware: one RTX A4500 through `with-gpu`.
+- Full architecture: forward width 128 with three layers; backward width 128
+  with two layers.
+- A coarse `sigma` sweep showed a sharp nonlinear transition. `0.02` was
+  ineffective, `0.1` gave gradient cosine `0.9766`, and `0.3` caused the
+  correction RMS to explode.
+- The refined sweep selected `sigma=0.08`: at the full horizon-10 smoke it
+  produced mean gradient cosine `0.9909` and correction/original RMS ratio
+  `0.1025`.
+- Runtime: population 8, horizon 10, batch size 64, all 512 fitness examples,
+  and 128 correct-leak diagnostics took `3.76s`. The scalar implementation
+  should therefore take roughly `30s` per population-64 generation at horizon
+  10.
+
+### 2026-07-26: ordinary-Adam shortcut diagnostic
+
+One forward model was trained from initialization on correct-leak examples
+using the agreed Adam settings:
+
+| Step | Correct leak | Masked leak | Incorrect leak | Clean CE |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 | 15.6% | 12.5% | 12.9% | 2.5245 |
+| 20 | 14.8% | 12.9% | 15.6% | 2.4028 |
+| 40 | 44.5% | 20.3% | 16.8% | 2.3394 |
+| 80 | 100.0% | 21.5% | 0.0% | 3.1588 |
+| 160 | 100.0% | 19.1% | 0.0% | 3.9253 |
+| 1,000 | 100.0% | 20.3% | 0.0% | 6.2231 |
+
+The task exposes the intended failure cleanly: ordinary Adam learns the fixed
+leak perfectly by step 80, while performance with an incorrect leak falls to
+zero and clean loss continues worsening. The horizon curriculum should
+therefore eventually reach at least 80 updates.
