@@ -1157,9 +1157,22 @@ broader positional anti-recency filter around the output query, not an exact
 copy of the hand-coded single-edge oracle.
 
 Replacing the correct hint with `<MASK>` or an incorrect value changes each
-reported medium-checkpoint gate by at most `0.006`. Thus the router is
-responding to token roles and positions rather than recognizing a particular
-answer digit.
+reported medium-checkpoint gate by at most `0.006`. Thus the router is not
+recognizing a particular answer digit. A stricter position-matched comparison
+also shows that it is not materially recognizing the useful token roles:
+
+| Medium generation 110 | Gate at role | Mean gate at same absolute positions | Ratio |
+| --- | ---: | ---: | ---: |
+| Pointer | 0.534 | 0.529 | 1.009 |
+| Pointer value | 0.512 | 0.509 | 1.006 |
+| Target value | 0.466 | 0.463 | 1.007 |
+
+The apparent preservation of pointer-related roles in the preceding bar chart
+is almost entirely explained by where those roles occur. The learned rule is
+best described as a positional anti-recency profile: preserve early list
+positions and suppress the suffix near the output query. This is sufficient
+for the present fixed-layout shortcut, but is less general than an
+input-conditioned semantic router.
 
 The same diagnostic at other lengths exposes a current generalization limit:
 

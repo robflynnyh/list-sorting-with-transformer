@@ -105,6 +105,36 @@ def query_role_gates(
     }
 
 
+def position_matched_role_gates(
+    attention_gates: Tensor,
+    batch: ShortcutBatch,
+    vocabulary: ShortcutPointerVocabulary,
+) -> dict[str, float]:
+    """Give expected gates at each variable role's absolute positions."""
+
+    if attention_gates.ndim != 4:
+        raise ValueError("attention gates must have shape [B, H, T, T]")
+    gates = attention_gates.mean(dim=1)
+    pointer_positions = (
+        batch.input_ids.eq(vocabulary.marker_token("PTR"))
+        .nonzero(as_tuple=False)[:, 1]
+        .to(gates.device)
+    )
+    if pointer_positions.numel() != batch.batch_size:
+        raise ValueError("every prompt must contain exactly one pointer")
+    final_query_gates = gates[:, -1]
+    position_means = final_query_gates.mean(dim=0)
+    return {
+        "pointer": float(position_means[pointer_positions].mean()),
+        "pointer value": float(
+            position_means[pointer_positions + 1].mean()
+        ),
+        "target value": float(
+            position_means[pointer_positions + 3].mean()
+        ),
+    }
+
+
 @torch.no_grad()
 def summarize_rule(
     rule: AttentionRoutingRule,
@@ -186,24 +216,40 @@ def main(argv: Sequence[str] | None = None) -> None:
         generator=generator,
         vocabulary=vocabulary,
     )
-    summaries = [
-        (
-            label,
-            summarize_rule(
-                load_attention_router(path),
-                batch,
-                vocabulary,
-            ),
+    summaries = []
+    matched_summaries = []
+    for label, path in args.checkpoint:
+        rule = load_attention_router(path)
+        gates = rule.attention_gates(batch.input_ids)[0]
+        summaries.append(
+            (label, query_role_gates(gates, batch, vocabulary))
         )
-        for label, path in args.checkpoint
-    ]
+        matched_summaries.append(
+            (
+                label,
+                position_matched_role_gates(
+                    gates,
+                    batch,
+                    vocabulary,
+                ),
+            )
+        )
     plot_routing_roles(summaries, args.output)
-    for label, summary in summaries:
+    for (label, summary), (_, matched) in zip(
+        summaries,
+        matched_summaries,
+    ):
         values = " ".join(
             f"{role}={summary[role]:.3f}"
             for role in ROLE_LABELS
         )
         print(f"{label}: {values}")
+        matched_values = " ".join(
+            f"{role}={matched[role]:.3f} "
+            f"(actual/matched={summary[role] / matched[role]:.3f})"
+            for role in matched
+        )
+        print(f"{label} position-matched: {matched_values}")
     print(args.output)
 
 

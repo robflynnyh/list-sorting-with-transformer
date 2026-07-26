@@ -13,6 +13,7 @@ from list_sorting_transformer.shortcut_credit_routing_plot import (
     ROLE_LABELS,
     parse_checkpoint,
     plot_routing_roles,
+    position_matched_role_gates,
     query_role_gates,
 )
 
@@ -53,6 +54,44 @@ def test_query_role_gates_extracts_prompt_positions() -> None:
     assert summary["pointer"] == pytest.approx(0.4)
     assert summary["target value"] == pytest.approx(0.7)
     assert set(summary) == set(ROLE_LABELS)
+
+
+def test_position_matched_roles_use_same_absolute_positions() -> None:
+    vocabulary = ShortcutPointerVocabulary("numbers", 10)
+    batch = make_shortcut_batch(
+        4,
+        5,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(3),
+        vocabulary=vocabulary,
+    )
+    sequence_length = batch.input_ids.shape[1]
+    gates = torch.ones(4, 2, sequence_length, sequence_length)
+    source_profile = torch.arange(
+        sequence_length,
+        dtype=torch.float32,
+    )
+    gates[:, :, -1, :] = source_profile
+    pointers = (
+        batch.input_ids.eq(vocabulary.marker_token("PTR"))
+        .nonzero(as_tuple=False)[:, 1]
+    )
+
+    summary = position_matched_role_gates(
+        gates,
+        batch,
+        vocabulary,
+    )
+
+    assert summary["pointer"] == pytest.approx(
+        float(pointers.float().mean())
+    )
+    assert summary["pointer value"] == pytest.approx(
+        float((pointers + 1).float().mean())
+    )
+    assert summary["target value"] == pytest.approx(
+        float((pointers + 3).float().mean())
+    )
 
 
 def test_plot_routing_roles(tmp_path: Path) -> None:
