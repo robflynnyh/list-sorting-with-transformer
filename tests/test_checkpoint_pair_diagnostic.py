@@ -61,3 +61,17 @@ def test_aggregate_rows_reports_paired_wins_and_ties() -> None:
 def test_aggregate_rows_rejects_empty_input() -> None:
     with pytest.raises(ValueError, match="at least one comparison row"):
         MODULE.aggregate_rows([])
+
+
+def test_parse_generation_seeds_requires_unique_nonnegative_values() -> None:
+    assert MODULE.parse_generation_seeds("7,11,13") == (7, 11, 13)
+    with pytest.raises(
+        MODULE.argparse.ArgumentTypeError,
+        match="unique nonnegative",
+    ):
+        MODULE.parse_generation_seeds("7,7")
+    with pytest.raises(
+        MODULE.argparse.ArgumentTypeError,
+        match="unique nonnegative",
+    ):
+        MODULE.parse_generation_seeds("-1,7")

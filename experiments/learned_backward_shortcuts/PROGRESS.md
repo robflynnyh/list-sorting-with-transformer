@@ -2158,9 +2158,44 @@ observed collapses on this seed. Both clip norms `1.0` and `0.1` retain
 `97.66%` through 5,000 steps, but clip `1.0` has better clean CE (`0.149`
 versus `0.172`). Gradients near the original collapse are already much smaller
 than `1.0`, so clipping acts through the early trajectory rather than directly
-clamping the failure step. The clip-1 run is continuing to 50,000 steps at
+clamping the failure step. Clip `1.0` retains `97.66%` through 10,000 updates,
+but reaches only `94.53%` at 20,000 and `94.92%` at 50,000. Clipping delays
+the instability but does not solve long-run retention. The complete run is on
 [W&B](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/pwesu763).
-The unmodified horizon-3,000 EGGROLL generation remains a clean comparison at
+
+The horizon-3,000 EGGROLL generation provides stronger evidence that the
+collapse boundary is the useful optimization target. Its four-candidate elite
+centroid was correctly rejected: it worsened fixed clean CE by `0.0245`.
+However, the best single population member was substantially better than the
+old centre on that trajectory (`0.2683 -> 0.2345` clean CE). Reconstructing
+that one-candidate update exposed why the centroid failed:
+
+| Update | Four-trajectory fixed CE change | Weaker-split regressions |
+| --- | ---: | ---: |
+| Half candidate | `-0.00777` (worse) | 1/4 |
+| Full candidate | **`+0.01011` (better)** | **0/4** |
+
+The full candidate therefore passes the robust acceptance rule while the
+half-step does not. This is not a fresh-data selection: all four trajectories
+were scored on the permanent 512-example fitness set. On a separate
+20-trajectory report-only audit, the accepted candidate tied weaker-split
+accuracy on all 20 trajectories and reduced mean clean CE slightly
+(`0.35160 -> 0.34913`, with 13/20 CE wins). It is a real but still small
+general improvement.
+
+Most importantly, replaying the known collapse trajectory with the accepted
+candidate keeps weaker-split accuracy at `97.66%` through step 3,000, where
+the old rule had fallen to `88.28%`. The candidate then falls to `95.31%` by
+step 3,200 and remains there through 5,000. The update therefore moves and
+softens the collapse rather than eliminating it.
+
+The next evolution stage should target this transition directly. Candidate
+forward models should run continuously to 3,600 updates and be ranked by their
+worst fixed-set CE at updates `2,800`, `3,000`, `3,200`, and `3,600`.
+Proposal acceptance should retain the existing four independent inner
+trajectories and permanent fitness set. This objective cannot reward a
+candidate merely for moving the collapse onto the other side of one endpoint.
+The unmodified horizon-3,000 generation is on
 [W&B](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/igb63vdn).
 
 Fixed-rule trajectory outputs:
@@ -2168,5 +2203,13 @@ Fixed-rule trajectory outputs:
 [`results/fixed_rule_best_seed_57155105_collapse_dense.jsonl`](results/fixed_rule_best_seed_57155105_collapse_dense.jsonl),
 [`results/fixed_rule_best_seed_57155105_collapse_fine.jsonl`](results/fixed_rule_best_seed_57155105_collapse_fine.jsonl),
 [`results/fixed_rule_best_seed_57155105_clip1_5k.jsonl`](results/fixed_rule_best_seed_57155105_clip1_5k.jsonl),
+[`results/fixed_rule_best_seed_57155105_clip01_5k.jsonl`](results/fixed_rule_best_seed_57155105_clip01_5k.jsonl),
 and
-[`results/fixed_rule_best_seed_57155105_clip01_5k.jsonl`](results/fixed_rule_best_seed_57155105_clip01_5k.jsonl).
+[`results/fixed_rule_best_seed_57155105_clip1_50k.jsonl`](results/fixed_rule_best_seed_57155105_clip1_50k.jsonl).
+
+Horizon-3,000 single-candidate outputs:
+[`results/random_h3000_g70_elite1_alpha05_fixed4_summary.json`](results/random_h3000_g70_elite1_alpha05_fixed4_summary.json),
+[`results/random_h3000_g70_elite1_alpha10_fixed4_summary.json`](results/random_h3000_g70_elite1_alpha10_fixed4_summary.json),
+[`results/random_h3000_g70_elite1_alpha10_audit20_summary.json`](results/random_h3000_g70_elite1_alpha10_audit20_summary.json),
+and
+[`results/random_h3000_g70_elite1_alpha10_best_seed_collapse.jsonl`](results/random_h3000_g70_elite1_alpha10_best_seed_collapse.jsonl).

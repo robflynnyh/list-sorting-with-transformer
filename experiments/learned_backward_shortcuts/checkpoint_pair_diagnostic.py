@@ -25,6 +25,15 @@ from list_sorting_transformer.shortcut_credit_experiment import (
 )
 
 
+def parse_generation_seeds(value: str) -> tuple[int, ...]:
+    seeds = tuple(int(item) for item in value.split(","))
+    if not seeds or min(seeds) < 0 or len(seeds) != len(set(seeds)):
+        raise argparse.ArgumentTypeError(
+            "generation seeds must be unique nonnegative integers"
+        )
+    return seeds
+
+
 def aggregate_rows(rows: list[dict[str, float]]) -> dict[str, float]:
     if not rows:
         raise ValueError("at least one comparison row is required")
@@ -88,6 +97,16 @@ def main() -> None:
     parser.add_argument("--replicates", type=int, default=20)
     parser.add_argument("--replicate-start", type=int, default=0)
     parser.add_argument("--generation-offset", type=int, default=1_000)
+    parser.add_argument(
+        "--generation-seeds",
+        type=parse_generation_seeds,
+        help="comma-separated explicit trajectory seeds",
+    )
+    parser.add_argument(
+        "--fixed-fitness",
+        action="store_true",
+        help="score every trajectory on the experiment's permanent fitness set",
+    )
     parser.add_argument("--horizon", type=int, required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--output", type=Path, required=True)
@@ -138,12 +157,45 @@ def main() -> None:
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
     rows: list[dict[str, float]] = []
 
-    for replicate in range(
-        args.replicate_start,
-        args.replicate_start + args.replicates,
-    ):
-        generation = args.generation_offset + replicate
-        generation_seed = config_a.seed * 1_000_003 + generation * 10_007
+    if args.generation_seeds is None:
+        replicate_seeds = tuple(
+            (
+                replicate,
+                config_a.seed * 1_000_003
+                + (args.generation_offset + replicate) * 10_007,
+            )
+            for replicate in range(
+                args.replicate_start,
+                args.replicate_start + args.replicates,
+            )
+        )
+    else:
+        replicate_seeds = tuple(enumerate(args.generation_seeds))
+
+    fixed_clean_batches = None
+    fixed_correct_batches = None
+    if args.fixed_fitness:
+        fixed_generator = torch.Generator().manual_seed(config_a.seed + 10_000)
+        fixed_clean_batches = make_fitness_batches(
+            config_a.fitness_examples,
+            min_length=config_a.min_length,
+            max_length=config_a.max_length,
+            batch_size=config_a.fitness_batch_size,
+            generator=fixed_generator,
+            vocabulary=vocabulary,
+            leak_placement=config_a.leak_placement,
+            device=device,
+        )
+        fixed_correct_batches = make_mode_batches(
+            config_a.correct_eval_examples,
+            leak_mode="correct",
+            config=config_a,
+            vocabulary=vocabulary,
+            generator=fixed_generator,
+            device=device,
+        )
+
+    for replicate, generation_seed in replicate_seeds:
         base_model = initialize_forward_model(
             config_a,
             vocabulary,
@@ -162,27 +214,31 @@ def main() -> None:
             generator=torch.Generator().manual_seed(generation_seed + 2),
             device=device,
         )
-        evaluation_generator = torch.Generator().manual_seed(
-            generation_seed + 4
-        )
-        clean_batches = make_fitness_batches(
-            config_a.fitness_examples,
-            min_length=config_a.min_length,
-            max_length=config_a.max_length,
-            batch_size=config_a.fitness_batch_size,
-            generator=evaluation_generator,
-            vocabulary=vocabulary,
-            leak_placement=config_a.leak_placement,
-            device=device,
-        )
-        correct_batches = make_mode_batches(
-            config_a.correct_eval_examples,
-            leak_mode="correct",
-            config=config_a,
-            vocabulary=vocabulary,
-            generator=evaluation_generator,
-            device=device,
-        )
+        if fixed_clean_batches is None or fixed_correct_batches is None:
+            evaluation_generator = torch.Generator().manual_seed(
+                generation_seed + 4
+            )
+            clean_batches = make_fitness_batches(
+                config_a.fitness_examples,
+                min_length=config_a.min_length,
+                max_length=config_a.max_length,
+                batch_size=config_a.fitness_batch_size,
+                generator=evaluation_generator,
+                vocabulary=vocabulary,
+                leak_placement=config_a.leak_placement,
+                device=device,
+            )
+            correct_batches = make_mode_batches(
+                config_a.correct_eval_examples,
+                leak_mode="correct",
+                config=config_a,
+                vocabulary=vocabulary,
+                generator=evaluation_generator,
+                device=device,
+            )
+        else:
+            clean_batches = fixed_clean_batches
+            correct_batches = fixed_correct_batches
         trajectory_a = train_forward_trajectory(
             config_a,
             base_state=base_state,
