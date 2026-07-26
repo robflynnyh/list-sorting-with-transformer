@@ -94,3 +94,31 @@ def test_plot_matched_controls(tmp_path: Path) -> None:
 
     assert output.exists()
     assert output.stat().st_size > 1_000
+
+
+def test_plot_matched_controls_prefers_heldout_metrics(tmp_path: Path) -> None:
+    rows = [
+        {
+            "generation": 10,
+            "heldout_center_rule/min_mode_accuracy": 0.2,
+            "heldout_center_rule/clean_loss": 2.1,
+            "heldout_center_rule/correct_leak_accuracy": 0.9,
+            "heldout_ordinary_rule/min_mode_accuracy": 0.1,
+            "heldout_ordinary_rule/clean_loss": 2.4,
+            "heldout_ordinary_rule/correct_leak_accuracy": 1.0,
+            "heldout_masked_training/min_mode_accuracy": 0.4,
+            "heldout_masked_training/clean_loss": 1.8,
+            "heldout_masked_training/correct_leak_accuracy": 0.6,
+            "robust/min_mode_accuracy": 0.8,
+            "robust/clean_loss": 0.7,
+            "robust/correct_leak_accuracy": 1.0,
+            "heldout_comparison/center_minus_ordinary_min_accuracy": 0.1,
+            "heldout_comparison/center_clean_loss_improvement_over_ordinary": 0.3,
+        }
+    ]
+    output = tmp_path / "heldout.png"
+
+    plot_matched_controls(rows, output)
+
+    assert output.exists()
+    assert output.stat().st_size > 1_000

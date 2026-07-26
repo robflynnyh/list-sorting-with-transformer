@@ -219,11 +219,40 @@ def plot_matched_controls(
         constrained_layout=True,
     )
     accuracy_axis, loss_axis, correct_axis, delta_axis = axes.flat
+    use_heldout = any(
+        "heldout_center_rule/min_mode_accuracy" in row
+        for row in rows
+    )
+    heldout_prefix = "heldout_" if use_heldout else ""
     trajectories = (
-        ("Evolved centre", "center_rule", "#1f77b4", "-"),
-        ("Ordinary leak training", "ordinary_rule", "#555555", "--"),
-        ("Masked training", "masked_training", "#2ca02c", "-."),
-        ("Most robust sampled rule", "robust", "#d62728", ":"),
+        (
+            "Evolved centre",
+            f"{heldout_prefix}center_rule",
+            "#1f77b4",
+            "-",
+        ),
+        (
+            "Ordinary leak training",
+            f"{heldout_prefix}ordinary_rule",
+            "#555555",
+            "--",
+        ),
+        (
+            "Masked training",
+            f"{heldout_prefix}masked_training",
+            "#2ca02c",
+            "-.",
+        ),
+        (
+            (
+                "Most robust sampled rule (outer set)"
+                if use_heldout
+                else "Most robust sampled rule"
+            ),
+            "robust",
+            "#d62728",
+            ":",
+        ),
     )
 
     for label, prefix, color, linestyle in trajectories:
@@ -281,7 +310,11 @@ def plot_matched_controls(
     _plot(
         delta_axis,
         rows,
-        "comparison/center_minus_ordinary_min_accuracy",
+        (
+            "heldout_comparison/center_minus_ordinary_min_accuracy"
+            if use_heldout
+            else "comparison/center_minus_ordinary_min_accuracy"
+        ),
         label="Accuracy advantage",
         color="#1f77b4",
     )
@@ -289,7 +322,11 @@ def plot_matched_controls(
     _plot(
         loss_delta_axis,
         rows,
-        "comparison/center_clean_loss_improvement_over_ordinary",
+        (
+            "heldout_comparison/center_clean_loss_improvement_over_ordinary"
+            if use_heldout
+            else "comparison/center_clean_loss_improvement_over_ordinary"
+        ),
         label="Clean-loss improvement",
         color="#ff7f0e",
         linestyle="--",
@@ -309,7 +346,13 @@ def plot_matched_controls(
     for axis in axes.flat:
         axis.set_xlabel("EGGROLL generation")
         axis.grid(alpha=0.2)
-    figure.suptitle("Matched shortcut-learning controls")
+    figure.suptitle(
+        (
+            "Matched shortcut-learning controls: fresh held-out evaluation"
+            if use_heldout
+            else "Matched shortcut-learning controls"
+        )
+    )
     figure.savefig(output_path, dpi=180)
     plt.close(figure)
 
