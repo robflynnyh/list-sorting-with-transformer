@@ -288,6 +288,7 @@ def candidate_summary(
     clean_metrics: list[ShortcutMetrics],
     correct_metrics: list[ShortcutMetrics],
 ) -> dict[str, float]:
+    pair_deltas = fitnesses[0::2] - fitnesses[1::2]
     clean_losses = torch.tensor([metrics.loss for metrics in clean_metrics])
     clean_accuracies = torch.tensor(
         [metrics.accuracy for metrics in clean_metrics]
@@ -304,12 +305,40 @@ def candidate_summary(
     return {
         "fitness/mean": float(fitnesses.mean()),
         "fitness/std": float(fitnesses.std(unbiased=False)),
+        "fitness/pair_delta_mean_abs": float(pair_deltas.abs().mean()),
+        "fitness/pair_delta_rms": float(pair_deltas.square().mean().sqrt()),
         "fitness/max": float(fitnesses.max()),
         "clean/loss_mean": float(clean_losses.mean()),
         "clean/accuracy_mean": float(clean_accuracies.mean()),
         "clean/masked_accuracy_mean": float(masked_accuracies.mean()),
         "clean/incorrect_accuracy_mean": float(incorrect_accuracies.mean()),
         "correct_leak/accuracy_mean": float(correct_accuracies.mean()),
+    }
+
+
+def center_update_summary(
+    backward_rule: LearnedBackwardRule,
+    previous_parameters: dict[str, Tensor],
+) -> dict[str, float]:
+    """Summarize the actual EGGROLL center displacement."""
+
+    squared_update = 0.0
+    squared_center = 0.0
+    parameter_count = 0
+    for name, parameter in backward_rule.named_parameters():
+        previous = previous_parameters[name]
+        squared_update += float((parameter - previous).square().sum())
+        squared_center += float(previous.square().sum())
+        parameter_count += parameter.numel()
+
+    update_rms = (squared_update / parameter_count) ** 0.5
+    center_rms = (squared_center / parameter_count) ** 0.5
+    gates = backward_rule.gates.detach()
+    return {
+        "outer/update_rms": update_rms,
+        "outer/update_to_center_rms": update_rms / max(center_rms, 1e-12),
+        "backward/center_gate_abs_mean": float(gates.abs().mean()),
+        "backward/center_gate_abs_max": float(gates.abs().max()),
     }
 
 
@@ -513,6 +542,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             clean_results,
             correct_results,
         )
+        summary.update(center_update_summary(center_rule, center_parameters))
         summary.update(
             {
                 "generation": generation,

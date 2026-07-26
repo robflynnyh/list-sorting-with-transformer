@@ -150,12 +150,17 @@ therefore eventually reach at least 80 updates.
 - Candidate clean-loss improvement had mean `0.3372`, standard deviation
   `0.0839`, and maximum `0.4678`. The nontrivial standard deviation confirms
   that the initial population produces a usable EGGROLL ranking signal.
-- Mean correction/original gradient RMS was `0.1078`, with gradient cosine
-  `0.9903`. This is consistent with the preceding calibration rather than an
-  ineffective or unstable perturbation.
+- For the first positive probe candidate, mean correction/original gradient RMS
+  was `0.1078`, with gradient cosine `0.9903`. This is consistent with the
+  preceding calibration rather than an ineffective or unstable perturbation.
+  These are candidate diagnostics, not measurements of the unperturbed centre.
 - Initial post-training diagnostic accuracy was close to chance at horizon 10:
   `9.0%` with a correct leak, `11.8%` with a masked leak, and `9.6%` with an
   incorrect leak. This is expected before the inner horizon reaches the point
   where ordinary Adam learns the shortcut.
 - The detached run writes checkpoints every 10 generations under
   `artifacts/learned_backward_shortcuts/learned-backward-p64-curriculum-seed7/`.
+- Subsequent launches also log antithetic pair-difference magnitude, the actual
+  centre update RMS, and centre gate magnitudes. Those diagnostics distinguish
+  a useful directional EGGROLL signal from candidate spread caused only by
+  perturbation size.
