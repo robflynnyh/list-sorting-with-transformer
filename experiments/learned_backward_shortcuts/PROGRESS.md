@@ -557,3 +557,21 @@ experiment both show that horizons 10 and 20 precede shortcut learning, and
 router fitness separation there is correspondingly negligible. This keeps
 the side experiment focused on the first informative regime without changing
 the task, model, population, or clean fitness set.
+
+The population-64 router run is:
+
+- Run:
+  [`attention-router-p64-h40-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/qwslfp4a)
+- Hardware: two-GPU candidate sharding on GPUs 2 and 3.
+- Generation-0 runtime: `27.2s`.
+- Clean CE / accuracy: `2.3055 / 17.1%`.
+- Masked / incorrect-hint accuracy: `19.7% / 14.5%`.
+- Distinct predicted digits / modal fraction: `10 / 10` and `39.0%`.
+- Antithetic pair-difference RMS: `0.00057`.
+- Standardized-fitness SD: `0.127`.
+- Centre update / centre RMS: `2.88%`.
+
+Thus the full population retains a directional, nonzero estimator without
+prediction collapse or an excessive first update. As with the main rule,
+multiple generations are needed to separate evolution from the randomly reset
+forward model.
