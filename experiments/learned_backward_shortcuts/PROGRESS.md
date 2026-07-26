@@ -195,3 +195,27 @@ the `+/-` comparisons contain a material directional ranking signal. The
 centre itself is still close to ordinary backpropagation after 10 generations;
 the larger correction statistics in the main run measure one perturbed probe
 candidate rather than the centre.
+
+#### Generation-30 short-horizon behavior
+
+The horizon remained at 10 through generation 30. Fitness showed no sustained
+increase, and the plateau state reached 24 stale generations out of the
+required 50. More importantly, the centre gates moved back toward the identity
+anchor:
+
+| Checkpoint | Mean absolute gate | Maximum absolute gate |
+| ---: | ---: | ---: |
+| 10 | 0.0120 | 0.0158 |
+| 20 | 0.0089 | 0.0130 |
+| 30 | 0.0028 | 0.0034 |
+
+At this short horizon the learned rule is therefore recovering ordinary
+backpropagation, not growing an arbitrary correction. That is a useful
+sanity result: biased Adam does not reliably exploit the leak until later, so
+there is little shortcut-specific credit to correct in only 10 updates. The
+important test begins after the curriculum reaches horizons 80 and above.
+
+The PyTorch update was also checked line by line against the official EGGROLL
+implementation. Both use rank-one `A @ B.T` matrix perturbations, standardize
+fitness over the full population, average `score * sigma * perturbation`, and
+multiply the update by `sqrt(population_size)` before the SGD step.
