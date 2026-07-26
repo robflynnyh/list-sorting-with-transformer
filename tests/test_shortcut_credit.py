@@ -32,6 +32,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     candidate_summary,
     center_rule_summary,
     center_routing_summary,
+    heldout_candidate_summary,
     initialize_fresh_backward_rule,
     load_checkpoint,
     make_inner_batches,
@@ -412,6 +413,84 @@ def test_trajectory_summary_can_omit_fitness_for_heldout_data() -> None:
 
     assert "heldout_center_rule/fitness" not in summary
     assert summary["heldout_center_rule/min_mode_accuracy"] == 0.4
+
+
+def test_heldout_candidate_summary_keeps_outer_selection_indices() -> None:
+    outer_clean = [
+        ShortcutMetrics(
+            2.0,
+            0.2,
+            {"masked": 0.2, "incorrect": 0.1},
+            {"masked": 1.8, "incorrect": 2.0},
+            8,
+            7,
+            0.2,
+        ),
+        ShortcutMetrics(
+            1.0,
+            0.7,
+            {"masked": 0.8, "incorrect": 0.7},
+            {"masked": 0.9, "incorrect": 1.0},
+            10,
+            10,
+            0.15,
+        ),
+    ]
+    heldout_clean = [
+        ShortcutMetrics(
+            1.8,
+            0.3,
+            {"masked": 0.3, "incorrect": 0.2},
+            {"masked": 1.7, "incorrect": 2.0},
+            9,
+            8,
+            0.2,
+        ),
+        ShortcutMetrics(
+            1.0,
+            0.7,
+            {"masked": 0.7, "incorrect": 0.6},
+            {"masked": 0.9, "incorrect": 1.0},
+            10,
+            10,
+            0.15,
+        ),
+    ]
+    heldout_correct = [
+        ShortcutMetrics(
+            0.8,
+            0.8,
+            {"correct": 0.8},
+            {"correct": 0.8},
+            9,
+            9,
+            0.2,
+        ),
+        ShortcutMetrics(
+            0.7,
+            0.9,
+            {"correct": 0.9},
+            {"correct": 0.7},
+            10,
+            10,
+            0.15,
+        ),
+    ]
+
+    summary = heldout_candidate_summary(
+        torch.tensor([0.9, 0.1]),
+        outer_clean,
+        heldout_clean,
+        heldout_correct,
+    )
+
+    assert summary["best/heldout_min_mode_accuracy"] == pytest.approx(0.2)
+    assert summary["best/heldout_correct_leak_accuracy"] == pytest.approx(0.8)
+    assert summary["robust/heldout_min_mode_accuracy"] == pytest.approx(0.6)
+    assert summary["robust/heldout_correct_leak_accuracy"] == pytest.approx(
+        0.9
+    )
+    assert summary["heldout_candidates/outer_fitness_correlation"] < -0.99
 
 
 def test_forward_trajectory_evaluates_outer_loop_unseen_batches() -> None:

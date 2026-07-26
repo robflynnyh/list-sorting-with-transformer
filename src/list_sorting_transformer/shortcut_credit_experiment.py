@@ -498,6 +498,8 @@ def train_candidate_shard(
     inner_batches: tuple[ShortcutBatch, ...],
     fitness_batches: tuple[ShortcutBatch, ...],
     correct_batches: tuple[ShortcutBatch, ...],
+    heldout_fitness_batches: tuple[ShortcutBatch, ...],
+    heldout_correct_batches: tuple[ShortcutBatch, ...],
     initial_clean_metrics: ShortcutMetrics,
 ) -> list[
     tuple[
@@ -529,6 +531,12 @@ def train_candidate_shard(
     worker_correct_batches = tuple(
         batch.to(device) for batch in correct_batches
     )
+    worker_heldout_fitness_batches = tuple(
+        batch.to(device) for batch in heldout_fitness_batches
+    )
+    worker_heldout_correct_batches = tuple(
+        batch.to(device) for batch in heldout_correct_batches
+    )
     direction_indices = {spec[1] for spec in candidate_specs}
     worker_directions = {
         index: move_eggroll_direction(directions[index], device)
@@ -553,6 +561,8 @@ def train_candidate_shard(
                 isinstance(worker_center_rule, AttentionRoutingRule)
                 or candidate_index == 0
             ),
+            heldout_fitness_batches=worker_heldout_fitness_batches,
+            heldout_correct_batches=worker_heldout_correct_batches,
         )
         results.append(
             (candidate_index, fitness, trajectory, statistics)
@@ -690,6 +700,117 @@ def candidate_summary(
         ),
         "robust/prediction_mode_fraction": (
             robust_clean.prediction_mode_fraction
+        ),
+    }
+
+
+def heldout_candidate_summary(
+    fitnesses: Tensor,
+    outer_clean_metrics: list[ShortcutMetrics],
+    heldout_clean_metrics: list[ShortcutMetrics],
+    heldout_correct_metrics: list[ShortcutMetrics],
+) -> dict[str, float]:
+    """Measure whether outer-selected candidates generalize to fresh data."""
+
+    if not (
+        len(outer_clean_metrics)
+        == len(heldout_clean_metrics)
+        == len(heldout_correct_metrics)
+        == fitnesses.numel()
+    ):
+        raise ValueError("candidate metric groups must have matching lengths")
+    heldout_masked = torch.tensor(
+        [
+            metrics.mode_accuracy["masked"]
+            for metrics in heldout_clean_metrics
+        ]
+    )
+    heldout_incorrect = torch.tensor(
+        [
+            metrics.mode_accuracy["incorrect"]
+            for metrics in heldout_clean_metrics
+        ]
+    )
+    heldout_min_accuracy = torch.minimum(
+        heldout_masked,
+        heldout_incorrect,
+    )
+    heldout_worst_loss = torch.tensor(
+        [
+            max(
+                metrics.mode_loss["masked"],
+                metrics.mode_loss["incorrect"],
+            )
+            for metrics in heldout_clean_metrics
+        ]
+    )
+    heldout_correct = torch.tensor(
+        [metrics.accuracy for metrics in heldout_correct_metrics]
+    )
+    centered_fitness = fitnesses.float().cpu() - fitnesses.float().cpu().mean()
+    heldout_objective = -heldout_worst_loss
+    centered_heldout = heldout_objective - heldout_objective.mean()
+    denominator = (
+        centered_fitness.square().sum()
+        * centered_heldout.square().sum()
+    ).sqrt()
+    objective_correlation = (
+        float(
+            (centered_fitness * centered_heldout).sum()
+            / denominator
+        )
+        if float(denominator) > 0
+        else 0.0
+    )
+    best_index = int(fitnesses.argmax())
+    robust_index = max(
+        range(len(outer_clean_metrics)),
+        key=lambda index: min(
+            outer_clean_metrics[index].mode_accuracy["masked"],
+            outer_clean_metrics[index].mode_accuracy["incorrect"],
+        ),
+    )
+    best_clean = heldout_clean_metrics[best_index]
+    robust_clean = heldout_clean_metrics[robust_index]
+    return {
+        "heldout_candidates/masked_accuracy_mean": float(
+            heldout_masked.mean()
+        ),
+        "heldout_candidates/incorrect_accuracy_mean": float(
+            heldout_incorrect.mean()
+        ),
+        "heldout_candidates/min_mode_accuracy_mean": float(
+            heldout_min_accuracy.mean()
+        ),
+        "heldout_candidates/correct_leak_accuracy_mean": float(
+            heldout_correct.mean()
+        ),
+        "heldout_candidates/outer_fitness_correlation": (
+            objective_correlation
+        ),
+        "best/heldout_clean_loss": best_clean.loss,
+        "best/heldout_masked_accuracy": best_clean.mode_accuracy["masked"],
+        "best/heldout_incorrect_accuracy": (
+            best_clean.mode_accuracy["incorrect"]
+        ),
+        "best/heldout_min_mode_accuracy": float(
+            heldout_min_accuracy[best_index]
+        ),
+        "best/heldout_correct_leak_accuracy": float(
+            heldout_correct[best_index]
+        ),
+        "robust/heldout_clean_loss": robust_clean.loss,
+        "robust/heldout_masked_accuracy": (
+            robust_clean.mode_accuracy["masked"]
+        ),
+        "robust/heldout_incorrect_accuracy": (
+            robust_clean.mode_accuracy["incorrect"]
+        ),
+        "robust/heldout_min_mode_accuracy": float(
+            heldout_min_accuracy[robust_index]
+        ),
+        "robust/heldout_correct_leak_accuracy": float(
+            heldout_correct[robust_index]
         ),
     }
 
@@ -1097,6 +1218,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                         isinstance(center_rule, AttentionRoutingRule)
                         or candidate_index == 0
                     ),
+                    heldout_fitness_batches=heldout_fitness_batches,
+                    heldout_correct_batches=heldout_correct_batches,
                 )
                 candidate_outputs.append(
                     (
@@ -1127,6 +1250,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                         inner_batches=inner_batches,
                         fitness_batches=fitness_batches,
                         correct_batches=correct_batches,
+                        heldout_fitness_batches=heldout_fitness_batches,
+                        heldout_correct_batches=heldout_correct_batches,
                         initial_clean_metrics=initial_clean_metrics,
                     )
                     for shard, worker_device in zip(
@@ -1142,6 +1267,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         fitness_values = []
         clean_results = []
         correct_results = []
+        heldout_clean_results = []
+        heldout_correct_results = []
         candidate_statistics: list[list[dict[str, float]]] = []
         captured_statistics: list[dict[str, float]] = []
         for candidate_index, fitness, trajectory, statistics in (
@@ -1150,6 +1277,15 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             fitness_values.append(fitness)
             clean_results.append(trajectory.clean)
             correct_results.append(trajectory.correct)
+            if (
+                trajectory.heldout_clean is None
+                or trajectory.heldout_correct is None
+            ):
+                raise RuntimeError(
+                    "candidate held-out metrics were not produced"
+                )
+            heldout_clean_results.append(trajectory.heldout_clean)
+            heldout_correct_results.append(trajectory.heldout_correct)
             candidate_statistics.append(statistics)
             if candidate_index == 0 and statistics:
                 captured_statistics = statistics
@@ -1252,6 +1388,14 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             fitness_tensor.cpu(),
             clean_results,
             correct_results,
+        )
+        summary.update(
+            heldout_candidate_summary(
+                fitness_tensor.cpu(),
+                clean_results,
+                heldout_clean_results,
+                heldout_correct_results,
+            )
         )
         summary.update(
             center_rule_summary(
