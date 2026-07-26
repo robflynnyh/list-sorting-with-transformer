@@ -1540,3 +1540,13 @@ moving-hint selectivity has not yet emerged.
 
 Raw output:
 [`results/uniform_routing_g072_seed7.jsonl`](results/uniform_routing_g072_seed7.jsonl).
+
+The next checkpoint continuation will also evaluate every population candidate
+on the fresh held-out set. This is necessary because the currently reported
+"best" and "most robust" candidates are selected on the reused outer fitness
+set. The added metrics retain those outer-set selection indices, then report
+their fresh masked, wrong-hint, correct-hint, and clean-CE results. They also
+measure the population correlation between outer fitness and fresh negative
+worst-mode CE. The active generation-10 process cannot load new code, so this
+instrumentation will begin from its durable checkpoint 20 without resetting
+the evolved centre.
