@@ -1149,6 +1149,21 @@ correct-leak performance. Continuing both branches remains informative:
 medium tests whether aggressive suppression destabilizes, while conservative
 tests whether slower updates reach the same oracle range more cleanly.
 
+By generations 130-139, both branches are in the horizon-80 oracle range:
+
+| Generations 130-139 | Clean CE | Masked | Wrong hint | Correct leak | Minimum clean split | Robust candidate min | Centre leak ratio | Distinct predictions |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Conservative (`0.02`) | 2.3800 | 22.62% | 15.27% | 49.30% | 15.27% | 18.71% | 0.222 | 10.0 |
+| Medium (`0.05`) | 2.3090 | 21.84% | 17.89% | 37.73% | 17.81% | 20.04% | 0.089 | 9.8 |
+
+The weaker-split difference has narrowed to `2.54` percentage points.
+Conservative has improved in every window since generations 80-89 and now uses
+all ten output values throughout the window. Medium remains more selective and
+closer to its sampled-candidate ceiling, but its advantage is primarily speed:
+the two trajectories are approaching the same suppressive horizon-80
+solution. Both continue so later windows can test whether conservative retains
+better correct-leak and diversity behavior after convergence.
+
 ![Horizon-80 centre-step comparison](results/attention_router_center_step_comparison.png)
 
 #### Learned routing structure
