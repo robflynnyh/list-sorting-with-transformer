@@ -34,9 +34,13 @@ class OracleLeakRouter(AttentionRoutingRule):
         config: AttentionRoutingRuleConfig,
         *,
         gate_value: float,
+        scope: str,
     ) -> None:
         super().__init__(config)
         self.gate_value = gate_value
+        if scope not in {"direct", "hint_source"}:
+            raise ValueError("unknown oracle routing scope")
+        self.scope = scope
         self.leak_token = ShortcutPointerVocabulary(
             "numbers",
             10,
@@ -59,7 +63,14 @@ class OracleLeakRouter(AttentionRoutingRule):
             raise ValueError("every prompt must contain exactly one leak")
         rows = leak_positions[:, 0]
         hint_positions = leak_positions[:, 1] + 1
-        gate[rows, :, -1, hint_positions] = self.gate_value
+        if self.scope == "direct":
+            gate[rows, :, -1, hint_positions] = self.gate_value
+        else:
+            for row, hint_position in zip(
+                rows.tolist(),
+                hint_positions.tolist(),
+            ):
+                gate[row, :, :, hint_position] = self.gate_value
         return tuple(gate.clone() for _ in range(self.config.forward_layers))
 
 
@@ -72,6 +83,7 @@ def train_condition(
     correct_batches: tuple,
     route_output_projection: bool | None,
     gate_value: float,
+    oracle_scope: str,
     device: torch.device,
 ) -> dict[str, float]:
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
@@ -93,6 +105,7 @@ def train_condition(
                 route_output_projection=route_output_projection,
             ),
             gate_value=gate_value,
+            scope=oracle_scope,
         ).to(device)
 
     optimizer = torch.optim.Adam(
@@ -129,6 +142,17 @@ def main() -> None:
         "--leak-placement",
         choices=("suffix", "random_list"),
         default="suffix",
+    )
+    parser.add_argument(
+        "--oracle-scope",
+        choices=("direct", "hint_source"),
+        default="direct",
+        help="suppress the final-query edge or every edge sourced at the hint",
+    )
+    parser.add_argument(
+        "--include-masked-training",
+        action="store_true",
+        help="include ordinary Adam trained on otherwise matched masked hints",
     )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--device", default="cuda:0")
@@ -186,6 +210,20 @@ def main() -> None:
             generator=torch.Generator().manual_seed(generation_seed + 2),
             device=device,
         )
+        masked_inner_batches = (
+            make_inner_batches(
+                config,
+                horizon=horizon,
+                vocabulary=vocabulary,
+                generator=torch.Generator().manual_seed(
+                    generation_seed + 2
+                ),
+                device=device,
+                leak_mode="masked",
+            )
+            if args.include_masked_training
+            else None
+        )
         for name, route_projection in (
             ("ordinary", None),
             ("qkv_only", False),
@@ -199,11 +237,40 @@ def main() -> None:
                 correct_batches=correct_batches,
                 route_output_projection=route_projection,
                 gate_value=args.gate_value,
+                oracle_scope=args.oracle_scope,
                 device=device,
             )
-            row = {"horizon": horizon, "condition": name, **metrics}
+            row = {
+                "horizon": horizon,
+                "condition": name,
+                "oracle_scope": args.oracle_scope,
+                **metrics,
+            }
             results.append(row)
             print(json.dumps(row, sort_keys=True), flush=True)
+            if name == "ordinary" and masked_inner_batches is not None:
+                masked_metrics = train_condition(
+                    config=config,
+                    base_state=base_state,
+                    inner_batches=masked_inner_batches,
+                    fitness_batches=fitness_batches,
+                    correct_batches=correct_batches,
+                    route_output_projection=None,
+                    gate_value=args.gate_value,
+                    oracle_scope=args.oracle_scope,
+                    device=device,
+                )
+                masked_row = {
+                    "horizon": horizon,
+                    "condition": "masked_training",
+                    "oracle_scope": args.oracle_scope,
+                    **masked_metrics,
+                }
+                results.append(masked_row)
+                print(
+                    json.dumps(masked_row, sort_keys=True),
+                    flush=True,
+                )
 
     if args.output:
         output_path = Path(args.output)

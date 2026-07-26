@@ -1239,3 +1239,41 @@ oracle must be measured at several inner horizons. That diagnostic must first
 show that ordinary Adam learns the randomly located hint and that suppressing
 the marker-following edge prevents the shortcut. Otherwise a failed outer
 search would be uninterpretable.
+
+The preliminary same-seed CPU diagnostic establishes a delayed but clean
+shortcut transition:
+
+| Horizon | Ordinary correct hint | Ordinary masked | Ordinary wrong hint | Clean CE |
+| ---: | ---: | ---: | ---: | ---: |
+| 40 | 42.97% | 17.58% | 19.14% | 2.3413 |
+| 80 | 42.97% | 25.00% | 21.09% | 2.2673 |
+| 160 | 100.0% | 19.53% | 0.0% | 3.6322 |
+
+Randomizing the leak location delays shortcut acquisition from horizon 80 to
+horizon 160, but does not remove it. This makes fixed horizon 160 the first
+meaningful EGGROLL setting for the semantic control.
+
+The initial dynamic oracle suppressed only the final query's direct edge to
+the hint. At horizon 160 it retained `99.2%` correct-hint accuracy and reached
+`31.25% / 41.02%` masked/wrong-hint accuracy. The hint can therefore propagate
+indirectly through later tokens. A stronger oracle suppresses every backward
+attention edge whose source is the token following `<LEAK>`:
+
+| Horizon-160 training rule | Correct hint | Masked | Wrong hint | Clean accuracy | Clean CE |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Ordinary correct-hint Adam | 100.0% | 19.53% | 0.0% | 9.77% | 3.6322 |
+| Ordinary masked-hint Adam | 87.50% | 80.86% | 76.17% | 78.52% | 1.2708 |
+| Hint-source oracle, Q/K/V only | 89.06% | 76.95% | 77.34% | 77.15% | 0.9958 |
+| Hint-source oracle, including output projection | 57.03% | 27.73% | 25.78% | 26.76% | 2.1173 |
+
+The Q/K/V-only oracle nearly reproduces learning from clean masked-hint data
+despite training exclusively on examples containing the correct shortcut. Its
+lower clean CE is not accompanied by output collapse: all ten values are used.
+Routing the output-projection parameter gradient is substantially worse on
+this task and should be disabled in the semantic EGGROLL run.
+
+These are CPU prerequisites, not the final benchmark. They must be replicated
+on a GPU after the active fixed-suffix runs release one. If replicated, the
+first semantic search should start from a fresh shared router at fixed horizon
+160, use Q/K/V routing only, optimize worst-mode clean CE, and retain the
+matched masked-training and hand-coded oracle controls.

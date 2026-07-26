@@ -21,6 +21,7 @@ from .shortcut_credit import (
     BackwardRule,
     BackwardRuleConfig,
     EggrollDirection,
+    LeakMode,
     LeakPlacement,
     LearnedBackwardRule,
     ShortcutBatch,
@@ -253,6 +254,7 @@ def make_inner_batches(
     vocabulary: ShortcutPointerVocabulary,
     generator: torch.Generator,
     device: torch.device,
+    leak_mode: LeakMode = "correct",
 ) -> tuple[ShortcutBatch, ...]:
     return tuple(
         make_shortcut_batch(
@@ -265,7 +267,7 @@ def make_inner_batches(
                     generator=generator,
                 )
             ),
-            leak_mode="correct",
+            leak_mode=leak_mode,
             generator=generator,
             vocabulary=vocabulary,
             leak_placement=config.leak_placement,
