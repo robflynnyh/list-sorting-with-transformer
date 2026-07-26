@@ -36,6 +36,7 @@ sort-language-model-transfer = "list_sorting_transformer.language_model_transfer
 sort-shortcut-credit = "list_sorting_transformer.shortcut_credit_experiment:main"
 sort-shortcut-credit-plot = "list_sorting_transformer.shortcut_credit_plot:main"
 sort-shortcut-credit-compare-plot = "list_sorting_transformer.shortcut_credit_compare_plot:main"
+sort-shortcut-credit-routing-plot = "list_sorting_transformer.shortcut_credit_routing_plot:main"
 
 [build-system]
 requires = ["setuptools>=68"]

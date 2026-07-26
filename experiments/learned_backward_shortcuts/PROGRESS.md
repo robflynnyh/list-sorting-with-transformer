@@ -1115,3 +1115,50 @@ increase the inner horizon after its horizon-80 behavior is shown to be
 stable.
 
 ![Horizon-80 centre-step comparison](results/attention_router_center_step_comparison.png)
+
+#### Learned routing structure
+
+The shared routing map was inspected directly on 256 fixed-seed, length-20
+prompts. The table reports the absolute backward gate from each source role to
+the final `<QUERY>` token; `1.0` would leave that edge unchanged and lower
+values mean stronger suppression:
+
+| Checkpoint | Hint | `<LEAK>` | Separator | Pointer | Pointer value | Target value | Query self | All query sources |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Generation 80 | 0.247 | 0.272 | 0.280 | 0.473 | 0.465 | 0.443 | 0.235 | 0.453 |
+| Conservative generation 110 | 0.153 | 0.170 | 0.180 | 0.477 | 0.464 | 0.437 | 0.150 | 0.448 |
+| Medium generation 110 | 0.087 | 0.100 | 0.114 | 0.516 | 0.497 | 0.463 | 0.088 | 0.479 |
+
+![Attention-router gates by token role](results/attention_router_routing_roles.png)
+
+The medium branch has not achieved its result by shrinking every backward
+route. Relative to generation 80, it suppresses the answer hint by another
+`65%` while slightly increasing the gates to the pointer, pointer value, true
+target value, and the average query source. It also suppresses the nearby
+`<LEAK>`, separator, and query-self routes. The learned rule is therefore a
+broader positional anti-recency filter around the output query, not an exact
+copy of the hand-coded single-edge oracle.
+
+Replacing the correct hint with `<MASK>` or an incorrect value changes each
+reported medium-checkpoint gate by at most `0.006`. Thus the router is
+responding to token roles and positions rather than recognizing a particular
+answer digit.
+
+The same diagnostic at other lengths exposes a current generalization limit:
+
+| List length | Hint | Pointer | Target value | All query sources | Hint / pointer |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 0.142 | 0.767 | 0.765 | 0.675 | 0.185 |
+| 20 | 0.087 | 0.516 | 0.463 | 0.479 | 0.169 |
+| 32 | 0.095 | 0.328 | 0.281 | 0.298 | 0.290 |
+| 64 | 0.065 | 0.028 | 0.023 | 0.035 | 2.321 |
+| 128 | 0.098 | 0.071 | 0.074 | 0.073 | 1.380 |
+
+Within the training range of lengths 8-32, the hint is preferentially
+suppressed relative to the useful list positions. At unseen length 64 the map
+instead suppresses almost every route, and the pointer is suppressed more than
+the hint. These gate measurements are not forward-task accuracies, but they
+show that the current routing network has not learned length-extrapolating
+selectivity. A later length-generalization experiment should test normalized
+relative-position inputs or explicitly train the router on a wider length
+range; it should not assume that a longer inner horizon alone fixes this.
