@@ -1541,6 +1541,26 @@ moving-hint selectivity has not yet emerged.
 Raw output:
 [`results/uniform_routing_g072_seed7.jsonl`](results/uniform_routing_g072_seed7.jsonl).
 
+Through fresh held-out generations 10--18, the centre has not improved on
+ordinary training:
+
+| Fresh held-out aggregate | Evolved centre | Ordinary training | Masked training |
+| --- | ---: | ---: | ---: |
+| Mean weaker-split accuracy | 4.56% | 6.60% | 18.53% |
+| Mean correct-hint accuracy | 90.89% | 86.02% | 36.02% |
+| Mean clean CE | 3.028 | 2.938 | 2.193 |
+
+The paired centre-minus-ordinary difference is `-2.04` percentage points for
+weaker-split accuracy and `-0.090` for clean-CE improvement. Only two of nine
+rows favor the centre on weaker-split accuracy, while three favor it on CE.
+The centre's higher correct-hint accuracy alongside worse clean behavior is
+more consistent with retaining shortcut reliance than learning the underlying
+pointer function. Across these rows its mean gate falls to `0.661`, while the
+mean all-hint-source relative gate remains `1.000`. The present evidence is
+therefore negative for centre learning and still shows global rather than
+moving-hint-specific suppression. This remains an interim result before the
+longer horizon requested for learned credit assignment.
+
 The next checkpoint continuation will also evaluate every population candidate
 on the fresh held-out set. This is necessary because the currently reported
 "best" and "most robust" candidates are selected on the reused outer fitness
