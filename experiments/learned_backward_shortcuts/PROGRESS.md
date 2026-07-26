@@ -420,3 +420,36 @@ Two-GPU sharding became authoritative from checkpoint 110:
 - Generation-110 clean CE / pair-difference RMS: `2.5367 / 0.0691`.
 - Clean accuracy remained at chance with `1.11 / 10` distinct predicted
   digits and a `98.8%` modal fraction.
+
+#### Evolved-centre perturbation recalibration
+
+The fixed `sigma=0.08` search radius stopped being local as the backward-rule
+centre evolved. Across generations 102-120 at horizon 40, the first probe
+candidate had mean gradient cosine `0.845` and correction/original-gradient
+RMS ratio `0.251`. Candidate models remained collapsed throughout those 19
+generations: mean clean accuracy was `10.0%`, mean clean CE was `2.5439`, and
+the modal prediction fraction was `99.5%`.
+
+Generation 110 was replayed from the same checkpoint, with the same forward
+initialization and batches, across smaller fixed search radii:
+
+| Sigma | Clean CE | Clean acc. | Masked | Wrong hint | Distinct digits | Modal fraction | Pair delta RMS | Gradient cosine |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.080 | 2.5367 | 10.7% | 11.1% | 10.3% | 1.11 | 98.8% | 0.0691 | 0.87837 |
+| 0.040 | 2.4586 | 11.9% | 12.7% | 11.0% | 2.09 | 88.8% | 0.0421 | 0.99716 |
+| 0.020 | 2.4085 | 15.3% | 16.5% | 14.1% | 5.39 | 59.7% | 0.0444 | 0.99990 |
+| 0.010 | 2.3807 | 17.3% | 18.1% | 16.6% | 8.41 | 36.6% | 0.0355 | 0.99997 |
+| 0.005 | 2.3786 | 17.4% | 18.1% | 16.8% | 9.73 | 33.5% | 0.0266 | 0.99998 |
+
+This reverses the initial horizon-10 calibration because the mapping from
+backward-rule parameters to gradients is nonlinear and the centre is no
+longer the identity initialization. At the evolved centre, `sigma=0.08`
+mostly tests destructive, nonlocal backward rules rather than estimating a
+useful local search direction.
+
+`sigma=0.01` is the selected continuation point. Halving it again yields only
+`0.0021` lower CE and `0.13` percentage points more clean accuracy, while
+reducing antithetic pair separation by `25%` and halving the magnitude of the
+paper-style EGGROLL centre update. The `sigma=0.08` continuation was stopped
+at its durable generation-120 checkpoint; generations 121-124 after that
+checkpoint are excluded from the authoritative lineage.

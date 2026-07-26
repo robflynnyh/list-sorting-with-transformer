@@ -730,6 +730,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "generation": generation,
                 "horizon": horizon,
                 "population_size": config.population_size,
+                "search/sigma": config.sigma,
                 "candidate_device_count": len(candidate_devices),
                 "outer_learning_rate": outer_learning_rate,
                 "fitness/standardized_mean": float(standardized.mean()),
