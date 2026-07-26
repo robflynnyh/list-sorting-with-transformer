@@ -219,3 +219,31 @@ The PyTorch update was also checked line by line against the official EGGROLL
 implementation. Both use rank-one `A @ B.T` matrix perturbations, standardize
 fitness over the full population, average `score * sigma * perturbation`, and
 multiply the update by `sqrt(population_size)` before the SGD step.
+
+#### Curriculum metric correction
+
+The first 40 generations exposed a problem in the original plateau detector.
+Mean candidate fitness was correlated `0.913` with the randomly initialized
+forward model's initial clean loss. This does **not** bias EGGROLL's candidate
+ranking within a generation, because every candidate shares the same initial
+model and the initial term cancels. It does make fitness reduction a poor
+quantity for comparing progress across generations with different initial
+models.
+
+Horizon promotion now tracks negative post-training clean CE instead. This is
+the actual cross-generation objective and has much lower dependence on the
+initial model. The run was stopped after generation 45, then resumed from its
+durable generation-40 backward-rule checkpoint with plateau state recomputed
+from generations 0-39 using the corrected objective. Metrics from the six
+superseded, post-checkpoint generations were preserved separately rather than
+treated as part of the continued trajectory.
+
+- Original W&B run through the checkpoint:
+  <https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/yupx3qo8>
+- Continued run: `learned-backward-p64-clean-plateau-resume40-seed7`
+- Migrated checkpoint:
+  `checkpoint_000040_clean_plateau.pt`
+- Recomputed state at generation 40: clean-loss EMA `2.6894`, best EMA
+  `2.6523`, and 39 stale generations.
+- New metrics explicitly log the curriculum objective, its EMA, stale
+  generation count, and promotion events.

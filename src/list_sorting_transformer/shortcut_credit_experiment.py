@@ -265,15 +265,15 @@ def linear_outer_learning_rate(
 def update_plateau_state(
     state: PlateauState,
     *,
-    fitness: float,
+    objective: float,
     config: ShortcutCreditExperimentConfig,
 ) -> bool:
     if state.ema_fitness is None:
-        state.ema_fitness = fitness
+        state.ema_fitness = objective
     else:
         state.ema_fitness = (
             config.plateau_ema_decay * state.ema_fitness
-            + (1.0 - config.plateau_ema_decay) * fitness
+            + (1.0 - config.plateau_ema_decay) * objective
         )
     if state.ema_fitness > state.best_ema_fitness + config.plateau_min_delta:
         state.best_ema_fitness = state.ema_fitness
@@ -570,17 +570,32 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 for item in captured_statistics
             ) / len(captured_statistics)
 
+        # Mean fitness cannot be compared across generations because each
+        # generation starts from a different model and initial clean loss.
+        # Post-training clean CE is the stable cross-generation objective.
+        plateau_objective = -summary["clean/loss_mean"]
+        promote_horizon = update_plateau_state(
+            plateau_state,
+            objective=plateau_objective,
+            config=config,
+        )
+        summary.update(
+            {
+                "curriculum/objective_negative_clean_loss": plateau_objective,
+                "curriculum/ema_objective": plateau_state.ema_fitness,
+                "curriculum/stale_generations": plateau_state.stale_generations,
+                "curriculum/promoted": float(
+                    promote_horizon and horizon < config.max_horizon
+                ),
+            }
+        )
+
         with metrics_path.open("a") as handle:
             handle.write(json.dumps(summary, sort_keys=True) + "\n")
         print(json.dumps(summary, sort_keys=True), flush=True)
         if wandb_run is not None:
             wandb_run.log(summary, step=generation)
 
-        promote_horizon = update_plateau_state(
-            plateau_state,
-            fitness=summary["fitness/mean"],
-            config=config,
-        )
         if promote_horizon and horizon < config.max_horizon:
             horizon = min(
                 config.max_horizon,

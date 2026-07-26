@@ -18,6 +18,11 @@ from list_sorting_transformer.shortcut_credit import (
     sample_eggroll_direction,
     shortcut_loss,
 )
+from list_sorting_transformer.shortcut_credit_experiment import (
+    PlateauState,
+    ShortcutCreditExperimentConfig,
+    update_plateau_state,
+)
 
 
 def small_vocabulary() -> ShortcutPointerVocabulary:
@@ -203,3 +208,18 @@ def test_paper_update_moves_toward_the_fitter_antithetic_candidate() -> None:
         displacement = parameter - center[name]
         alignment = (displacement * direction.tensors[name]).sum()
         assert alignment > 0
+
+
+def test_plateau_state_tracks_a_comparable_objective() -> None:
+    config = ShortcutCreditExperimentConfig(
+        plateau_patience=2,
+        plateau_min_delta=0.01,
+        plateau_ema_decay=0.0,
+    )
+    state = PlateauState()
+
+    assert not update_plateau_state(state, objective=-2.0, config=config)
+    assert not update_plateau_state(state, objective=-2.0, config=config)
+    assert update_plateau_state(state, objective=-2.0, config=config)
+    assert not update_plateau_state(state, objective=-1.9, config=config)
+    assert state.stale_generations == 0
