@@ -28,6 +28,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     candidate_fitness,
     candidate_summary,
+    center_rule_summary,
     center_routing_summary,
     initialize_fresh_backward_rule,
     load_checkpoint,
@@ -252,6 +253,35 @@ def test_routing_population_summary_links_selectivity_to_fitness() -> None:
     assert abs(
         summary["backward/best_fitness_leak_relative_gate"] - 0.8
     ) < 1e-6
+
+
+def test_center_rule_summary_reports_unperturbed_training_metrics() -> None:
+    clean = ShortcutMetrics(
+        2.0,
+        0.5,
+        {"masked": 0.6, "incorrect": 0.4},
+        {"masked": 1.9, "incorrect": 2.1},
+        8,
+        7,
+        0.2,
+    )
+    correct = ShortcutMetrics(
+        1.2,
+        0.8,
+        {"correct": 0.8},
+        {"correct": 1.2},
+        9,
+        8,
+        0.2,
+    )
+
+    summary = center_rule_summary(0.7, clean, correct)
+
+    assert summary["center_rule/fitness"] == 0.7
+    assert summary["center_rule/masked_accuracy"] == 0.6
+    assert summary["center_rule/incorrect_accuracy"] == 0.4
+    assert summary["center_rule/min_mode_accuracy"] == 0.4
+    assert summary["center_rule/correct_leak_accuracy"] == 0.8
 
 
 def test_worst_mode_fitness_uses_the_weaker_clean_split() -> None:

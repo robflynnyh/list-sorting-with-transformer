@@ -283,6 +283,7 @@ def train_candidate(
     initial_clean_metrics: ShortcutMetrics,
     device: torch.device,
     capture_statistics: bool,
+    perturbation_sigma: float | None = None,
 ) -> tuple[float, ShortcutMetrics, ShortcutMetrics, list[dict[str, float]]]:
     model = initialize_forward_model(
         config,
@@ -299,7 +300,11 @@ def train_candidate(
         backward_rule,
         center_parameters,
         direction,
-        sigma=config.sigma,
+        sigma=(
+            config.sigma
+            if perturbation_sigma is None
+            else perturbation_sigma
+        ),
         sign=sign,
     )
     backward_rule.capture_statistics = capture_statistics
@@ -341,6 +346,31 @@ def candidate_fitness(
         trained_worst = max(trained.mode_loss.values())
         return initial_worst - trained_worst
     raise ValueError(f"unknown fitness objective: {objective}")
+
+
+def center_rule_summary(
+    fitness: float,
+    clean: ShortcutMetrics,
+    correct: ShortcutMetrics,
+) -> dict[str, float]:
+    return {
+        "center_rule/fitness": fitness,
+        "center_rule/clean_loss": clean.loss,
+        "center_rule/clean_accuracy": clean.accuracy,
+        "center_rule/masked_accuracy": clean.mode_accuracy["masked"],
+        "center_rule/incorrect_accuracy": clean.mode_accuracy["incorrect"],
+        "center_rule/min_mode_accuracy": min(
+            clean.mode_accuracy["masked"],
+            clean.mode_accuracy["incorrect"],
+        ),
+        "center_rule/correct_leak_accuracy": correct.accuracy,
+        "center_rule/unique_value_predictions": float(
+            clean.unique_value_prediction_count
+        ),
+        "center_rule/prediction_mode_fraction": (
+            clean.prediction_mode_fraction
+        ),
+    }
 
 
 def parse_candidate_devices(
@@ -968,6 +998,26 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             if candidate_index == 0 and statistics:
                 captured_statistics = statistics
 
+        (
+            center_fitness,
+            center_clean,
+            center_correct,
+            _,
+        ) = train_candidate(
+            config,
+            base_state=base_state,
+            center_rule=center_rule,
+            center_parameters=center_parameters,
+            direction=directions[0],
+            sign=1,
+            inner_batches=inner_batches,
+            fitness_batches=fitness_batches,
+            correct_batches=correct_batches,
+            initial_clean_metrics=initial_clean_metrics,
+            device=device,
+            capture_statistics=False,
+            perturbation_sigma=0.0,
+        )
         fitness_tensor = torch.tensor(fitness_values, device=device)
         outer_learning_rate = linear_outer_learning_rate(config, generation)
         standardized = paper_eggroll_update(
@@ -983,6 +1033,13 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             fitness_tensor.cpu(),
             clean_results,
             correct_results,
+        )
+        summary.update(
+            center_rule_summary(
+                center_fitness,
+                center_clean,
+                center_correct,
+            )
         )
         if isinstance(center_rule, AttentionRoutingRule):
             summary.update(

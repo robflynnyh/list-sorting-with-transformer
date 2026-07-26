@@ -996,3 +996,34 @@ candidate reached `23.83%` masked and `16.02%` wrong-hint accuracy with a
 `0.330` leak ratio and `63.28%` correct-leak accuracy. Population-mean
 wrong-hint accuracy rose to `0.88%`. The centre itself still requires repeated
 updates before these candidate gains can be considered learned.
+
+#### Unperturbed-centre evaluation
+
+The harness previously measured the centre's routing map but only trained
+perturbed candidates. It now also trains one forward model with the exact
+unperturbed centre rule on the same inner batches and evaluates it on the same
+fitness batches. These `center_rule/*` metrics add only one trajectory per
+generation and answer whether EGGROLL has actually accumulated the candidate
+behavior.
+
+The diagnostic-enabled continuation is:
+
+- Run:
+  [`attention-router-shared-h80-center-eval-resume80-seed7`](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/059lhje5)
+- Source:
+  `attention-router-shared-h80-long-p64-popdiag-resume70-seed7/checkpoint_000080.pt`.
+- The backward parameters, horizon, population, radius, and outer learning-rate
+  schedule are unchanged; only the additional centre evaluation is new.
+
+At generation 80:
+
+| Rule | Masked | Wrong hint | Correct leak | Minimum clean split |
+| --- | ---: | ---: | ---: | ---: |
+| Unperturbed centre | 19.92% | 0.0% | 100% | 0.0% |
+| Fittest candidate | 20.31% | 12.11% | 56.25% | 12.11% |
+| Best robust candidate | 25.39% | 12.50% | 67.19% | 12.50% |
+
+Thus the local population contains useful horizon-80 rules, but the learned
+centre has not yet incorporated them. Sustained centre-rule accuracy, rather
+than isolated candidate accuracy or routing selectivity alone, is now the
+success criterion.

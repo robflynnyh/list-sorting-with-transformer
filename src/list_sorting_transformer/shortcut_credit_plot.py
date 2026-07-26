@@ -80,6 +80,14 @@ def plot_chained_metrics(
         label="post-training clean CE",
         color="#16697a",
     )
+    _plot_series(
+        loss_axis,
+        rows,
+        "center_rule/clean_loss",
+        label="unperturbed centre clean CE",
+        color="#003049",
+        linestyle="--",
+    )
     loss_axis.axhline(
         2.302585,
         color="#777777",
@@ -135,6 +143,14 @@ def plot_chained_metrics(
         label="best candidate's weaker clean split",
         color="#7b2cbf",
         linestyle=":",
+    )
+    _plot_series(
+        accuracy_axis,
+        rows,
+        "center_rule/min_mode_accuracy",
+        label="unperturbed centre weaker clean split",
+        color="#264653",
+        linestyle="-.",
     )
     accuracy_axis.axhline(
         0.1,
