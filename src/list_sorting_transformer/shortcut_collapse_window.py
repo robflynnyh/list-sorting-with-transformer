@@ -271,6 +271,94 @@ def replay_collapse_window(
     )
 
 
+def slice_collapse_window(
+    config: ShortcutCreditExperimentConfig,
+    *,
+    window: CollapseWindow,
+    backward_rule: BackwardRule,
+    fitness_batches: tuple[ShortcutBatch, ...],
+    start_offset: int,
+    window_steps: int,
+    device: torch.device,
+    evaluation_batch_size: int = 64,
+) -> CollapseWindow:
+    """Advance a saved centre state and retain one exact subwindow."""
+
+    if start_offset < 0:
+        raise ValueError("collapse slice offset must be nonnegative")
+    if window_steps < 1:
+        raise ValueError("collapse slice must contain at least one step")
+    if start_offset + window_steps > len(window.batches):
+        raise ValueError("collapse slice exceeds the source window")
+
+    vocabulary = ShortcutPointerVocabulary("numbers", 10)
+    model = initialize_forward_model(
+        config,
+        vocabulary,
+        initialization_seed=None,
+        device=device,
+    )
+    model.load_state_dict(window.model_state)
+    optimizer = optimizer_for_model(
+        model,
+        learning_rate=config.forward_learning_rate,
+        state=window.optimizer_state,
+        device=device,
+    )
+    backward_rule.capture_statistics = False
+    for batch in window.batches[:start_offset]:
+        train_forward_step(
+            model,
+            optimizer,
+            batch.to(device),
+            backward_rule,
+        )
+
+    start_metrics = evaluate_shortcut_batches(
+        model,
+        fitness_batches,
+        evaluation_batch_size=evaluation_batch_size,
+    )
+    sliced = CollapseWindow(
+        generation_seed=window.generation_seed,
+        start_step=window.start_step + start_offset,
+        model_state={
+            name: tensor.detach().clone().cpu()
+            for name, tensor in model.state_dict().items()
+        },
+        optimizer_state=clone_state_tree(
+            optimizer.state_dict(),
+            device="cpu",
+        ),
+        batches=tuple(
+            batch.to("cpu")
+            for batch in window.batches[
+                start_offset : start_offset + window_steps
+            ]
+        ),
+        start_metrics=start_metrics,
+        center_end_metrics=start_metrics,
+    )
+    replay = replay_collapse_window(
+        config,
+        window=sliced,
+        backward_rule=backward_rule,
+        fitness_batches=fitness_batches,
+        device=device,
+        checkpoint_steps=(window_steps,),
+        evaluation_batch_size=evaluation_batch_size,
+    )
+    return CollapseWindow(
+        generation_seed=sliced.generation_seed,
+        start_step=sliced.start_step,
+        model_state=sliced.model_state,
+        optimizer_state=sliced.optimizer_state,
+        batches=sliced.batches,
+        start_metrics=sliced.start_metrics,
+        center_end_metrics=replay.end_metrics,
+    )
+
+
 def metrics_from_dict(values: dict[str, Any]) -> ShortcutMetrics:
     return ShortcutMetrics(**values)
 

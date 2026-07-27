@@ -2621,3 +2621,59 @@ of the conditional projection computationally practical.
 
 Tracked output:
 [`results/state_conditioned_collapse_summary.json`](results/state_conditioned_collapse_summary.json).
+
+### Trimmed collapse-window evolution
+
+The serialized trajectories were reduced to the 30--40 updates immediately
+around each collapse while preserving the exact model weights, Adam moments,
+training batches, and fixed clean evaluation set. The six ranking slices
+contain 215 updates in total, versus 1,000 updates in the source windows. A
+focused test confirms that replaying a sliced window reaches the same centre
+state and metrics as replaying the corresponding part of the original
+trajectory.
+
+Three P64 generations perturbed only the state-conditioned projection, with
+the radius halved after every rejected proposal:
+
+| Population seed | Sigma | Best maximin change | Windows non-worse | Accepted |
+| --- | ---: | ---: | ---: | --- |
+| `840001` | 0.00328125 | -5.08 points | 3/6 | no |
+| `840002` | 0.001640625 | -4.30 points | 3/6 | no |
+| `840003` | 0.0008203125 | -7.03 points | 3/6 | no |
+
+No candidate improved all six windows. At the two smaller radii, two candidates
+did improve at least five of six, so the search was expanded rather than
+discarding the collapse objective.
+
+A staged P256 search screened candidates on the first two collapse slices.
+Seventeen candidates improved both. Dense replay of all 17 survivors on the
+remaining four found candidate 131 as the nearest robust update:
+
+| Ranking seed | Minimum-accuracy change |
+| --- | ---: |
+| `57,155,105` | +1.17 points |
+| `7,700,511` | +22.27 points |
+| `67,172,112` | +2.34 points |
+| `67,122,077` | 0.00 points |
+| `67,112,070` | -0.39 points |
+| `67,222,147` | +5.86 points |
+
+The sole regression is one example in the 256-example failing mode, but it is
+not only an accuracy tie-break: worst-mode CE also rises slightly from
+`1.9608` to `1.9669`. A ranking-only line search from `0.5x` through `1.5x`
+did not remove that regression without causing a larger collapse elsewhere.
+At `1.1x`, for example, the six changes were `+0.78`, `+21.48`, `0.00`,
+`0.00`, `-0.39`, and `+8.20` points.
+
+The proposal is therefore rejected under the predeclared nonnegative-maximin
+rule. The two reserved seed-disjoint full trajectories were deliberately not
+opened. This phase confirms that the collapse onset is a strong and efficient
+fitness signal: individual candidates repeatedly rescue severe events by
+20--40 points. It does not yet show that one rank-one conditional update
+generalizes across collapse types. The next change should increase the update's
+conditional capacity or optimize a higher-rank population update, while
+retaining these exact collapse slices and sealed full-trajectory acceptance
+gate.
+
+Tracked output:
+[`results/trimmed_collapse_evolution_summary.json`](results/trimmed_collapse_evolution_summary.json).

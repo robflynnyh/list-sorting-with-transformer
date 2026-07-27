@@ -9,6 +9,7 @@ from list_sorting_transformer.shortcut_collapse_window import (
     load_collapse_window,
     replay_collapse_window,
     save_collapse_window,
+    slice_collapse_window,
 )
 from list_sorting_transformer.shortcut_credit import (
     ShortcutPointerVocabulary,
@@ -109,4 +110,74 @@ def test_capture_replay_restores_model_and_adam_state(tmp_path) -> None:
     assert loaded_replay.end_metrics.loss == pytest.approx(
         window.center_end_metrics.loss,
         abs=1e-7,
+    )
+
+
+def test_slice_window_preserves_exact_center_trajectory() -> None:
+    config = tiny_config()
+    device = torch.device("cpu")
+    vocabulary = ShortcutPointerVocabulary("numbers", 10)
+    rule = initialize_fresh_backward_rule(
+        config,
+        vocabulary,
+        device=device,
+    )
+    generator = torch.Generator().manual_seed(config.seed + 10_000)
+    fitness_batches = make_fitness_batches(
+        config.fitness_examples,
+        min_length=config.min_length,
+        max_length=config.max_length,
+        batch_size=config.fitness_batch_size,
+        generator=generator,
+        vocabulary=vocabulary,
+        leak_placement=config.leak_placement,
+        device=device,
+    )
+    window = capture_collapse_window(
+        config,
+        backward_rule=rule,
+        generation_seed=4321,
+        start_step=2,
+        window_steps=5,
+        fitness_batches=fitness_batches,
+        device=device,
+    )
+    full_replay = replay_collapse_window(
+        config,
+        window=window,
+        backward_rule=rule,
+        fitness_batches=fitness_batches,
+        device=device,
+        checkpoint_steps=(2, 5),
+    )
+
+    sliced = slice_collapse_window(
+        config,
+        window=window,
+        backward_rule=rule,
+        fitness_batches=fitness_batches,
+        start_offset=2,
+        window_steps=3,
+        device=device,
+    )
+    sliced_replay = replay_collapse_window(
+        config,
+        window=sliced,
+        backward_rule=rule,
+        fitness_batches=fitness_batches,
+        device=device,
+        checkpoint_steps=(3,),
+    )
+
+    assert sliced.start_step == 4
+    assert sliced.start_metrics.loss == pytest.approx(
+        full_replay.checkpoint_metrics[0][1].loss,
+        abs=1e-7,
+    )
+    assert sliced_replay.end_metrics.loss == pytest.approx(
+        full_replay.checkpoint_metrics[1][1].loss,
+        abs=1e-7,
+    )
+    assert sliced_replay.end_metrics.mode_accuracy == (
+        full_replay.checkpoint_metrics[1][1].mode_accuracy
     )
