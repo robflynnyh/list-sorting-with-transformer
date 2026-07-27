@@ -1,0 +1,66 @@
+{
+  "status": "oracle_gate_passed",
+  "leak_placement": "random_list",
+  "accepted_mechanism": "attention_scores",
+  "reversal_scale": 4.0,
+  "forward_learning_rate": 0.0001,
+  "fixed_set_results": [
+    {
+      "seed": 7,
+      "horizon": 3000,
+      "clean_accuracy": 1.0,
+      "masked_accuracy": 1.0,
+      "incorrect_accuracy": 1.0,
+      "correct_hint_accuracy": 1.0
+    },
+    {
+      "seed": 13,
+      "horizon": 3000,
+      "clean_accuracy": 1.0,
+      "masked_accuracy": 1.0,
+      "incorrect_accuracy": 1.0,
+      "correct_hint_accuracy": 1.0
+    }
+  ],
+  "fresh_results": [
+    {
+      "model_seed": 7,
+      "evaluation_seed": 47007,
+      "examples": 20000,
+      "clean_accuracy": 1.0,
+      "masked_accuracy": 1.0,
+      "incorrect_accuracy": 1.0
+    },
+    {
+      "model_seed": 7,
+      "evaluation_seed": 57007,
+      "examples": 20000,
+      "clean_accuracy": 0.99985,
+      "masked_accuracy": 1.0,
+      "incorrect_accuracy": 0.9997
+    },
+    {
+      "model_seed": 13,
+      "evaluation_seed": 47007,
+      "examples": 20000,
+      "clean_accuracy": 1.0,
+      "masked_accuracy": 1.0,
+      "incorrect_accuracy": 1.0
+    },
+    {
+      "model_seed": 13,
+      "evaluation_seed": 57007,
+      "examples": 20000,
+      "clean_accuracy": 1.0,
+      "masked_accuracy": 1.0,
+      "incorrect_accuracy": 1.0
+    }
+  ],
+  "rejected_diagnostics": {
+    "complete_attention_reversal": "Prevented shortcut fitting but stayed near chance on the real task.",
+    "qkv_reversal": "Temporarily improved then collapsed near chance.",
+    "attention_mass_penalty": "Weak penalties retained the shortcut; strong penalties damaged shared Q/K learning.",
+    "gradient_clipping": "Reduced performance relative to the lower-learning-rate solution."
+  },
+  "raw_outputs": "/exp/exp4/acp21rjf/.scratch/list-sorting-token-reversal/random_optim"
+}

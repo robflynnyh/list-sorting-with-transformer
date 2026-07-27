@@ -151,6 +151,42 @@ def test_score_only_reversal_keeps_ordinary_value_credit() -> None:
     torch.testing.assert_close(reversed_value.grad, ordinary_value.grad)
 
 
+def test_attention_penalty_matches_explicit_selected_mass_loss() -> None:
+    generator = torch.Generator().manual_seed(29)
+    explicit_query = torch.randn(
+        1, 2, 3, 4, generator=generator, requires_grad=True
+    )
+    explicit_key = torch.randn(
+        1, 2, 3, 4, generator=generator, requires_grad=True
+    )
+    value = torch.randn(1, 2, 3, 4, generator=generator)
+    routed_query = explicit_query.detach().clone().requires_grad_()
+    routed_key = explicit_key.detach().clone().requires_grad_()
+    scale = explicit_query.shape[-1] ** -0.5
+    causal = torch.ones(3, 3, dtype=torch.bool).tril()
+    scores = (
+        explicit_query @ explicit_key.transpose(-2, -1) * scale
+    ).masked_fill(~causal, float("-inf"))
+    weights = scores.softmax(dim=-1)
+    explicit_loss = weights[..., 1].mean()
+
+    routed, _ = source_reversed_scaled_dot_product_attention(
+        routed_query,
+        routed_key,
+        value,
+        source_multipliers=torch.tensor([[1.0, -1.0, 1.0]]),
+        reverse_score_credit=False,
+        reverse_value_credit=False,
+        attention_penalty_strength=1.0,
+        is_causal=True,
+    )
+    explicit_loss.backward()
+    (routed * 0).sum().backward()
+
+    torch.testing.assert_close(routed_query.grad, explicit_query.grad)
+    torch.testing.assert_close(routed_key.grad, explicit_key.grad)
+
+
 @pytest.mark.parametrize("leak_placement", ("suffix", "random_list"))
 def test_oracle_selects_answer_after_leak(leak_placement: str) -> None:
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
@@ -249,4 +285,11 @@ def test_reversal_scope_validation() -> None:
             token_ids,
             torch.tensor([[False, True]]),
             reversal_scope="unknown",
+        )
+    with pytest.raises(ValueError):
+        forward_with_source_gradient_reversal(
+            model,
+            token_ids,
+            torch.tensor([[False, True]]),
+            reversal_scope="attention_penalty",
         )

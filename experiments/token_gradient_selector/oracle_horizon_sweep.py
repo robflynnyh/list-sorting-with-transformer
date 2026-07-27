@@ -65,11 +65,17 @@ def main() -> None:
     parser.add_argument("--min-length", type=int, default=8)
     parser.add_argument("--max-length", type=int, default=32)
     parser.add_argument("--forward-learning-rate", type=float, default=3e-4)
+    parser.add_argument("--gradient-clip-norm", type=float)
     parser.add_argument("--reversal-scale", type=float, default=1.0)
     parser.add_argument(
         "--reversal-scope",
         choices=REVERSAL_SCOPES,
         default="complete_attention",
+    )
+    parser.add_argument(
+        "--attention-penalty-strength",
+        type=float,
+        default=0.0,
     )
     parser.add_argument(
         "--leak-placement",
@@ -82,6 +88,13 @@ def main() -> None:
     args = parser.parse_args()
     if args.reversal_scale <= 0:
         raise ValueError("reversal-scale must be positive")
+    if args.attention_penalty_strength < 0:
+        raise ValueError("attention-penalty-strength must be nonnegative")
+    if (
+        args.gradient_clip_norm is not None
+        and args.gradient_clip_norm <= 0
+    ):
+        raise ValueError("gradient-clip-norm must be positive")
 
     device = torch.device(args.device)
     max_horizon = args.horizons[-1]
@@ -157,13 +170,20 @@ def main() -> None:
                     vocabulary,
                     reversal_scale=args.reversal_scale,
                     reversal_scope=args.reversal_scope,
+                    attention_penalty_strength=(
+                        args.attention_penalty_strength
+                    ),
                 )
             else:
                 loss = shortcut_loss(model, batch)
             loss.backward()
             gradient_norm = torch.nn.utils.clip_grad_norm_(
                 model.parameters(),
-                float("inf"),
+                (
+                    float("inf")
+                    if args.gradient_clip_norm is None
+                    else args.gradient_clip_norm
+                ),
             )
             optimizer.step()
             recent_losses.append(float(loss.detach()))
@@ -178,6 +198,10 @@ def main() -> None:
             "horizon": horizon,
             "reversal_scale": args.reversal_scale,
             "reversal_scope": args.reversal_scope,
+            "attention_penalty_strength": (
+                args.attention_penalty_strength
+            ),
+            "gradient_clip_norm": args.gradient_clip_norm,
             "train_loss_last_100": (
                 sum(recent_losses) / len(recent_losses)
                 if recent_losses
@@ -210,6 +234,10 @@ def main() -> None:
                 "horizon": completed_steps,
                 "reversal_scale": args.reversal_scale,
                 "reversal_scope": args.reversal_scope,
+                "attention_penalty_strength": (
+                    args.attention_penalty_strength
+                ),
+                "gradient_clip_norm": args.gradient_clip_norm,
                 "config": asdict(config),
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),

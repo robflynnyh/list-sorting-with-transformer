@@ -13,7 +13,12 @@ from .shortcut_credit import (
 )
 
 
-REVERSAL_SCOPES = ("attention_scores", "qkv", "complete_attention")
+REVERSAL_SCOPES = (
+    "attention_penalty",
+    "attention_scores",
+    "qkv",
+    "complete_attention",
+)
 
 
 def oracle_shortcut_selection(
@@ -61,6 +66,7 @@ def forward_with_source_gradient_reversal(
     *,
     reversal_scale: float = 1.0,
     reversal_scope: str = "complete_attention",
+    attention_penalty_strength: float = 0.0,
 ) -> Tensor:
     """Run the model with one shared source-reversal mask in every layer."""
 
@@ -68,6 +74,15 @@ def forward_with_source_gradient_reversal(
         raise ValueError("selection must match token_ids")
     if reversal_scope not in REVERSAL_SCOPES:
         raise ValueError(f"unknown reversal scope: {reversal_scope}")
+    if attention_penalty_strength < 0:
+        raise ValueError("attention_penalty_strength must be nonnegative")
+    if (
+        reversal_scope == "attention_penalty"
+        and attention_penalty_strength == 0
+    ):
+        raise ValueError(
+            "attention_penalty scope requires a positive penalty strength"
+        )
     multipliers = source_gradient_multipliers(
         selection,
         reversal_scale=reversal_scale,
@@ -77,8 +92,14 @@ def forward_with_source_gradient_reversal(
         hidden = block(
             hidden,
             backward_source_multipliers=multipliers,
+            reverse_source_score_credit=(
+                reversal_scope != "attention_penalty"
+            ),
             reverse_source_value_credit=(
-                reversal_scope != "attention_scores"
+                reversal_scope in {"qkv", "complete_attention"}
+            ),
+            source_attention_penalty_strength=(
+                attention_penalty_strength
             ),
             route_source_output_projection=(
                 reversal_scope == "complete_attention"
@@ -95,6 +116,7 @@ def oracle_reversal_shortcut_loss(
     *,
     reversal_scale: float = 1.0,
     reversal_scope: str = "complete_attention",
+    attention_penalty_strength: float = 0.0,
 ) -> Tensor:
     """Cross entropy with oracle reversal of the leaked answer source."""
 
@@ -105,5 +127,6 @@ def oracle_reversal_shortcut_loss(
         selection,
         reversal_scale=reversal_scale,
         reversal_scope=reversal_scope,
+        attention_penalty_strength=attention_penalty_strength,
     )
     return F.cross_entropy(logits[:, -1], batch.targets)

@@ -76,9 +76,13 @@ class _SourceReversedAttentionBackward(torch.autograd.Function):
         value: Tensor,
         weights: Tensor,
         source_multipliers: Tensor,
+        reverse_score_credit: bool,
         reverse_value_credit: bool,
+        attention_penalty_strength: float,
     ) -> Tensor:
+        ctx.reverse_score_credit = reverse_score_credit
         ctx.reverse_value_credit = reverse_value_credit
+        ctx.attention_penalty_strength = attention_penalty_strength
         ctx.save_for_backward(
             query,
             key,
@@ -92,7 +96,17 @@ class _SourceReversedAttentionBackward(torch.autograd.Function):
     def backward(
         ctx: object,
         output_gradient: Tensor,
-    ) -> tuple[None, Tensor, Tensor, Tensor, None, None, None]:
+    ) -> tuple[
+        None,
+        Tensor,
+        Tensor,
+        Tensor,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]:
         (
             query,
             key,
@@ -108,13 +122,30 @@ class _SourceReversedAttentionBackward(torch.autograd.Function):
             if ctx.reverse_value_credit
             else weights
         ).transpose(-2, -1) @ output_gradient
-        weight_gradient = (
-            output_gradient @ value.transpose(-2, -1)
-        ) * edge_multipliers
+        weight_gradient = output_gradient @ value.transpose(-2, -1)
+        if ctx.reverse_score_credit:
+            weight_gradient = weight_gradient * edge_multipliers
         score_gradient = weights * (
             weight_gradient
             - (weight_gradient * weights).sum(dim=-1, keepdim=True)
         )
+        if ctx.attention_penalty_strength:
+            selected_sources = source_multipliers.lt(0).to(weights.dtype)
+            penalty_weight_gradient = (
+                selected_sources[:, None, None, :]
+                * ctx.attention_penalty_strength
+                / (
+                    weights.shape[0]
+                    * weights.shape[1]
+                    * weights.shape[2]
+                )
+            )
+            score_gradient = score_gradient + weights * (
+                penalty_weight_gradient
+                - (
+                    penalty_weight_gradient * weights
+                ).sum(dim=-1, keepdim=True)
+            )
         query_gradient = (score_gradient @ key) * scale
         key_gradient = (
             score_gradient.transpose(-2, -1) @ query
@@ -124,6 +155,8 @@ class _SourceReversedAttentionBackward(torch.autograd.Function):
             query_gradient,
             key_gradient,
             value_gradient,
+            None,
+            None,
             None,
             None,
             None,
@@ -252,7 +285,9 @@ def source_reversed_scaled_dot_product_attention(
     value: Tensor,
     *,
     source_multipliers: Tensor,
+    reverse_score_credit: bool = True,
     reverse_value_credit: bool = True,
+    attention_penalty_strength: float = 0.0,
     attention_mask: Tensor | None = None,
     is_causal: bool = False,
 ) -> tuple[Tensor, Tensor]:
@@ -265,6 +300,8 @@ def source_reversed_scaled_dot_product_attention(
         )
     if not bool(torch.isfinite(source_multipliers).all()):
         raise ValueError("source multipliers must be finite")
+    if attention_penalty_strength < 0:
+        raise ValueError("attention penalty strength must be nonnegative")
 
     attended = F.scaled_dot_product_attention(
         query,
@@ -309,7 +346,9 @@ def source_reversed_scaled_dot_product_attention(
         value,
         weights,
         multipliers,
+        reverse_score_credit,
         reverse_value_credit,
+        attention_penalty_strength,
     )
     return reversed_attended, backward_attended
 
@@ -528,7 +567,9 @@ class CausalSelfAttention(nn.Module):
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
         backward_source_multipliers: Tensor | None = None,
+        reverse_source_score_credit: bool = True,
         reverse_source_value_credit: bool = True,
+        source_attention_penalty_strength: float = 0.0,
         route_source_output_projection: bool = True,
         route_output_projection: bool = False,
     ) -> tuple[Tensor, KeyValueCache]:
@@ -619,7 +660,11 @@ class CausalSelfAttention(nn.Module):
                     key,
                     value,
                     source_multipliers=backward_source_multipliers,
+                    reverse_score_credit=reverse_source_score_credit,
                     reverse_value_credit=reverse_source_value_credit,
+                    attention_penalty_strength=(
+                        source_attention_penalty_strength
+                    ),
                     attention_mask=combined_mask,
                     is_causal=combined_mask is None,
                 )
@@ -682,7 +727,9 @@ class CausalSelfAttention(nn.Module):
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
         backward_source_multipliers: Tensor | None = None,
+        reverse_source_score_credit: bool = True,
         reverse_source_value_credit: bool = True,
+        source_attention_penalty_strength: float = 0.0,
         route_source_output_projection: bool = True,
         route_output_projection: bool = False,
     ) -> Tensor:
@@ -691,7 +738,11 @@ class CausalSelfAttention(nn.Module):
             attention_mask=attention_mask,
             backward_attention_gate=backward_attention_gate,
             backward_source_multipliers=backward_source_multipliers,
+            reverse_source_score_credit=reverse_source_score_credit,
             reverse_source_value_credit=reverse_source_value_credit,
+            source_attention_penalty_strength=(
+                source_attention_penalty_strength
+            ),
             route_source_output_projection=route_source_output_projection,
             route_output_projection=route_output_projection,
         )
@@ -727,7 +778,9 @@ class TransformerBlock(nn.Module):
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
         backward_source_multipliers: Tensor | None = None,
+        reverse_source_score_credit: bool = True,
         reverse_source_value_credit: bool = True,
+        source_attention_penalty_strength: float = 0.0,
         route_source_output_projection: bool = True,
         route_output_projection: bool = False,
     ) -> Tensor:
@@ -737,7 +790,11 @@ class TransformerBlock(nn.Module):
                 attention_mask=attention_mask,
                 backward_attention_gate=backward_attention_gate,
                 backward_source_multipliers=backward_source_multipliers,
+                reverse_source_score_credit=reverse_source_score_credit,
                 reverse_source_value_credit=reverse_source_value_credit,
+                source_attention_penalty_strength=(
+                    source_attention_penalty_strength
+                ),
                 route_source_output_projection=route_source_output_projection,
                 route_output_projection=route_output_projection,
             )

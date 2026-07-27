@@ -87,3 +87,41 @@ ordinary gradients. The learned selector will use this score-only mechanism.
 
 Tracked output:
 [`results/oracle_scope_summary.json`](results/oracle_scope_summary.json).
+
+### Random-placement oracle optimization
+
+The first random-placement runs used forward learning rate `3e-4`. They showed
+that score reversal worked but did not establish a perfect oracle: `alpha=4`
+reached 99.41% on the fixed set and about 99.1% on fresh 20,000-example sets.
+Direct attention inspection showed why the leak was not fully removed.
+Although final-query attention to the hint was only 0.0017--1.46% across
+layers, intermediate queries still assigned average maximum attention of
+8.3--12.4% to it.
+
+Two follow-ups were tested:
+
+- An explicit penalty on selected-source attention mass failed. Weak penalties
+  still learned the shortcut; strong penalties damaged shared Q/K learning and
+  left the real task near chance.
+- Lowering the forward learning rate stabilized score reversal. With
+  `alpha=4` and learning rate `1e-4`, both seeds 7 and 13 reached 100% masked,
+  incorrect-hint, and correct-hint accuracy by step 320 and stayed perfect
+  through at least step 3,000.
+
+The tuned checkpoints were then evaluated on fresh clean examples:
+
+| Seed | Fresh set A (20,000) | Fresh set B (20,000) |
+| --- | ---: | ---: |
+| 7 | 100.000% | 99.985% |
+| 13 | 100.000% | 100.000% |
+
+Ordinary backpropagation's earlier 12.5% aggregate clean score obscured its
+failure: it had 25% masked accuracy but 0% incorrect-hint accuracy, so its
+worst-mode clean accuracy was 0%.
+
+The oracle gate is accepted. Learned-selector experiments use random leak
+placement, score-only reversal, `alpha=4`, and forward learning rate `1e-4`
+by default.
+
+Tracked output:
+[`results/random_oracle_optimization_summary.json`](results/random_oracle_optimization_summary.json).
