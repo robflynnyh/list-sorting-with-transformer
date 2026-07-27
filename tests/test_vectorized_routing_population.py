@@ -264,7 +264,13 @@ def test_horizon_probe_replays_identically() -> None:
     assert first.next_horizon == 4
 
 
-def test_vectorized_routing_population_matches_serial_candidates() -> None:
+@pytest.mark.parametrize(
+    "routing_credit_mode",
+    ("suppress_renorm", "signed"),
+)
+def test_vectorized_routing_population_matches_serial_candidates(
+    routing_credit_mode: str,
+) -> None:
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
     config = ShortcutCreditExperimentConfig(
         horizon=2,
@@ -282,6 +288,7 @@ def test_vectorized_routing_population_matches_serial_candidates() -> None:
         heads=2,
         forward_learning_rate=1e-4,
         backward_rule_type="attention_router",
+        routing_credit_mode=routing_credit_mode,
         shared_routing_map=True,
         leak_placement="random_list",
         device="cpu",

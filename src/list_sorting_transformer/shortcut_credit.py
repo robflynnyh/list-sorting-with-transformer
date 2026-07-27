@@ -508,6 +508,7 @@ class AttentionRoutingRuleConfig:
     ffn_multiplier: float = 4.0
     routing_temperature: float = 0.1
     max_log_suppression: float = 8.0
+    routing_credit_mode: str = "suppress_renorm"
     route_output_projection: bool = False
     shared_routing_map: bool = False
     condition_on_forward_state: bool = False
@@ -529,10 +530,15 @@ class AttentionRoutingRuleConfig:
             self.max_log_suppression,
         ) <= 0:
             raise ValueError("routing-rule scaling must be positive")
+        if self.routing_credit_mode not in {
+            "suppress_renorm",
+            "signed",
+        }:
+            raise ValueError("unknown routing credit mode")
 
 
 class AttentionRoutingRule(nn.Module):
-    """Input-conditioned, suppress-only routing for attention backward maps."""
+    """Input-conditioned routing for attention backward maps."""
 
     def __init__(self, config: AttentionRoutingRuleConfig) -> None:
         super().__init__()
@@ -714,6 +720,8 @@ class AttentionRoutingRule(nn.Module):
             active_strength * routing_priority
         ).clamp(max=self.config.max_log_suppression)
         forward_gates = (-log_suppression).exp().transpose(-2, -1)
+        if self.config.routing_credit_mode == "signed":
+            forward_gates = 2 * forward_gates - 1
         if self.config.shared_routing_map:
             forward_gates = forward_gates.expand(
                 batch_size,
@@ -730,7 +738,7 @@ class AttentionRoutingRule(nn.Module):
         *,
         forward_state: Tensor | tuple[Tensor, ...] | None = None,
     ) -> tuple[Tensor, ...]:
-        """Return one existing-edge suppression map per forward layer."""
+        """Return one existing-edge backward map per forward layer."""
 
         batch_size, sequence_length = token_ids.shape
         routing_context = self._routing_context(token_ids)
@@ -896,6 +904,9 @@ class AttentionRoutingRule(nn.Module):
                     "routing_suppressed_fraction": float(
                         (valid_gates < 0.99).float().mean()
                     ),
+                    "routing_negative_fraction": float(
+                        (valid_gates < 0).float().mean()
+                    ),
                     "routing_strength": float(active_strength.mean()),
                     "routing_leak_gate": float(leak_gates.mean()),
                     "routing_query_other_gate": float(
@@ -903,7 +914,7 @@ class AttentionRoutingRule(nn.Module):
                     ),
                     "routing_leak_relative_gate": float(
                         leak_gates.mean()
-                        / other_query_gates.mean().clamp_min(
+                        / other_query_gates.mean().abs().clamp_min(
                             torch.finfo(forward_gates.dtype).tiny
                         )
                     ),
@@ -915,7 +926,7 @@ class AttentionRoutingRule(nn.Module):
                     ),
                     "routing_hint_source_relative_gate": float(
                         hint_source_gates.mean()
-                        / other_source_gates.mean().clamp_min(
+                        / other_source_gates.mean().abs().clamp_min(
                             torch.finfo(forward_gates.dtype).tiny
                         )
                     ),
@@ -958,6 +969,10 @@ class ShortcutDecoderTransformer(DecoderTransformer):
                     None
                     if attention_gates is None
                     else attention_gates[layer_index]
+                ),
+                signed_backward_attention=(
+                    isinstance(backward_rule, AttentionRoutingRule)
+                    and backward_rule.config.routing_credit_mode == "signed"
                 ),
                 route_output_projection=(
                     isinstance(backward_rule, AttentionRoutingRule)

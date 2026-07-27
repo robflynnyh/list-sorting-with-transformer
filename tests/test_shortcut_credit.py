@@ -91,6 +91,7 @@ def small_rule() -> LearnedBackwardRule:
 
 def small_routing_rule(
     *,
+    routing_credit_mode: str = "suppress_renorm",
     route_output_projection: bool = False,
     shared_routing_map: bool = False,
     condition_on_forward_state: bool = False,
@@ -103,11 +104,47 @@ def small_routing_rule(
             n_heads=4,
             forward_layers=2,
             ffn_multiplier=2.0,
+            routing_credit_mode=routing_credit_mode,
             route_output_projection=route_output_projection,
             shared_routing_map=shared_routing_map,
             condition_on_forward_state=condition_on_forward_state,
         )
     )
+
+
+def test_signed_router_starts_as_identity_and_can_reverse_credit() -> None:
+    vocabulary = small_vocabulary()
+    rule = small_routing_rule(routing_credit_mode="signed")
+    batch = make_shortcut_batch(
+        4,
+        6,
+        leak_mode="correct",
+        leak_placement="random_list",
+        generator=torch.Generator().manual_seed(71),
+        vocabulary=vocabulary,
+    )
+
+    identity_maps = rule.attention_gates(batch.input_ids)
+    assert all(
+        torch.equal(gates, torch.ones_like(gates))
+        for gates in identity_maps
+    )
+
+    with torch.no_grad():
+        rule.gates.fill_(0.5)
+    signed_maps = rule.attention_gates(batch.input_ids)
+    sequence_length = batch.input_ids.shape[1]
+    valid = torch.ones(
+        sequence_length,
+        sequence_length,
+        dtype=torch.bool,
+    ).tril()
+    valid_multipliers = torch.cat(
+        tuple(gates[..., valid].flatten() for gates in signed_maps)
+    )
+    assert bool(valid_multipliers.lt(0).any())
+    assert float(valid_multipliers.min()) >= -1
+    assert float(valid_multipliers.max()) <= 1
 
 
 def test_shortcut_batch_places_correct_masked_and_incorrect_hints() -> None:

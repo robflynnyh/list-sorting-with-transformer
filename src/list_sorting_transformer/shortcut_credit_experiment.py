@@ -84,6 +84,7 @@ class ShortcutCreditExperimentConfig:
     d_model: int = 128
     backward_d_model: int = 128
     backward_rule_type: str = "gradient_transformer"
+    routing_credit_mode: str = "suppress_renorm"
     route_output_projection: bool = False
     shared_routing_map: bool = True
     condition_on_forward_state: bool = False
@@ -144,6 +145,18 @@ class ShortcutCreditExperimentConfig:
             "attention_router",
         }:
             raise ValueError("unknown backward_rule_type")
+        if self.routing_credit_mode not in {
+            "suppress_renorm",
+            "signed",
+        }:
+            raise ValueError("unknown routing credit mode")
+        if (
+            self.routing_credit_mode != "suppress_renorm"
+            and self.backward_rule_type != "attention_router"
+        ):
+            raise ValueError(
+                "nonstandard routing credit requires an attention router"
+            )
         if self.vectorized_population and (
             self.backward_rule_type != "attention_router"
             or self.route_output_projection
@@ -442,6 +455,7 @@ def make_rule_config(
         forward_d_model=config.d_model,
         n_heads=config.heads,
         forward_layers=config.forward_layers,
+        routing_credit_mode=config.routing_credit_mode,
         route_output_projection=config.route_output_projection,
         shared_routing_map=config.shared_routing_map,
         condition_on_forward_state=config.condition_on_forward_state,
@@ -3509,6 +3523,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--backward-rule-type",
         choices=("gradient_transformer", "attention_router"),
         default="gradient_transformer",
+    )
+    parser.add_argument(
+        "--routing-credit-mode",
+        choices=("suppress_renorm", "signed"),
+        default="suppress_renorm",
+        help="positive suppression or signed attention-edge credit",
     )
     parser.add_argument(
         "--route-output-projection",

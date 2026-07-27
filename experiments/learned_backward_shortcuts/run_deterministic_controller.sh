@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUN_NAME="${RUN_NAME:-attention-router-performance-curriculum-h160-p64-seed7}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${ROOT}/artifacts/learned_backward_shortcuts}"
 GPU_DEVICES="${GPU_DEVICES:-cuda:0,cuda:1,cuda:2}"
+ROUTING_CREDIT_MODE="${ROUTING_CREDIT_MODE:-suppress_renorm}"
 
 cd "${ROOT}"
 export PYTHONPATH="${ROOT}/src:${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
@@ -48,6 +49,7 @@ exec python -m list_sorting_transformer.shortcut_credit_experiment \
   --d-model 128 \
   --backward-d-model 128 \
   --backward-rule-type attention_router \
+  --routing-credit-mode "${ROUTING_CREDIT_MODE}" \
   --shared-routing-map \
   --fitness-objective worst_mode_ce \
   --forward-layers 3 \

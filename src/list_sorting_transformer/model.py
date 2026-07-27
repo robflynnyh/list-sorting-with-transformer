@@ -196,11 +196,10 @@ class _RoutedLinearBackward(torch.autograd.Function):
         return input_gradient, None, weight_gradient, bias_gradient
 
 
-def _routed_attention_weights(
+def _attention_weights(
     query: Tensor,
     key: Tensor,
     *,
-    backward_gate: Tensor,
     attention_mask: Tensor | None,
     is_causal: bool,
 ) -> Tensor:
@@ -218,7 +217,23 @@ def _routed_attention_weights(
     if attention_mask is not None:
         scores = scores.masked_fill(~attention_mask, float("-inf"))
 
-    weights = scores.softmax(dim=-1)
+    return scores.softmax(dim=-1)
+
+
+def _routed_attention_weights(
+    query: Tensor,
+    key: Tensor,
+    *,
+    backward_gate: Tensor,
+    attention_mask: Tensor | None,
+    is_causal: bool,
+) -> Tensor:
+    weights = _attention_weights(
+        query,
+        key,
+        attention_mask=attention_mask,
+        is_causal=is_causal,
+    )
     routed_weights = weights * backward_gate.to(
         device=weights.device,
         dtype=weights.dtype,
@@ -275,6 +290,55 @@ def routed_scaled_dot_product_attention(
         attended.detach(),
         manually_routed_attended,
     )
+    return routed, routed_attended
+
+
+def signed_routed_scaled_dot_product_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    *,
+    backward_multipliers: Tensor,
+    attention_mask: Tensor | None = None,
+    is_causal: bool = False,
+) -> tuple[Tensor, Tensor]:
+    """Run exact attention forward with signed per-edge backward credit."""
+
+    if backward_multipliers.shape != (
+        query.shape[0],
+        query.shape[1],
+        query.shape[-2],
+        key.shape[-2],
+    ):
+        raise ValueError("backward multipliers must match the attention map")
+    attended = F.scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attention_mask,
+        dropout_p=0.0,
+        is_causal=is_causal,
+    )
+    weights = _attention_weights(
+        query,
+        key,
+        attention_mask=attention_mask,
+        is_causal=is_causal,
+    )
+    multipliers = backward_multipliers.detach().to(
+        device=weights.device,
+        dtype=weights.dtype,
+    )
+    score_surrogate = (weights * multipliers) @ value.detach()
+    value_surrogate = (weights.detach() * multipliers) @ value
+    backward_surrogate = score_surrogate + value_surrogate
+    routed = (
+        attended.detach()
+        + (backward_surrogate - backward_surrogate.detach())
+    )
+    routed_attended = (
+        weights.detach() * multipliers
+    ) @ value.detach()
     return routed, routed_attended
 
 
@@ -601,6 +665,7 @@ class CausalSelfAttention(nn.Module):
         cache: KeyValueCache | None = None,
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
+        signed_backward_attention: bool = False,
         backward_source_multipliers: Tensor | None = None,
         reverse_source_score_credit: bool = True,
         reverse_source_value_credit: bool = True,
@@ -621,6 +686,10 @@ class CausalSelfAttention(nn.Module):
         ):
             raise ValueError(
                 "attention routing and source-gradient reversal are exclusive"
+            )
+        if signed_backward_attention and backward_attention_gate is None:
+            raise ValueError(
+                "signed backward attention requires an attention gate"
             )
         query, key, value = self.qkv(hidden).chunk(3, dim=-1)
         query = self._split_heads(query)
@@ -672,14 +741,28 @@ class CausalSelfAttention(nn.Module):
                 raise ValueError(
                     "backward attention routing requires zero attention dropout"
                 )
-            attended, routed_attended = routed_scaled_dot_product_attention(
-                query,
-                key,
-                value,
-                backward_gate=backward_attention_gate,
-                attention_mask=combined_mask,
-                is_causal=combined_mask is None,
-            )
+            if signed_backward_attention:
+                attended, routed_attended = (
+                    signed_routed_scaled_dot_product_attention(
+                        query,
+                        key,
+                        value,
+                        backward_multipliers=backward_attention_gate,
+                        attention_mask=combined_mask,
+                        is_causal=combined_mask is None,
+                    )
+                )
+            else:
+                attended, routed_attended = (
+                    routed_scaled_dot_product_attention(
+                        query,
+                        key,
+                        value,
+                        backward_gate=backward_attention_gate,
+                        attention_mask=combined_mask,
+                        is_causal=combined_mask is None,
+                    )
+                )
         elif backward_source_multipliers is not None:
             if self.top_k is not None:
                 raise ValueError(
@@ -761,6 +844,7 @@ class CausalSelfAttention(nn.Module):
         *,
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
+        signed_backward_attention: bool = False,
         backward_source_multipliers: Tensor | None = None,
         reverse_source_score_credit: bool = True,
         reverse_source_value_credit: bool = True,
@@ -772,6 +856,7 @@ class CausalSelfAttention(nn.Module):
             hidden,
             attention_mask=attention_mask,
             backward_attention_gate=backward_attention_gate,
+            signed_backward_attention=signed_backward_attention,
             backward_source_multipliers=backward_source_multipliers,
             reverse_source_score_credit=reverse_source_score_credit,
             reverse_source_value_credit=reverse_source_value_credit,
@@ -812,6 +897,7 @@ class TransformerBlock(nn.Module):
         *,
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
+        signed_backward_attention: bool = False,
         backward_source_multipliers: Tensor | None = None,
         reverse_source_score_credit: bool = True,
         reverse_source_value_credit: bool = True,
@@ -824,6 +910,7 @@ class TransformerBlock(nn.Module):
                 self.attention_norm(hidden),
                 attention_mask=attention_mask,
                 backward_attention_gate=backward_attention_gate,
+                signed_backward_attention=signed_backward_attention,
                 backward_source_multipliers=backward_source_multipliers,
                 reverse_source_score_credit=reverse_source_score_credit,
                 reverse_source_value_credit=reverse_source_value_credit,

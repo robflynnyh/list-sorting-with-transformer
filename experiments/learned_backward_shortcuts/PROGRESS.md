@@ -2860,3 +2860,28 @@ failed extensions. It can progress through horizons 160, 320, 640, and 1280.
 Thus a plateau at 160 promotes to 320; continued plateaus can reach 640, while
 two longer horizons that fail to improve over the last successful reference
 end the run cleanly. Held-out examples remain reporting-only throughout.
+
+### Signed attention-credit ablation
+
+The original router can only suppress backward attention edges. It preserves
+the normal forward attention output, but backpropagates through the normalized
+positive weights `normalize(A * G)`, where `G` is in `(0, 1]`.
+
+The `signed` routing-credit ablation keeps the same forward pass, router,
+identity initialization, EGGROLL search, fixed fitness set, and curriculum. It
+maps the existing suppression gate to a signed edge multiplier:
+
+```text
+M = 2 * exp(-log_suppression) - 1
+```
+
+Thus an edge multiplier of `+1` gives ordinary score/value credit, `0` blocks
+credit, and values approaching `-1` reverse the edge's contribution to Q/K/V
+gradients. The implementation uses differentiable score and value surrogates,
+so it remains compatible with the vectorized `torch.func.vmap` population
+path. `backward/center_routing_negative_fraction` reports the fraction of
+causal edges currently assigned negative credit.
+
+Set `ROUTING_CREDIT_MODE=signed` when invoking
+`run_deterministic_controller.sh`. The default remains `suppress_renorm`, so
+existing checkpoints and baseline launches retain their previous behavior.
