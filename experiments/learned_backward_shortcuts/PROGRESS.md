@@ -2375,3 +2375,96 @@ Tracked outputs:
 [`results/random_transition_h3600_g72_summary.json`](results/random_transition_h3600_g72_summary.json)
 and
 [`results/random_transition_h3600_g72_metrics.jsonl`](results/random_transition_h3600_g72_metrics.jsonl).
+
+### Collapse-window evolution
+
+The transition objective above still trains every population member for 3,600
+updates and only observes four sparse checkpoints. A sharper test now captures
+the forward model, the complete Adam state, and the exact future shortcut
+batches immediately before a collapse. Every perturbation starts from this
+identical optimizer state and controls only the failing interval.
+
+The accepted generation-70 rule has an abrupt event on generation seed
+`57,155,105`:
+
+- step 3,000: `95.31%` minimum fixed-set accuracy;
+- step 3,009: `67.97%`;
+- recovery to `95.31%` after step 3,030.
+
+The serialized step-3,000 window reproduces the event exactly, including the
+Adam moments. A second independent collapse was found on seed `7,700,511`,
+falling from `94.14%` at step 2,920 to a minimum of `38.67%` at step 2,936.
+Both windows retain 100 subsequent batches so a candidate cannot win by moving
+the failure one or two checkpoints later.
+
+The full test suite passes, and an end-to-end GPU smoke with separate ranking
+and acceptance windows verifies proposal scoring, maximin acceptance, and that
+`next_checkpoint.pt` contains the proposal only when the acceptance window
+improves.
+
+Three objective corrections were required:
+
+1. Endpoint fitness was insufficient. One candidate looked perfect at the end
+   of a ten-step window but had fallen to `91.41%` five steps earlier.
+2. Worst clean CE was not an exact proxy for collapse severity. A two-window
+   candidate reduced CE on average while lowering minimum accuracy on one
+   window.
+3. Mean multi-window fitness allowed a large win on one collapse to pay for a
+   regression on the other. The robust objective therefore uses the literal
+   minimum weaker-split accuracy over every update, then takes the minimum
+   improvement across ranking windows.
+
+The corrected objective was applied retrospectively to the already evaluated
+P64 population at `sigma=0.00328125`; no extra candidate evaluations or new
+data were used for selection. Candidate 63 is the unique strongest robust
+member:
+
+| Saved optimizer window | Centre minimum | Candidate 63 | Change |
+| --- | ---: | ---: | ---: |
+| Seed `57,155,105`, steps 3,001--3,100 | 67.97% | **72.27%** | **+4.30** |
+| Seed `7,700,511`, steps 2,921--3,020 | 38.67% | **42.97%** | **+4.30** |
+
+The candidate's CE calibration is not uniformly better: worst mode CE improves
+`1.834 -> 1.464` on the first window but worsens `2.384 -> 3.258` on the
+second. The primary claim is therefore about avoiding incorrect predictions
+during collapse, not about calibration.
+
+#### Full-trajectory transfer
+
+Candidate 63 was then used from forward-model initialization, rather than
+switched in at either saved state. Dense replay shows that the local update
+transfers to both complete training trajectories:
+
+| Full trajectory | Centre minimum | Candidate 63 minimum | Change |
+| --- | ---: | ---: | ---: |
+| Seed `57,155,105` | 67.97% | **78.52%** | **+10.55** |
+| Seed `7,700,511` | 38.67% | **91.02%** | **+52.34** |
+
+Both candidate trajectories recover to `95.31%` and retain it at update 5,000.
+On seed `7,700,511`, protection trades some ordinary pre-collapse accuracy
+(`94.14%` for the centre versus `91--94%` for the candidate) for removal of
+the catastrophic transient.
+
+Four trajectories that did not collapse under the centre were used only as a
+report-only audit. Candidate 63 matched the centre's permanent-set accuracy
+at update 3,000 on all four. On their separate fresh audit sets it tied three
+and lost one example on one trajectory (`-0.78` points); CE changes were small
+and mixed.
+
+![Collapse-window transfer](results/collapse_window_transfer.png)
+
+This is direct evidence for optimizing the collapse event itself. It is not
+yet a robustly accepted backward-rule update: both known collapse windows
+participated in ranking, and the stable trajectories do not constitute a
+seed-disjoint collapse-window acceptance set. The next gate is to locate
+additional collapse events, rank on a subset, and require positive maximin
+accuracy change on unseen collapse windows before updating the persistent
+centre.
+
+Tracked outputs:
+[`results/collapse_window_multi_seed_summary.json`](results/collapse_window_multi_seed_summary.json),
+[`results/collapse_window_seed57155105_center.jsonl`](results/collapse_window_seed57155105_center.jsonl),
+[`results/collapse_window_seed57155105_candidate63_full.jsonl`](results/collapse_window_seed57155105_candidate63_full.jsonl),
+[`results/collapse_window_seed7700511_center.jsonl`](results/collapse_window_seed7700511_center.jsonl),
+and
+[`results/collapse_window_seed7700511_candidate63_full.jsonl`](results/collapse_window_seed7700511_candidate63_full.jsonl).

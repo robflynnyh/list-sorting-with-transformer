@@ -1,0 +1,70 @@
+{
+  "source_backward_checkpoint": "artifacts/learned_backward_shortcuts/attention-router-random-list-transition-h3600-p64-elite1-g72-seed7/checkpoint_000073.pt",
+  "population_size": 64,
+  "population_seed": 800001,
+  "sigma": 0.00328125,
+  "selected_candidate_index": 63,
+  "selection": {
+    "metric": "minimum weaker-split accuracy over every update in each 100-update window",
+    "window_aggregation": "minimum improvement across windows"
+  },
+  "saved_window_results": [
+    {
+      "generation_seed": 57155105,
+      "start_step": 3000,
+      "end_step": 3100,
+      "center_minimum_accuracy": 0.6796875,
+      "candidate_minimum_accuracy": 0.72265625,
+      "accuracy_delta": 0.04296875,
+      "center_worst_mode_ce": 1.8340301513671875,
+      "candidate_worst_mode_ce": 1.4644255638122559
+    },
+    {
+      "generation_seed": 7700511,
+      "start_step": 2920,
+      "end_step": 3020,
+      "center_minimum_accuracy": 0.38671875,
+      "candidate_minimum_accuracy": 0.4296875,
+      "accuracy_delta": 0.04296875,
+      "center_worst_mode_ce": 2.383545398712158,
+      "candidate_worst_mode_ce": 3.258078098297119
+    }
+  ],
+  "full_trajectory_results": [
+    {
+      "generation_seed": 57155105,
+      "center_minimum_accuracy": 0.6796875,
+      "candidate_minimum_accuracy": 0.78515625,
+      "accuracy_delta": 0.10546875,
+      "candidate_step_5000_accuracy": 0.953125
+    },
+    {
+      "generation_seed": 7700511,
+      "center_minimum_accuracy": 0.38671875,
+      "candidate_minimum_accuracy": 0.91015625,
+      "accuracy_delta": 0.5234375,
+      "candidate_step_5000_accuracy": 0.953125
+    }
+  ],
+  "stable_trajectory_audit": {
+    "generation_seeds": [
+      1007700518,
+      2007700525,
+      3007700532,
+      37071056
+    ],
+    "fixed_step_3000_accuracy_deltas": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "fresh_audit_step_3000_accuracy_deltas": [
+      0.0,
+      -0.0078125,
+      0.0,
+      0.0
+    ]
+  },
+  "limitation": "Both collapse windows participated in candidate ranking; no seed-disjoint collapse-window acceptance set was available yet."
+}
