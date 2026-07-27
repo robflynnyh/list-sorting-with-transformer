@@ -83,3 +83,20 @@ smoke covered BF16, the two-layer forward model, fixed horizon mode, adaptive
 P64-compatible elite selection, strict two-trajectory acceptance, and sparse
 reporting. The middle sparse generation retained both acceptance trajectories
 while omitting all length-400/control work and shortcut-only metric aliases.
+
+## Active high-throughput run
+
+- W&B:
+  <https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/k8sj7g3n>
+- Run:
+  `pointer-next-length20-fitness50-heldout400-h320-2l-p64-10k-seed7-v3`
+- Service:
+  `list-sorting-length-generalization-h320-2l-p64-10k-seed7-v3.service`
+- Output:
+  `artifacts/learned_backward_length_generalization/pointer-next-length20-fitness50-heldout400-h320-2l-p64-10k-seed7-v3`
+
+Generation 0 completed in 52.9 seconds with full reporting, 7.72 GiB peak
+allocation, and an accepted elite-4 update. Generation 1 completed in 38.9
+seconds on the sparse path with 2.27 GiB peak allocation and both strict
+acceptance trajectories intact. The measured weighted runtime is approximately
+40.3 seconds per generation, or 4.7 days for 10,000 generations.
