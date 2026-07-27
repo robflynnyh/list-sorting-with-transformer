@@ -18,7 +18,7 @@ from .model import DecoderTransformer, ModelConfig
 from .tokens import BOS, COMMA, PAD, SEP, VALUE_OFFSET, PointerNextVocabulary
 
 
-LeakMode = Literal["correct", "masked", "incorrect"]
+LeakMode = Literal["correct", "masked", "incorrect", "clean"]
 LeakPlacement = Literal["suffix", "random_list"]
 
 
@@ -217,6 +217,52 @@ def make_shortcut_batch(
         length=length,
         leak_mode=leak_mode,
         leak_placement=leak_placement,
+    )
+
+
+def make_clean_pointer_batch(
+    batch_size: int,
+    length: int,
+    *,
+    generator: torch.Generator,
+    vocabulary: PointerNextVocabulary,
+    device: torch.device | str | None = None,
+) -> ShortcutBatch:
+    """Generate the ordinary pointer-next task without shortcut tokens."""
+
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    if length < 2:
+        raise ValueError("length must be at least two")
+    values = torch.randint(
+        vocabulary.symbol_count,
+        (batch_size, length),
+        generator=generator,
+    )
+    pointers = torch.randint(
+        length - 1,
+        (batch_size,),
+        generator=generator,
+    )
+    targets = values[
+        torch.arange(batch_size),
+        pointers + 1,
+    ]
+    prompts = [
+        vocabulary.encode_prompt_with_pointer(row, int(pointer))
+        for row, pointer in zip(values.tolist(), pointers.tolist())
+    ]
+    input_ids = torch.tensor(prompts, dtype=torch.long)
+    target_tensor = vocabulary.value_token(0) + targets
+    if device is not None:
+        input_ids = input_ids.to(device)
+        target_tensor = target_tensor.to(device)
+    return ShortcutBatch(
+        input_ids=input_ids,
+        targets=target_tensor,
+        length=length,
+        leak_mode="clean",
+        leak_placement="suffix",
     )
 
 
@@ -512,6 +558,7 @@ class AttentionRoutingRuleConfig:
     route_output_projection: bool = False
     shared_routing_map: bool = False
     condition_on_forward_state: bool = False
+    leak_token: int | None = None
 
     def __post_init__(self) -> None:
         if min(
@@ -535,6 +582,10 @@ class AttentionRoutingRuleConfig:
             "signed",
         }:
             raise ValueError("unknown routing credit mode")
+        if self.leak_token is not None and not (
+            0 <= self.leak_token < self.vocab_size
+        ):
+            raise ValueError("leak token must be inside the routing vocabulary")
 
 
 class AttentionRoutingRule(nn.Module):
@@ -808,130 +859,133 @@ class AttentionRoutingRule(nn.Module):
             per_example_gate_mean = valid_gates.flatten(start_dim=1).mean(
                 dim=1
             )
-            leak_token = self.config.vocab_size - 3
-            leak_mask = token_ids.eq(leak_token)
-            if not bool(leak_mask.sum(dim=1).eq(1).all()):
-                raise ValueError(
-                    "every routing prompt must contain exactly one leak"
+            statistics = {
+                "routing_gate": float(valid_gates.mean()),
+                "routing_gate_std": float(
+                    valid_gates.std(unbiased=False)
+                ),
+                "routing_position_profile_std": float(
+                    position_profile_values.std(unbiased=False)
+                ),
+                "routing_input_conditioned_rms": float(
+                    input_conditioned_residual.square().mean().sqrt()
+                ),
+                "routing_per_example_mean_std": float(
+                    per_example_gate_mean.std(unbiased=False)
+                ),
+                "routing_min_gate": float(valid_gates.min()),
+                "routing_suppressed_fraction": float(
+                    (valid_gates < 0.99).float().mean()
+                ),
+                "routing_negative_fraction": float(
+                    (valid_gates < 0).float().mean()
+                ),
+                "routing_strength": float(active_strength.mean()),
+            }
+            if self.config.leak_token is not None:
+                leak_mask = token_ids.eq(self.config.leak_token)
+                if not bool(leak_mask.sum(dim=1).eq(1).all()):
+                    raise ValueError(
+                        "every shortcut-routing prompt must contain one leak"
+                    )
+                hint_positions = leak_mask.to(dtype=torch.int64).argmax(
+                    dim=1
+                ) + 1
+                if bool(hint_positions.ge(sequence_length).any()):
+                    raise ValueError("leak marker must be followed by a hint")
+                query_gates = forward_gates[..., -1, :]
+                hint_indices = hint_positions.view(
+                    batch_size,
+                    1,
+                    1,
+                    1,
+                ).expand(
+                    batch_size,
+                    self.config.forward_layers,
+                    self.config.n_heads,
+                    1,
                 )
-            hint_positions = leak_mask.to(dtype=torch.int64).argmax(
-                dim=1
-            ) + 1
-            if bool(hint_positions.ge(sequence_length).any()):
-                raise ValueError("leak marker must be followed by a hint")
-            query_gates = forward_gates[..., -1, :]
-            hint_indices = hint_positions.view(
-                batch_size,
-                1,
-                1,
-                1,
-            ).expand(
-                batch_size,
-                self.config.forward_layers,
-                self.config.n_heads,
-                1,
-            )
-            leak_gates = query_gates.gather(
-                dim=-1,
-                index=hint_indices,
-            ).squeeze(-1)
-            other_mask = torch.ones(
-                batch_size,
-                sequence_length,
-                dtype=torch.bool,
-                device=forward_gates.device,
-            )
-            other_mask.scatter_(
-                1,
-                hint_positions.unsqueeze(1),
-                False,
-            )
-            other_query_gates = query_gates.masked_select(
-                other_mask[:, None, None, :].expand_as(query_gates)
-            )
-            hint_source_indices = hint_positions.view(
-                batch_size,
-                1,
-                1,
-                1,
-                1,
-            ).expand(
-                batch_size,
-                self.config.forward_layers,
-                self.config.n_heads,
-                sequence_length,
-                1,
-            )
-            hint_source_by_destination = forward_gates.gather(
-                dim=-1,
-                index=hint_source_indices,
-            ).squeeze(-1)
-            valid_hint_destinations = (
-                torch.arange(
+                leak_gates = query_gates.gather(
+                    dim=-1,
+                    index=hint_indices,
+                ).squeeze(-1)
+                other_mask = torch.ones(
+                    batch_size,
                     sequence_length,
+                    dtype=torch.bool,
                     device=forward_gates.device,
-                )[None, :]
-                >= hint_positions[:, None]
-            )
-            hint_source_gates = hint_source_by_destination.masked_select(
-                valid_hint_destinations[:, None, None, :].expand_as(
-                    hint_source_by_destination
                 )
-            )
-            other_valid_edges = (
-                causal[None, None, None, :, :]
-                & other_mask[:, None, None, None, :]
-            ).expand_as(forward_gates)
-            other_source_gates = forward_gates.masked_select(
-                other_valid_edges
-            )
-            self.statistics.append(
-                {
-                    "routing_gate": float(valid_gates.mean()),
-                    "routing_gate_std": float(
-                        valid_gates.std(unbiased=False)
-                    ),
-                    "routing_position_profile_std": float(
-                        position_profile_values.std(unbiased=False)
-                    ),
-                    "routing_input_conditioned_rms": float(
-                        input_conditioned_residual.square().mean().sqrt()
-                    ),
-                    "routing_per_example_mean_std": float(
-                        per_example_gate_mean.std(unbiased=False)
-                    ),
-                    "routing_min_gate": float(valid_gates.min()),
-                    "routing_suppressed_fraction": float(
-                        (valid_gates < 0.99).float().mean()
-                    ),
-                    "routing_negative_fraction": float(
-                        (valid_gates < 0).float().mean()
-                    ),
-                    "routing_strength": float(active_strength.mean()),
-                    "routing_leak_gate": float(leak_gates.mean()),
-                    "routing_query_other_gate": float(
-                        other_query_gates.mean()
-                    ),
-                    "routing_leak_relative_gate": float(
-                        leak_gates.mean()
-                        / other_query_gates.mean().abs().clamp_min(
-                            torch.finfo(forward_gates.dtype).tiny
-                        )
-                    ),
-                    "routing_hint_source_gate": float(
-                        hint_source_gates.mean()
-                    ),
-                    "routing_hint_source_other_gate": float(
-                        other_source_gates.mean()
-                    ),
-                    "routing_hint_source_relative_gate": float(
-                        hint_source_gates.mean()
-                        / other_source_gates.mean().abs().clamp_min(
-                            torch.finfo(forward_gates.dtype).tiny
-                        )
-                    ),
-                }
-            )
+                other_mask.scatter_(
+                    1,
+                    hint_positions.unsqueeze(1),
+                    False,
+                )
+                other_query_gates = query_gates.masked_select(
+                    other_mask[:, None, None, :].expand_as(query_gates)
+                )
+                hint_source_indices = hint_positions.view(
+                    batch_size,
+                    1,
+                    1,
+                    1,
+                    1,
+                ).expand(
+                    batch_size,
+                    self.config.forward_layers,
+                    self.config.n_heads,
+                    sequence_length,
+                    1,
+                )
+                hint_source_by_destination = forward_gates.gather(
+                    dim=-1,
+                    index=hint_source_indices,
+                ).squeeze(-1)
+                valid_hint_destinations = (
+                    torch.arange(
+                        sequence_length,
+                        device=forward_gates.device,
+                    )[None, :]
+                    >= hint_positions[:, None]
+                )
+                hint_source_gates = hint_source_by_destination.masked_select(
+                    valid_hint_destinations[:, None, None, :].expand_as(
+                        hint_source_by_destination
+                    )
+                )
+                other_valid_edges = (
+                    causal[None, None, None, :, :]
+                    & other_mask[:, None, None, None, :]
+                ).expand_as(forward_gates)
+                other_source_gates = forward_gates.masked_select(
+                    other_valid_edges
+                )
+                statistics.update(
+                    {
+                        "routing_leak_gate": float(leak_gates.mean()),
+                        "routing_query_other_gate": float(
+                            other_query_gates.mean()
+                        ),
+                        "routing_leak_relative_gate": float(
+                            leak_gates.mean()
+                            / other_query_gates.mean().abs().clamp_min(
+                                torch.finfo(forward_gates.dtype).tiny
+                            )
+                        ),
+                        "routing_hint_source_gate": float(
+                            hint_source_gates.mean()
+                        ),
+                        "routing_hint_source_other_gate": float(
+                            other_source_gates.mean()
+                        ),
+                        "routing_hint_source_relative_gate": float(
+                            hint_source_gates.mean()
+                            / other_source_gates.mean().abs().clamp_min(
+                                torch.finfo(forward_gates.dtype).tiny
+                            )
+                        ),
+                    }
+                )
+            self.statistics.append(statistics)
         return tuple(forward_gates.unbind(dim=1))
 
 
@@ -1224,7 +1278,7 @@ def evaluate_shortcut_batches(
 
 
 def make_forward_model_config(
-    vocabulary: ShortcutPointerVocabulary,
+    vocabulary: PointerNextVocabulary,
     *,
     d_model: int = 128,
     n_layers: int = 3,

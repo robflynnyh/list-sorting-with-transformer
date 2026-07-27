@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from list_sorting_transformer.tokens import SEP
+from list_sorting_transformer.tokens import SEP, PointerNextVocabulary
 from list_sorting_transformer.shortcut_credit import (
     AttentionRoutingRule,
     AttentionRoutingRuleConfig,
@@ -19,6 +19,7 @@ from list_sorting_transformer.shortcut_credit import (
     clone_center_parameters,
     evaluate_shortcut_batches,
     make_fitness_batches,
+    make_clean_pointer_batch,
     make_forward_model_config,
     make_shortcut_batch,
     paper_eggroll_update,
@@ -158,6 +159,7 @@ def small_routing_rule(
             route_output_projection=route_output_projection,
             shared_routing_map=shared_routing_map,
             condition_on_forward_state=condition_on_forward_state,
+            leak_token=small_vocabulary().leak_token,
         )
     )
 
@@ -223,6 +225,82 @@ def test_shortcut_batch_places_correct_masked_and_incorrect_hints() -> None:
     assert not batches["incorrect"].input_ids[:, -2].eq(
         batches["incorrect"].targets
     ).any()
+
+
+def test_clean_pointer_batch_contains_no_shortcut_tokens() -> None:
+    vocabulary = PointerNextVocabulary("numbers", 10)
+    shortcut_vocabulary = small_vocabulary()
+    batch = make_clean_pointer_batch(
+        8,
+        6,
+        generator=torch.Generator().manual_seed(12),
+        vocabulary=vocabulary,
+    )
+
+    assert batch.input_ids.shape == (8, 14)
+    assert batch.input_ids[:, -1].eq(SEP).all()
+    assert batch.leak_mode == "clean"
+    assert not batch.input_ids.eq(shortcut_vocabulary.leak_token).any()
+    assert not batch.input_ids.eq(shortcut_vocabulary.mask_token).any()
+    assert not batch.input_ids.eq(shortcut_vocabulary.query_token).any()
+    assert batch.targets.ge(vocabulary.value_token(0)).all()
+    assert batch.targets.le(vocabulary.value_token(9)).all()
+
+
+def test_pointer_length_task_requires_strictly_longer_evaluations() -> None:
+    config = ShortcutCreditExperimentConfig(
+        task_variant="pointer_next_length",
+        min_length=2,
+        max_length=20,
+        fitness_length=50,
+        heldout_length=400,
+        fitness_objective="mean_clean_ce",
+    )
+
+    assert config.fitness_length == 50
+    assert config.heldout_length == 400
+    with pytest.raises(ValueError, match="requires fitness and held-out"):
+        ShortcutCreditExperimentConfig(
+            task_variant="pointer_next_length",
+            min_length=2,
+            max_length=20,
+        )
+    with pytest.raises(ValueError, match="fitness length must exceed"):
+        ShortcutCreditExperimentConfig(
+            task_variant="pointer_next_length",
+            min_length=2,
+            max_length=20,
+            fitness_length=20,
+            heldout_length=400,
+        )
+
+
+def test_clean_router_statistics_do_not_require_a_leak_token() -> None:
+    vocabulary = PointerNextVocabulary("numbers", 10)
+    rule = AttentionRoutingRule(
+        AttentionRoutingRuleConfig(
+            vocab_size=vocabulary.size,
+            d_model=32,
+            forward_d_model=32,
+            n_heads=4,
+            forward_layers=2,
+            ffn_multiplier=2.0,
+            leak_token=None,
+        )
+    )
+    batch = make_clean_pointer_batch(
+        4,
+        6,
+        generator=torch.Generator().manual_seed(13),
+        vocabulary=vocabulary,
+    )
+    rule.capture_statistics = True
+
+    rule.attention_gates(batch.input_ids)
+
+    assert len(rule.statistics) == 1
+    assert "routing_gate" in rule.statistics[0]
+    assert "routing_leak_gate" not in rule.statistics[0]
 
 
 def test_shortcut_batch_can_randomize_leak_within_the_list() -> None:

@@ -17,7 +17,6 @@ from .shortcut_credit import (
     EggrollDirection,
     ShortcutBatch,
     ShortcutMetrics,
-    ShortcutPointerVocabulary,
 )
 from .shortcut_credit_experiment import (
     CandidateRankingInput,
@@ -26,9 +25,10 @@ from .shortcut_credit_experiment import (
     candidate_fitness,
     forward_training_autocast_context,
     initialize_forward_model,
+    make_experiment_vocabulary,
     parse_fitness_checkpoints,
 )
-from .tokens import VALUE_OFFSET
+from .tokens import VALUE_OFFSET, PointerNextVocabulary
 from .vectorized_reversal_population import functional_adam_step
 
 if TYPE_CHECKING:
@@ -154,7 +154,7 @@ def _population_metrics(
     buffers: dict[str, Tensor],
     batches: tuple[ShortcutBatch, ...],
     *,
-    vocabulary: ShortcutPointerVocabulary,
+    vocabulary: PointerNextVocabulary,
     device: torch.device,
 ) -> tuple[ShortcutMetrics, ...]:
     population_size = next(iter(forward_parameters.values())).shape[0]
@@ -307,7 +307,7 @@ def train_vectorized_routing_population(
     ):
         raise ValueError("both held-out batch groups must be provided together")
     population_size = next(iter(rule_parameters.values())).shape[0]
-    vocabulary = ShortcutPointerVocabulary("numbers", 10)
+    vocabulary = make_experiment_vocabulary(config)
     forward_model = initialize_forward_model(
         config,
         vocabulary,

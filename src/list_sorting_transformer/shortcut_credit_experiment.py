@@ -34,12 +34,14 @@ from .shortcut_credit import (
     evaluate_shortcut_batches,
     make_fitness_batches,
     make_forward_model_config,
+    make_clean_pointer_batch,
     make_shortcut_batch,
     move_eggroll_direction,
     paper_eggroll_update,
     sample_eggroll_direction,
     shortcut_loss,
 )
+from .tokens import PointerNextVocabulary
 
 
 @dataclass(frozen=True)
@@ -58,8 +60,12 @@ class ShortcutCreditExperimentConfig:
     fitness_examples: int = 512
     fitness_batch_size: int = 64
     correct_eval_examples: int = 128
+    heldout_examples: int = 128
+    task_variant: str = "shortcut"
     min_length: int = 8
     max_length: int = 32
+    fitness_length: int | None = None
+    heldout_length: int | None = None
     leak_placement: LeakPlacement = "suffix"
     forward_learning_rate: float = 3e-4
     forward_training_precision: str = "fp32"
@@ -119,6 +125,7 @@ class ShortcutCreditExperimentConfig:
             self.fitness_examples,
             self.fitness_batch_size,
             self.correct_eval_examples,
+            self.heldout_examples,
             self.min_length,
             self.max_length,
             self.d_model,
@@ -176,6 +183,8 @@ class ShortcutCreditExperimentConfig:
             "worst_checkpoint_mode_ce",
         }:
             raise ValueError("unknown fitness_objective")
+        if self.task_variant not in {"shortcut", "pointer_next_length"}:
+            raise ValueError("unknown task variant")
         checkpoints = parse_fitness_checkpoints(self.fitness_checkpoints)
         if self.fitness_objective == "worst_checkpoint_mode_ce":
             if not checkpoints:
@@ -248,6 +257,28 @@ class ShortcutCreditExperimentConfig:
             raise ValueError("fitness_examples must be even")
         if not 2 <= self.min_length <= self.max_length:
             raise ValueError("invalid task length range")
+        if self.task_variant == "pointer_next_length":
+            if self.fitness_length is None or self.heldout_length is None:
+                raise ValueError(
+                    "pointer-next length task requires fitness and held-out "
+                    "lengths"
+                )
+            if self.fitness_objective != "mean_clean_ce":
+                raise ValueError(
+                    "pointer-next length task uses mean clean CE fitness"
+                )
+            if self.fitness_length <= self.max_length:
+                raise ValueError(
+                    "fitness length must exceed the training length range"
+                )
+            if self.heldout_length <= self.fitness_length:
+                raise ValueError(
+                    "held-out length must exceed the fitness length"
+                )
+        elif self.fitness_length is not None or self.heldout_length is not None:
+            raise ValueError(
+                "fixed evaluation lengths require pointer-next length task"
+            )
         if self.horizon > self.max_horizon:
             raise ValueError("horizon must not exceed max_horizon")
         if self.resume_horizon is not None:
@@ -387,7 +418,7 @@ def make_mode_batches(
     *,
     leak_mode: str,
     config: ShortcutCreditExperimentConfig,
-    vocabulary: ShortcutPointerVocabulary,
+    vocabulary: PointerNextVocabulary,
     generator: torch.Generator,
     device: torch.device,
 ) -> tuple[ShortcutBatch, ...]:
@@ -404,13 +435,13 @@ def make_mode_batches(
         while remaining:
             current = min(config.fitness_batch_size, remaining)
             batches.append(
-                make_shortcut_batch(
+                make_task_batch(
+                    config,
                     current,
                     int(length),
-                    leak_mode=leak_mode,  # type: ignore[arg-type]
+                    leak_mode=leak_mode,
                     generator=generator,
                     vocabulary=vocabulary,
-                    leak_placement=config.leak_placement,
                     device=device,
                 )
             )
@@ -418,9 +449,76 @@ def make_mode_batches(
     return tuple(batches)
 
 
+def make_task_batch(
+    config: ShortcutCreditExperimentConfig,
+    batch_size: int,
+    length: int,
+    *,
+    leak_mode: str,
+    generator: torch.Generator,
+    vocabulary: PointerNextVocabulary,
+    device: torch.device,
+) -> ShortcutBatch:
+    if config.task_variant == "pointer_next_length":
+        return make_clean_pointer_batch(
+            batch_size,
+            length,
+            generator=generator,
+            vocabulary=vocabulary,
+            device=device,
+        )
+    if not isinstance(vocabulary, ShortcutPointerVocabulary):
+        raise TypeError("shortcut task requires shortcut vocabulary")
+    return make_shortcut_batch(
+        batch_size,
+        length,
+        leak_mode=leak_mode,  # type: ignore[arg-type]
+        generator=generator,
+        vocabulary=vocabulary,
+        leak_placement=config.leak_placement,
+        device=device,
+    )
+
+
+def make_fixed_length_batches(
+    example_count: int,
+    *,
+    length: int,
+    config: ShortcutCreditExperimentConfig,
+    vocabulary: PointerNextVocabulary,
+    generator: torch.Generator,
+    device: torch.device,
+) -> tuple[ShortcutBatch, ...]:
+    batches = []
+    remaining = example_count
+    while remaining:
+        current = min(config.fitness_batch_size, remaining)
+        batches.append(
+            make_task_batch(
+                config,
+                current,
+                length,
+                leak_mode="clean",
+                generator=generator,
+                vocabulary=vocabulary,
+                device=device,
+            )
+        )
+        remaining -= current
+    return tuple(batches)
+
+
+def make_experiment_vocabulary(
+    config: ShortcutCreditExperimentConfig,
+) -> PointerNextVocabulary:
+    if config.task_variant == "pointer_next_length":
+        return PointerNextVocabulary("numbers", 10)
+    return ShortcutPointerVocabulary("numbers", 10)
+
+
 def initialize_forward_model(
     config: ShortcutCreditExperimentConfig,
-    vocabulary: ShortcutPointerVocabulary,
+    vocabulary: PointerNextVocabulary,
     *,
     initialization_seed: int | None,
     device: torch.device,
@@ -443,7 +541,7 @@ RuleConfig = Union[BackwardRuleConfig, AttentionRoutingRuleConfig]
 
 def make_rule_config(
     config: ShortcutCreditExperimentConfig,
-    vocabulary: ShortcutPointerVocabulary,
+    vocabulary: PointerNextVocabulary,
 ) -> RuleConfig:
     if config.backward_rule_type == "gradient_transformer":
         return BackwardRuleConfig(
@@ -463,6 +561,11 @@ def make_rule_config(
         route_output_projection=config.route_output_projection,
         shared_routing_map=config.shared_routing_map,
         condition_on_forward_state=config.condition_on_forward_state,
+        leak_token=(
+            vocabulary.leak_token
+            if isinstance(vocabulary, ShortcutPointerVocabulary)
+            else None
+        ),
     )
 
 
@@ -478,7 +581,7 @@ def initialize_backward_rule(
 
 def initialize_fresh_backward_rule(
     config: ShortcutCreditExperimentConfig,
-    vocabulary: ShortcutPointerVocabulary,
+    vocabulary: PointerNextVocabulary,
     *,
     device: torch.device,
 ) -> BackwardRule:
@@ -495,13 +598,14 @@ def make_inner_batches(
     config: ShortcutCreditExperimentConfig,
     *,
     horizon: int,
-    vocabulary: ShortcutPointerVocabulary,
+    vocabulary: PointerNextVocabulary,
     generator: torch.Generator,
     device: torch.device,
     leak_mode: LeakMode = "correct",
 ) -> tuple[ShortcutBatch, ...]:
     return tuple(
-        make_shortcut_batch(
+        make_task_batch(
+            config,
             config.batch_size,
             int(
                 torch.randint(
@@ -514,7 +618,6 @@ def make_inner_batches(
             leak_mode=leak_mode,
             generator=generator,
             vocabulary=vocabulary,
-            leak_placement=config.leak_placement,
             device=device,
         )
         for _ in range(horizon)
@@ -631,7 +734,7 @@ def train_forward_trajectory(
         raise ValueError("both held-out batch groups must be provided together")
     model = initialize_forward_model(
         config,
-        ShortcutPointerVocabulary("numbers", 10),
+        make_experiment_vocabulary(config),
         initialization_seed=None,
         device=device,
     )
@@ -745,15 +848,11 @@ def trajectory_summary(
     clean: ShortcutMetrics,
     correct: ShortcutMetrics,
 ) -> dict[str, float]:
+    minimum_accuracy = min(clean.mode_accuracy.values())
     summary = {
         f"{prefix}/clean_loss": clean.loss,
         f"{prefix}/clean_accuracy": clean.accuracy,
-        f"{prefix}/masked_accuracy": clean.mode_accuracy["masked"],
-        f"{prefix}/incorrect_accuracy": clean.mode_accuracy["incorrect"],
-        f"{prefix}/min_mode_accuracy": min(
-            clean.mode_accuracy["masked"],
-            clean.mode_accuracy["incorrect"],
-        ),
+        f"{prefix}/min_mode_accuracy": minimum_accuracy,
         f"{prefix}/correct_leak_accuracy": correct.accuracy,
         f"{prefix}/unique_value_predictions": float(
             clean.unique_value_prediction_count
@@ -762,6 +861,8 @@ def trajectory_summary(
             clean.prediction_mode_fraction
         ),
     }
+    for mode, accuracy in clean.mode_accuracy.items():
+        summary[f"{prefix}/{mode}_accuracy"] = accuracy
     if fitness is not None:
         summary[f"{prefix}/fitness"] = fitness
     return summary
@@ -1201,7 +1302,7 @@ def select_adaptive_elite_proposal(
     sigma: float,
     generation_seed: int,
     horizon: int,
-    vocabulary: ShortcutPointerVocabulary,
+    vocabulary: PointerNextVocabulary,
     fitness_batches: tuple[ShortcutBatch, ...],
     correct_batches: tuple[ShortcutBatch, ...],
     acceptance_devices: tuple[torch.device, ...],
@@ -1420,7 +1521,7 @@ def probe_longer_horizon(
     center_rule: BackwardRule,
     generation_seed: int,
     horizon: int,
-    vocabulary: ShortcutPointerVocabulary,
+    vocabulary: PointerNextVocabulary,
     fitness_batches: tuple[ShortcutBatch, ...],
     correct_batches: tuple[ShortcutBatch, ...],
     device: torch.device,
@@ -1618,19 +1719,28 @@ def candidate_summary(
         [metrics.accuracy for metrics in clean_metrics]
     )
     masked_accuracies = torch.tensor(
-        [metrics.mode_accuracy["masked"] for metrics in clean_metrics]
+        [
+            metrics.mode_accuracy.get("masked", metrics.accuracy)
+            for metrics in clean_metrics
+        ]
     )
     incorrect_accuracies = torch.tensor(
-        [metrics.mode_accuracy["incorrect"] for metrics in clean_metrics]
+        [
+            metrics.mode_accuracy.get("incorrect", metrics.accuracy)
+            for metrics in clean_metrics
+        ]
     )
     correct_accuracies = torch.tensor(
         [metrics.accuracy for metrics in correct_metrics]
     )
     masked_losses = torch.tensor(
-        [metrics.mode_loss["masked"] for metrics in clean_metrics]
+        [metrics.mode_loss.get("masked", metrics.loss) for metrics in clean_metrics]
     )
     incorrect_losses = torch.tensor(
-        [metrics.mode_loss["incorrect"] for metrics in clean_metrics]
+        [
+            metrics.mode_loss.get("incorrect", metrics.loss)
+            for metrics in clean_metrics
+        ]
     )
     worst_mode_losses = torch.maximum(masked_losses, incorrect_losses)
     clean_unique_values = torch.tensor(
@@ -1648,10 +1758,7 @@ def candidate_summary(
     best_correct = correct_metrics[best_index]
     robust_index = max(
         range(len(clean_metrics)),
-        key=lambda index: min(
-            clean_metrics[index].mode_accuracy["masked"],
-            clean_metrics[index].mode_accuracy["incorrect"],
-        ),
+        key=lambda index: min(clean_metrics[index].mode_accuracy.values()),
     )
     robust_clean = clean_metrics[robust_index]
     robust_correct = correct_metrics[robust_index]
@@ -1679,8 +1786,12 @@ def candidate_summary(
         "best/fitness": float(fitnesses[best_index]),
         "best/clean_loss": best_clean.loss,
         "best/clean_accuracy": best_clean.accuracy,
-        "best/masked_accuracy": best_clean.mode_accuracy["masked"],
-        "best/incorrect_accuracy": best_clean.mode_accuracy["incorrect"],
+        "best/masked_accuracy": best_clean.mode_accuracy.get(
+            "masked", best_clean.accuracy
+        ),
+        "best/incorrect_accuracy": best_clean.mode_accuracy.get(
+            "incorrect", best_clean.accuracy
+        ),
         "best/correct_leak_accuracy": best_correct.accuracy,
         "best/unique_value_predictions": float(
             best_clean.unique_value_prediction_count
@@ -1690,15 +1801,16 @@ def candidate_summary(
         ),
         "robust/candidate_index": robust_index,
         "robust/min_mode_accuracy": min(
-            robust_clean.mode_accuracy["masked"],
-            robust_clean.mode_accuracy["incorrect"],
+            robust_clean.mode_accuracy.values()
         ),
         "robust/fitness": float(fitnesses[robust_index]),
         "robust/clean_loss": robust_clean.loss,
         "robust/clean_accuracy": robust_clean.accuracy,
-        "robust/masked_accuracy": robust_clean.mode_accuracy["masked"],
+        "robust/masked_accuracy": robust_clean.mode_accuracy.get(
+            "masked", robust_clean.accuracy
+        ),
         "robust/incorrect_accuracy": (
-            robust_clean.mode_accuracy["incorrect"]
+            robust_clean.mode_accuracy.get("incorrect", robust_clean.accuracy)
         ),
         "robust/correct_leak_accuracy": robust_correct.accuracy,
         "robust/unique_value_predictions": float(
@@ -1727,13 +1839,13 @@ def heldout_candidate_summary(
         raise ValueError("candidate metric groups must have matching lengths")
     heldout_masked = torch.tensor(
         [
-            metrics.mode_accuracy["masked"]
+            metrics.mode_accuracy.get("masked", metrics.accuracy)
             for metrics in heldout_clean_metrics
         ]
     )
     heldout_incorrect = torch.tensor(
         [
-            metrics.mode_accuracy["incorrect"]
+            metrics.mode_accuracy.get("incorrect", metrics.accuracy)
             for metrics in heldout_clean_metrics
         ]
     )
@@ -1744,8 +1856,7 @@ def heldout_candidate_summary(
     heldout_worst_loss = torch.tensor(
         [
             max(
-                metrics.mode_loss["masked"],
-                metrics.mode_loss["incorrect"],
+                metrics.mode_loss.values(),
             )
             for metrics in heldout_clean_metrics
         ]
@@ -1772,8 +1883,7 @@ def heldout_candidate_summary(
     robust_index = max(
         range(len(outer_clean_metrics)),
         key=lambda index: min(
-            outer_clean_metrics[index].mode_accuracy["masked"],
-            outer_clean_metrics[index].mode_accuracy["incorrect"],
+            outer_clean_metrics[index].mode_accuracy.values()
         ),
     )
     best_clean = heldout_clean_metrics[best_index]
@@ -1795,9 +1905,11 @@ def heldout_candidate_summary(
             objective_correlation
         ),
         "best/heldout_clean_loss": best_clean.loss,
-        "best/heldout_masked_accuracy": best_clean.mode_accuracy["masked"],
+        "best/heldout_masked_accuracy": best_clean.mode_accuracy.get(
+            "masked", best_clean.accuracy
+        ),
         "best/heldout_incorrect_accuracy": (
-            best_clean.mode_accuracy["incorrect"]
+            best_clean.mode_accuracy.get("incorrect", best_clean.accuracy)
         ),
         "best/heldout_min_mode_accuracy": float(
             heldout_min_accuracy[best_index]
@@ -1807,10 +1919,10 @@ def heldout_candidate_summary(
         ),
         "robust/heldout_clean_loss": robust_clean.loss,
         "robust/heldout_masked_accuracy": (
-            robust_clean.mode_accuracy["masked"]
+            robust_clean.mode_accuracy.get("masked", robust_clean.accuracy)
         ),
         "robust/heldout_incorrect_accuracy": (
-            robust_clean.mode_accuracy["incorrect"]
+            robust_clean.mode_accuracy.get("incorrect", robust_clean.accuracy)
         ),
         "robust/heldout_min_mode_accuracy": float(
             heldout_min_accuracy[robust_index]
@@ -1832,6 +1944,36 @@ def routing_population_summary(
         not statistics for statistics in candidate_statistics
     ):
         return {}
+    if not all(
+        "routing_leak_relative_gate" in item
+        for statistics in candidate_statistics
+        for item in statistics
+    ):
+        mean_gates = torch.tensor(
+            [
+                sum(item["routing_gate"] for item in statistics)
+                / len(statistics)
+                for statistics in candidate_statistics
+            ]
+        )
+        suppressed_fractions = torch.tensor(
+            [
+                sum(
+                    item["routing_suppressed_fraction"]
+                    for item in statistics
+                )
+                / len(statistics)
+                for statistics in candidate_statistics
+            ]
+        )
+        return {
+            "backward/population_gate_mean": float(mean_gates.mean()),
+            "backward/population_gate_min": float(mean_gates.min()),
+            "backward/population_gate_max": float(mean_gates.max()),
+            "backward/population_suppressed_fraction_mean": float(
+                suppressed_fractions.mean()
+            ),
+        }
     query_relative_gates = torch.tensor(
         [
             sum(
@@ -1891,10 +2033,7 @@ def routing_population_summary(
     best_index = int(fitnesses.argmax())
     robust_index = max(
         range(len(clean_metrics)),
-        key=lambda index: min(
-            clean_metrics[index].mode_accuracy["masked"],
-            clean_metrics[index].mode_accuracy["incorrect"],
-        ),
+        key=lambda index: min(clean_metrics[index].mode_accuracy.values()),
     )
     summary = {
         "backward/population_leak_relative_gate_min": float(
@@ -2176,10 +2315,7 @@ def routing_population_function_summary(
             )
     robust_index = max(
         range(len(clean_metrics)),
-        key=lambda index: min(
-            clean_metrics[index].mode_accuracy["masked"],
-            clean_metrics[index].mode_accuracy["incorrect"],
-        ),
+        key=lambda index: min(clean_metrics[index].mode_accuracy.values()),
     )
     return function_delta_alignment_summary(
         torch.stack(candidate_deltas),
@@ -2275,8 +2411,15 @@ def load_checkpoint(
         "gradient_transformer",
     )
     if rule_type == "attention_router":
+        routing_config = dict(checkpoint["backward_rule_config"])
+        shortcut_vocabulary = ShortcutPointerVocabulary("numbers", 10)
+        if (
+            "leak_token" not in routing_config
+            and routing_config["vocab_size"] == shortcut_vocabulary.size
+        ):
+            routing_config["leak_token"] = shortcut_vocabulary.leak_token
         rule_config: RuleConfig = AttentionRoutingRuleConfig(
-            **checkpoint["backward_rule_config"]
+            **routing_config
         )
     elif rule_type == "gradient_transformer":
         rule_config = BackwardRuleConfig(
@@ -2348,7 +2491,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
     config_path = output_dir / "config.json"
     config_path.write_text(json.dumps(asdict(config), indent=2) + "\n")
 
-    vocabulary = ShortcutPointerVocabulary("numbers", 10)
+    vocabulary = make_experiment_vocabulary(config)
     backward_config = make_rule_config(config, vocabulary)
     if config.resume is None:
         center_rule = initialize_fresh_backward_rule(
@@ -2371,24 +2514,64 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         plateau_state.search_sigma = config.sigma
 
     fitness_generator = torch.Generator().manual_seed(config.seed + 10_000)
-    fitness_batches = make_fitness_batches(
-        config.fitness_examples,
-        min_length=config.min_length,
-        max_length=config.max_length,
-        batch_size=config.fitness_batch_size,
-        generator=fitness_generator,
-        vocabulary=vocabulary,
-        leak_placement=config.leak_placement,
-        device=device,
-    )
+    if config.task_variant == "pointer_next_length":
+        assert config.fitness_length is not None
+        assert config.heldout_length is not None
+        fitness_batches = make_fixed_length_batches(
+            config.fitness_examples,
+            length=config.fitness_length,
+            config=config,
+            vocabulary=vocabulary,
+            generator=fitness_generator,
+            device=device,
+        )
+    else:
+        if not isinstance(vocabulary, ShortcutPointerVocabulary):
+            raise TypeError("shortcut task requires shortcut vocabulary")
+        fitness_batches = make_fitness_batches(
+            config.fitness_examples,
+            min_length=config.min_length,
+            max_length=config.max_length,
+            batch_size=config.fitness_batch_size,
+            generator=fitness_generator,
+            vocabulary=vocabulary,
+            leak_placement=config.leak_placement,
+            device=device,
+        )
     correct_batches = make_mode_batches(
         config.correct_eval_examples,
-        leak_mode="correct",
+        leak_mode=(
+            "clean"
+            if config.task_variant == "pointer_next_length"
+            else "correct"
+        ),
         config=config,
         vocabulary=vocabulary,
         generator=fitness_generator,
         device=device,
     )
+    fixed_heldout_fitness_batches = None
+    fixed_heldout_correct_batches = None
+    if config.task_variant == "pointer_next_length":
+        fixed_heldout_generator = torch.Generator().manual_seed(
+            config.seed + 20_000
+        )
+        fixed_heldout_fitness_batches = make_fixed_length_batches(
+            config.heldout_examples,
+            length=config.heldout_length,
+            config=config,
+            vocabulary=vocabulary,
+            generator=fixed_heldout_generator,
+            device=device,
+        )
+        fixed_heldout_correct_batches = make_mode_batches(
+            config.heldout_examples,
+            leak_mode="clean",
+            config=config,
+            vocabulary=vocabulary,
+            generator=fixed_heldout_generator,
+            device=device,
+        )
 
     wandb_run = maybe_initialize_wandb(config)
     started_at = time.monotonic()
@@ -2402,27 +2585,34 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             raise RuntimeError("search sigma was not initialized")
         generation_seed = config.seed * 1_000_003 + generation * 10_007
         initialization_seed = generation_seed + 1
-        heldout_generator = torch.Generator().manual_seed(
-            generation_seed + 4
-        )
-        heldout_fitness_batches = make_fitness_batches(
-            config.fitness_examples,
-            min_length=config.min_length,
-            max_length=config.max_length,
-            batch_size=config.fitness_batch_size,
-            generator=heldout_generator,
-            vocabulary=vocabulary,
-            leak_placement=config.leak_placement,
-            device=device,
-        )
-        heldout_correct_batches = make_mode_batches(
-            config.correct_eval_examples,
-            leak_mode="correct",
-            config=config,
-            vocabulary=vocabulary,
-            generator=heldout_generator,
-            device=device,
-        )
+        if fixed_heldout_fitness_batches is not None:
+            assert fixed_heldout_correct_batches is not None
+            heldout_fitness_batches = fixed_heldout_fitness_batches
+            heldout_correct_batches = fixed_heldout_correct_batches
+        else:
+            heldout_generator = torch.Generator().manual_seed(
+                generation_seed + 4
+            )
+            if not isinstance(vocabulary, ShortcutPointerVocabulary):
+                raise TypeError("shortcut task requires shortcut vocabulary")
+            heldout_fitness_batches = make_fitness_batches(
+                config.fitness_examples,
+                min_length=config.min_length,
+                max_length=config.max_length,
+                batch_size=config.fitness_batch_size,
+                generator=heldout_generator,
+                vocabulary=vocabulary,
+                leak_placement=config.leak_placement,
+                device=device,
+            )
+            heldout_correct_batches = make_mode_batches(
+                config.correct_eval_examples,
+                leak_mode="correct",
+                config=config,
+                vocabulary=vocabulary,
+                generator=heldout_generator,
+                device=device,
+            )
         base_model = initialize_forward_model(
             config,
             vocabulary,
@@ -2735,16 +2925,20 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             heldout_correct_batches=heldout_correct_batches,
             device=device,
         )
-        masked_training_trajectory = train_forward_trajectory(
-            config,
-            base_state=base_state,
-            backward_rule=None,
-            inner_batches=masked_inner_batches,
-            fitness_batches=fitness_batches,
-            correct_batches=correct_batches,
-            heldout_fitness_batches=heldout_fitness_batches,
-            heldout_correct_batches=heldout_correct_batches,
-            device=device,
+        masked_training_trajectory = (
+            ordinary_trajectory
+            if config.task_variant == "pointer_next_length"
+            else train_forward_trajectory(
+                config,
+                base_state=base_state,
+                backward_rule=None,
+                inner_batches=masked_inner_batches,
+                fitness_batches=fitness_batches,
+                correct_batches=correct_batches,
+                heldout_fitness_batches=heldout_fitness_batches,
+                heldout_correct_batches=heldout_correct_batches,
+                device=device,
+            )
         )
         ordinary_fitness = candidate_fitness(
             config.fitness_objective,
@@ -3157,25 +3351,16 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 masked_training_heldout_correct,
             )
         )
-        center_min_accuracy = min(
-            center_clean.mode_accuracy["masked"],
-            center_clean.mode_accuracy["incorrect"],
-        )
-        ordinary_min_accuracy = min(
-            ordinary_clean.mode_accuracy["masked"],
-            ordinary_clean.mode_accuracy["incorrect"],
-        )
+        center_min_accuracy = min(center_clean.mode_accuracy.values())
+        ordinary_min_accuracy = min(ordinary_clean.mode_accuracy.values())
         masked_training_min_accuracy = min(
-            masked_training_clean.mode_accuracy["masked"],
-            masked_training_clean.mode_accuracy["incorrect"],
+            masked_training_clean.mode_accuracy.values()
         )
         center_heldout_min_accuracy = min(
-            center_heldout_clean.mode_accuracy["masked"],
-            center_heldout_clean.mode_accuracy["incorrect"],
+            center_heldout_clean.mode_accuracy.values()
         )
         ordinary_heldout_min_accuracy = min(
-            ordinary_heldout_clean.mode_accuracy["masked"],
-            ordinary_heldout_clean.mode_accuracy["incorrect"],
+            ordinary_heldout_clean.mode_accuracy.values()
         )
         summary.update(
             {
@@ -3200,6 +3385,52 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 ),
             }
         )
+        if config.task_variant == "pointer_next_length":
+            assert config.fitness_length is not None
+            assert config.heldout_length is not None
+            fitness_prefix = f"length_{config.fitness_length}"
+            heldout_prefix = f"length_{config.heldout_length}"
+            summary.update(
+                {
+                    "task/train_max_length": float(config.max_length),
+                    "task/fitness_length": float(config.fitness_length),
+                    "task/heldout_length": float(config.heldout_length),
+                    f"{fitness_prefix}/center_accuracy": (
+                        center_clean.accuracy
+                    ),
+                    f"{fitness_prefix}/center_loss": center_clean.loss,
+                    f"{fitness_prefix}/ordinary_accuracy": (
+                        ordinary_clean.accuracy
+                    ),
+                    f"{fitness_prefix}/ordinary_loss": ordinary_clean.loss,
+                    f"{fitness_prefix}/center_minus_ordinary_accuracy": (
+                        center_clean.accuracy - ordinary_clean.accuracy
+                    ),
+                    f"{heldout_prefix}/center_accuracy": (
+                        center_heldout_clean.accuracy
+                    ),
+                    f"{heldout_prefix}/center_loss": (
+                        center_heldout_clean.loss
+                    ),
+                    f"{heldout_prefix}/ordinary_accuracy": (
+                        ordinary_heldout_clean.accuracy
+                    ),
+                    f"{heldout_prefix}/ordinary_loss": (
+                        ordinary_heldout_clean.loss
+                    ),
+                    f"{heldout_prefix}/center_minus_ordinary_accuracy": (
+                        center_heldout_clean.accuracy
+                        - ordinary_heldout_clean.accuracy
+                    ),
+                    "train_domain/center_accuracy": center_correct.accuracy,
+                    "train_domain/ordinary_accuracy": (
+                        ordinary_correct.accuracy
+                    ),
+                    "train_domain/center_minus_ordinary_accuracy": (
+                        center_correct.accuracy - ordinary_correct.accuracy
+                    ),
+                }
+            )
         if isinstance(center_rule, AttentionRoutingRule):
             summary.update(
                 routing_population_summary(
@@ -3604,8 +3835,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fitness-examples", type=int, default=512)
     parser.add_argument("--fitness-batch-size", type=int, default=64)
     parser.add_argument("--correct-eval-examples", type=int, default=128)
+    parser.add_argument("--heldout-examples", type=int, default=128)
+    parser.add_argument(
+        "--task-variant",
+        choices=("shortcut", "pointer_next_length"),
+        default="shortcut",
+        help="shortcut resistance or clean pointer-next length generalization",
+    )
     parser.add_argument("--min-length", type=int, default=8)
     parser.add_argument("--max-length", type=int, default=32)
+    parser.add_argument("--fitness-length", type=int)
+    parser.add_argument("--heldout-length", type=int)
     parser.add_argument(
         "--leak-placement",
         choices=("suffix", "random_list"),
