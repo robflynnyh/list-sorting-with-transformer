@@ -185,3 +185,38 @@ contention made the benchmark slower.
 
 Tracked output:
 [`results/sparse_selector_diagnostics.json`](results/sparse_selector_diagnostics.json).
+
+### Vectorized population implementation
+
+The remaining serial candidate loop was replaced with a functional population
+path. Parameters and Adam moments carry a leading population axis, and
+`torch.vmap` computes independent score-reversal gradients for each member.
+The group is sharded over three GPUs by default so GPU 3 remains available to
+other users.
+
+The score-only reversal custom backward was first expressed as an equivalent
+gradient proxy over live attention weights. A failed prototype accidentally
+formed those weights from detached Q/K tensors and produced tied candidates;
+that result was rejected. A regression test now requires score reversal to
+change Q/K gradients while preserving ordinary value gradients.
+
+The corrected vectorized and serial implementations were compared on the same
+generation-7 checkpoint, batches, masks, and random seeds:
+
+| Metric | Serial | Vectorized |
+| --- | ---: | ---: |
+| Reward std | 0.00177364 | 0.00177359 |
+| Best fixed clean accuracy | 23.4375% | 23.4375% |
+| Oracle reverse probability | 0.05425819 | 0.05425823 |
+| Other reverse probability | 0.05716732 | 0.05716735 |
+| Population seconds | 47.32 | 16.67 |
+| Wall seconds | 71.06 | 40.48 |
+
+Moving the shared selector sampling and policy update from CPU to GPU 0 then
+reduced total wall time to 23.73 seconds for group size 32 and horizon 160 on
+three GPUs. This is a 3.0x end-to-end speedup over the matched serial run and
+does not occupy the spare fourth GPU.
+
+The trainer now supports exact checkpoint resume, including the fixed fitness
+and held-out sets, selector Adam state, horizon state, and existing metrics
+history.

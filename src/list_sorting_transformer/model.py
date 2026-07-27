@@ -298,8 +298,6 @@ def source_reversed_scaled_dot_product_attention(
         raise ValueError(
             "source multipliers must have shape [batch, key_time]"
         )
-    if not bool(torch.isfinite(source_multipliers).all()):
-        raise ValueError("source multipliers must be finite")
     if attention_penalty_strength < 0:
         raise ValueError("attention penalty strength must be nonnegative")
 
@@ -331,6 +329,44 @@ def source_reversed_scaled_dot_product_attention(
         device=weights.device,
         dtype=weights.dtype,
     )
+    if (
+        reverse_score_credit
+        and not reverse_value_credit
+        and attention_penalty_strength == 0
+    ):
+        live_scores = query @ key.transpose(
+            -2,
+            -1,
+        ) / query.shape[-1] ** 0.5
+        if is_causal:
+            query_length = query.shape[-2]
+            key_length = key.shape[-2]
+            causal_mask = torch.ones(
+                query_length,
+                key_length,
+                dtype=torch.bool,
+                device=query.device,
+            ).tril(diagonal=key_length - query_length)
+            live_scores = live_scores.masked_fill(
+                ~causal_mask,
+                float("-inf"),
+            )
+        if attention_mask is not None:
+            live_scores = live_scores.masked_fill(
+                ~attention_mask,
+                float("-inf"),
+            )
+        live_weights = live_scores.softmax(dim=-1)
+        edge_multipliers = multipliers[:, None, None, :]
+        routed_weights = (
+            live_weights * edge_multipliers
+            + live_weights.detach() * (1 - edge_multipliers)
+        )
+        routed_attention = routed_weights @ value
+        reversed_attended = routed_attention + (
+            attended - routed_attention
+        ).detach()
+        return reversed_attended, live_weights.detach() @ value.detach()
     backward_attended = (
         (
             weights * multipliers[:, None, None, :]

@@ -39,6 +39,9 @@ from list_sorting_transformer.token_gradient_selector import (
     selector_probability_statistics,
     standardize_group_rewards,
 )
+from list_sorting_transformer.vectorized_reversal_population import (
+    train_vectorized_candidate_shard,
+)
 
 
 @dataclass(frozen=True)
@@ -248,6 +251,61 @@ def evaluate_population(
     return tuple(sorted(results, key=lambda result: result.candidate_index))
 
 
+def evaluate_population_vectorized(
+    *,
+    devices: tuple[str, ...],
+    config: ShortcutCreditExperimentConfig,
+    base_state: dict[str, Tensor],
+    inner_batches: tuple[ShortcutBatch, ...],
+    trajectories: tuple[SelectorTrajectory, ...],
+    fitness_batches: tuple[ShortcutBatch, ...],
+    heldout_batches: tuple[ShortcutBatch, ...],
+    correct_batches: tuple[ShortcutBatch, ...],
+    initial_clean_loss: float,
+    reversal_scale: float,
+    vocabulary: ShortcutPointerVocabulary,
+) -> tuple[CandidateResult, ...]:
+    shards = tuple(
+        tuple(range(device_index, len(trajectories), len(devices)))
+        for device_index in range(len(devices))
+    )
+    actions = tuple(
+        trajectory.actions for trajectory in trajectories
+    )
+    with ThreadPoolExecutor(max_workers=len(devices)) as executor:
+        futures = [
+            executor.submit(
+                train_vectorized_candidate_shard,
+                candidate_indices=indices,
+                device_name=device,
+                config=config,
+                base_state=base_state,
+                inner_batches=inner_batches,
+                actions=actions,
+                fitness_batches=fitness_batches,
+                heldout_batches=heldout_batches,
+                correct_batches=correct_batches,
+                initial_clean_loss=initial_clean_loss,
+                reversal_scale=reversal_scale,
+                vocabulary=vocabulary,
+            )
+            for device, indices in zip(devices, shards)
+            if indices
+        ]
+        results = [
+            CandidateResult(
+                candidate_index=result.candidate_index,
+                reward=result.reward,
+                clean=result.clean,
+                heldout_clean=result.heldout_clean,
+                correct=result.correct,
+            )
+            for future in futures
+            for result in future.result()
+        ]
+    return tuple(sorted(results, key=lambda result: result.candidate_index))
+
+
 def update_plateau(
     state: PlateauState,
     reward: float,
@@ -321,10 +379,12 @@ def main() -> None:
     parser.add_argument(
         "--candidate-devices",
         type=parse_devices,
-        default=parse_devices("cuda:0,cuda:1,cuda:2,cuda:3"),
+        default=parse_devices("cuda:0,cuda:1,cuda:2"),
     )
+    parser.add_argument("--vectorized-population", action="store_true")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--resume", type=Path)
     parser.add_argument("--checkpoint-interval", type=int, default=10)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument(
@@ -396,42 +456,69 @@ def main() -> None:
         initial_reverse_probability=args.initial_reverse_probability,
     )
     torch.manual_seed(args.seed + 20_000)
-    selector = TokenGradientSelector(selector_config)
+    selector_device = torch.device(args.candidate_devices[0])
+    selector = TokenGradientSelector(selector_config).to(selector_device)
     selector_optimizer = torch.optim.Adam(
         selector.parameters(),
         lr=args.selector_learning_rate,
     )
 
-    fixed_generator = torch.Generator().manual_seed(args.seed + 10_000)
-    fitness_batches = make_fitness_batches(
-        args.fitness_examples,
-        min_length=args.min_length,
-        max_length=args.max_length,
-        batch_size=forward_config.fitness_batch_size,
-        generator=fixed_generator,
-        vocabulary=vocabulary,
-        leak_placement=args.leak_placement,
-        device="cpu",
-    )
-    correct_batches = make_mode_batches(
-        forward_config.correct_eval_examples,
-        leak_mode="correct",
-        config=forward_config,
-        vocabulary=vocabulary,
-        generator=fixed_generator,
-        device=torch.device("cpu"),
-    )
-    heldout_generator = torch.Generator().manual_seed(args.seed + 30_000)
-    heldout_batches = make_fitness_batches(
-        args.fitness_examples,
-        min_length=args.min_length,
-        max_length=args.max_length,
-        batch_size=forward_config.fitness_batch_size,
-        generator=heldout_generator,
-        vocabulary=vocabulary,
-        leak_placement=args.leak_placement,
-        device="cpu",
-    )
+    if args.resume is None:
+        fixed_generator = torch.Generator().manual_seed(args.seed + 10_000)
+        fitness_batches = make_fitness_batches(
+            args.fitness_examples,
+            min_length=args.min_length,
+            max_length=args.max_length,
+            batch_size=forward_config.fitness_batch_size,
+            generator=fixed_generator,
+            vocabulary=vocabulary,
+            leak_placement=args.leak_placement,
+            device="cpu",
+        )
+        correct_batches = make_mode_batches(
+            forward_config.correct_eval_examples,
+            leak_mode="correct",
+            config=forward_config,
+            vocabulary=vocabulary,
+            generator=fixed_generator,
+            device=torch.device("cpu"),
+        )
+        heldout_generator = torch.Generator().manual_seed(
+            args.seed + 30_000
+        )
+        heldout_batches = make_fitness_batches(
+            args.fitness_examples,
+            min_length=args.min_length,
+            max_length=args.max_length,
+            batch_size=forward_config.fitness_batch_size,
+            generator=heldout_generator,
+            vocabulary=vocabulary,
+            leak_placement=args.leak_placement,
+            device="cpu",
+        )
+        start_generation = 0
+        horizon = args.horizon
+        plateau = PlateauState()
+        consecutive_tied_groups = 0
+    else:
+        checkpoint = torch.load(args.resume, map_location="cpu")
+        if checkpoint["selector_config"] != selector_config.as_dict():
+            raise ValueError(
+                "resume selector configuration does not match"
+            )
+        selector.load_state_dict(checkpoint["selector"])
+        selector_optimizer.load_state_dict(
+            checkpoint["selector_optimizer"]
+        )
+        fitness_batches = checkpoint["fitness_batches"]
+        heldout_batches = checkpoint["heldout_batches"]
+        correct_batches = checkpoint["correct_batches"]
+        start_generation = int(checkpoint["generation"]) + 1
+        horizon = int(checkpoint["horizon"])
+        plateau = PlateauState(**checkpoint["plateau"])
+        consecutive_tied_groups = int(
+            checkpoint["consecutive_tied_groups"]
+        )
 
     run_config = {
         **vars(args),
@@ -449,15 +536,30 @@ def main() -> None:
     )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = args.output_dir / "metrics.jsonl"
-    metrics_path.write_text("")
-    (args.output_dir / "config.json").write_text(
-        json.dumps(run_config, indent=2, sort_keys=True, default=str) + "\n"
-    )
+    if args.resume is None:
+        metrics_path.write_text("")
+        (args.output_dir / "config.json").write_text(
+            json.dumps(
+                run_config,
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+            + "\n"
+        )
+    elif not metrics_path.exists():
+        metrics_path.write_text("")
+        (args.output_dir / "config.json").write_text(
+            json.dumps(
+                run_config,
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+            + "\n"
+        )
 
-    horizon = args.horizon
-    plateau = PlateauState()
-    consecutive_tied_groups = 0
-    for generation in range(args.generations):
+    for generation in range(start_generation, args.generations):
         generation_seed = args.seed * 1_000_003 + generation * 10_007
         base_model = initialize_forward_model(
             forward_config,
@@ -487,14 +589,19 @@ def main() -> None:
             group_size=args.group_size,
             vocabulary=vocabulary,
             generators=tuple(
-                torch.Generator().manual_seed(
+                torch.Generator(device=selector_device).manual_seed(
                     generation_seed + 100 + candidate_index
                 )
                 for candidate_index in range(args.group_size)
             ),
         )
         population_started_at = time.perf_counter()
-        results = evaluate_population(
+        population_evaluator = (
+            evaluate_population_vectorized
+            if args.vectorized_population
+            else evaluate_population
+        )
+        results = population_evaluator(
             devices=args.candidate_devices,
             config=forward_config,
             base_state=base_state,

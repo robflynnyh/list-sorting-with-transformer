@@ -84,6 +84,8 @@ def test_source_reversal_negates_selected_value_credit_only() -> None:
     ordinary_value = torch.randn(
         1, 1, 3, 4, generator=generator, requires_grad=True
     )
+    reversed_query = query.detach().clone().requires_grad_()
+    reversed_key = key.detach().clone().requires_grad_()
     reversed_value = ordinary_value.detach().clone().requires_grad_()
     output_gradient = torch.randn(
         1, 1, 3, 4, generator=generator
@@ -97,8 +99,8 @@ def test_source_reversal_negates_selected_value_credit_only() -> None:
         is_causal=True,
     )
     reversed_output, _ = source_reversed_scaled_dot_product_attention(
-        query.detach().clone().requires_grad_(),
-        key.detach().clone().requires_grad_(),
+        reversed_query,
+        reversed_key,
         reversed_value,
         source_multipliers=torch.tensor([[1.0, -1.0, 1.0]]),
         is_causal=True,
@@ -127,6 +129,8 @@ def test_score_only_reversal_keeps_ordinary_value_credit() -> None:
     ordinary_value = torch.randn(
         1, 1, 3, 4, generator=generator, requires_grad=True
     )
+    reversed_query = query.detach().clone().requires_grad_()
+    reversed_key = key.detach().clone().requires_grad_()
     reversed_value = ordinary_value.detach().clone().requires_grad_()
     output_gradient = torch.randn(1, 1, 3, 4, generator=generator)
 
@@ -138,8 +142,8 @@ def test_score_only_reversal_keeps_ordinary_value_credit() -> None:
         is_causal=True,
     )
     reversed_output, _ = source_reversed_scaled_dot_product_attention(
-        query.detach().clone().requires_grad_(),
-        key.detach().clone().requires_grad_(),
+        reversed_query,
+        reversed_key,
         reversed_value,
         source_multipliers=torch.tensor([[1.0, -1.0, 1.0]]),
         reverse_value_credit=False,
@@ -149,6 +153,8 @@ def test_score_only_reversal_keeps_ordinary_value_credit() -> None:
     reversed_output.backward(output_gradient)
 
     torch.testing.assert_close(reversed_value.grad, ordinary_value.grad)
+    assert not torch.equal(reversed_query.grad, query.grad)
+    assert not torch.equal(reversed_key.grad, key.grad)
 
 
 def test_attention_penalty_matches_explicit_selected_mass_loss() -> None:

@@ -162,8 +162,10 @@ def sample_selector_trajectory(
     other_total = 0
     was_training = selector.training
     selector.eval()
+    selector_device = next(selector.parameters()).device
     for batch in batches:
-        logits = selector(batch.input_ids)
+        input_ids = batch.input_ids.to(selector_device)
+        logits = selector(input_ids)
         probabilities = logits.softmax(dim=-1)[..., 1]
         selected = torch.rand(
             probabilities.shape,
@@ -171,7 +173,7 @@ def sample_selector_trajectory(
             device=probabilities.device,
         ).lt(probabilities)
         oracle = oracle_shortcut_selection(
-            batch.input_ids,
+            input_ids,
             vocabulary,
         )
         actions.append(selected.cpu())
@@ -212,12 +214,14 @@ def sample_selector_trajectories(
     other_total = 0
     was_training = selector.training
     selector.eval()
+    selector_device = next(selector.parameters()).device
     for batch in batches:
+        input_ids = batch.input_ids.to(selector_device)
         probabilities = selector(
-            batch.input_ids
+            input_ids
         ).softmax(dim=-1)[..., 1]
         oracle = oracle_shortcut_selection(
-            batch.input_ids,
+            input_ids,
             vocabulary,
         )
         token_total += probabilities.numel()
@@ -311,8 +315,10 @@ def grouped_trajectory_policy_terms(
         device=log_probability_sums.device,
     )
     token_count = 0
+    selector_device = next(selector.parameters()).device
     for batch_index, batch in enumerate(batches):
-        logits = selector(batch.input_ids)
+        input_ids = batch.input_ids.to(selector_device)
+        logits = selector(input_ids)
         log_probabilities = logits.log_softmax(dim=-1)
         selected = torch.stack(
             [
@@ -320,7 +326,7 @@ def grouped_trajectory_policy_terms(
                 for trajectory in trajectories
             ]
         ).to(device=logits.device, dtype=torch.long)
-        if selected.shape[1:] != batch.input_ids.shape:
+        if selected.shape[1:] != input_ids.shape:
             raise ValueError("actions must match their batch token shapes")
         expanded = log_probabilities.unsqueeze(0).expand(
             group_size,
@@ -336,7 +342,7 @@ def grouped_trajectory_policy_terms(
         entropy_sum = entropy_sum - (
             probabilities * log_probabilities
         ).sum()
-        token_count += batch.input_ids.numel()
+        token_count += input_ids.numel()
     return (
         log_probability_sums / token_count,
         entropy_sum / token_count,
@@ -354,12 +360,14 @@ def selector_probability_statistics(
 
     was_training = selector.training
     selector.eval()
+    selector_device = next(selector.parameters()).device
     oracle_probabilities = []
     other_probabilities = []
     for batch in batches:
-        probabilities = selector(batch.input_ids).softmax(dim=-1)[..., 1]
+        input_ids = batch.input_ids.to(selector_device)
+        probabilities = selector(input_ids).softmax(dim=-1)[..., 1]
         oracle = oracle_shortcut_selection(
-            batch.input_ids,
+            input_ids,
             vocabulary,
         )
         oracle_probabilities.append(probabilities[oracle])
