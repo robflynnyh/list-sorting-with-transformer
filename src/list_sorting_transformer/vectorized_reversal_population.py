@@ -368,3 +368,26 @@ def train_vectorized_candidate_shard(
         )
         for local_index, candidate_index in enumerate(candidate_indices)
     ]
+
+
+def train_vectorized_candidate_chunks(
+    *,
+    candidate_indices: tuple[int, ...],
+    chunk_size: int,
+    **kwargs: object,
+) -> list[VectorizedCandidateResult]:
+    """Run bounded-size vectorized chunks sequentially on one device."""
+
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be positive")
+    results = []
+    for start in range(0, len(candidate_indices), chunk_size):
+        results.extend(
+            train_vectorized_candidate_shard(
+                candidate_indices=candidate_indices[
+                    start : start + chunk_size
+                ],
+                **kwargs,
+            )
+        )
+    return results

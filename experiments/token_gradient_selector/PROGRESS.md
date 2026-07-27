@@ -220,3 +220,25 @@ does not occupy the spare fourth GPU.
 The trainer now supports exact checkpoint resume, including the fixed fitness
 and held-out sets, selector Adam state, horizon state, and existing metrics
 history.
+
+### Unattended continuation
+
+The role-level interpretation of the learned policy remains unresolved:
+reversing non-leak tokens may be useful if it moves attention toward the
+genuine source token, so leak-versus-other selection probability is not by
+itself a valid stopping criterion. The decisive evidence remains fixed and
+held-out clean performance.
+
+An unattended continuation was launched at `2026-07-27T10:34:06Z` from dense
+selector generation 34 with:
+
+- three GPUs (`cuda:0,cuda:1,cuda:2`), leaving GPU 3 available;
+- group size 128 in vectorized chunks of 12;
+- horizon 160, score-only reversal scale 4, and forward learning rate `1e-4`;
+- the original fixed fitness and held-out sets restored from the checkpoint;
+- no entropy bonus and reward standard-deviation cutoff `1e-3`;
+- a 30-minute external wall-clock limit, with a checkpoint after every
+  completed generation.
+
+The run is intentionally not inspected while active. Its outputs are under
+`/exp/exp4/acp21rjf/.scratch/list-sorting-token-reversal/selector_background_30m_h160_g128`.

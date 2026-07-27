@@ -40,7 +40,7 @@ from list_sorting_transformer.token_gradient_selector import (
     standardize_group_rewards,
 )
 from list_sorting_transformer.vectorized_reversal_population import (
-    train_vectorized_candidate_shard,
+    train_vectorized_candidate_chunks,
 )
 
 
@@ -264,6 +264,7 @@ def evaluate_population_vectorized(
     initial_clean_loss: float,
     reversal_scale: float,
     vocabulary: ShortcutPointerVocabulary,
+    chunk_size: int,
 ) -> tuple[CandidateResult, ...]:
     shards = tuple(
         tuple(range(device_index, len(trajectories), len(devices)))
@@ -275,8 +276,9 @@ def evaluate_population_vectorized(
     with ThreadPoolExecutor(max_workers=len(devices)) as executor:
         futures = [
             executor.submit(
-                train_vectorized_candidate_shard,
+                train_vectorized_candidate_chunks,
                 candidate_indices=indices,
+                chunk_size=chunk_size,
                 device_name=device,
                 config=config,
                 base_state=base_state,
@@ -382,9 +384,11 @@ def main() -> None:
         default=parse_devices("cuda:0,cuda:1,cuda:2"),
     )
     parser.add_argument("--vectorized-population", action="store_true")
+    parser.add_argument("--vectorized-chunk-size", type=int, default=12)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--resume", type=Path)
+    parser.add_argument("--resume-horizon", type=int)
     parser.add_argument("--checkpoint-interval", type=int, default=10)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument(
@@ -406,6 +410,7 @@ def main() -> None:
         args.selector_d_model,
         args.selector_heads,
         args.checkpoint_interval,
+        args.vectorized_chunk_size,
     )
     if any(value < 1 for value in positive_integers):
         raise ValueError("integer settings must be positive")
@@ -413,6 +418,16 @@ def main() -> None:
         raise ValueError("group-size must be at least two")
     if args.horizon > args.max_horizon:
         raise ValueError("horizon must not exceed max-horizon")
+    if (
+        args.resume_horizon is not None
+        and (
+            args.resume is None
+            or not 1 <= args.resume_horizon <= args.max_horizon
+        )
+    ):
+        raise ValueError(
+            "resume-horizon requires resume and must not exceed max-horizon"
+        )
     if not 0 <= args.plateau_ema_decay < 1:
         raise ValueError("plateau-ema-decay must be in [0, 1)")
     if min(
@@ -502,7 +517,13 @@ def main() -> None:
         consecutive_tied_groups = 0
     else:
         checkpoint = torch.load(args.resume, map_location="cpu")
-        if checkpoint["selector_config"] != selector_config.as_dict():
+        checkpoint_selector_config = checkpoint["selector_config"]
+        current_selector_config = selector_config.as_dict()
+        shared_current_config = {
+            key: current_selector_config[key]
+            for key in checkpoint_selector_config
+        }
+        if checkpoint_selector_config != shared_current_config:
             raise ValueError(
                 "resume selector configuration does not match"
             )
@@ -514,7 +535,11 @@ def main() -> None:
         heldout_batches = checkpoint["heldout_batches"]
         correct_batches = checkpoint["correct_batches"]
         start_generation = int(checkpoint["generation"]) + 1
-        horizon = int(checkpoint["horizon"])
+        horizon = (
+            args.resume_horizon
+            if args.resume_horizon is not None
+            else int(checkpoint["horizon"])
+        )
         plateau = PlateauState(**checkpoint["plateau"])
         consecutive_tied_groups = int(
             checkpoint["consecutive_tied_groups"]
@@ -596,24 +621,26 @@ def main() -> None:
             ),
         )
         population_started_at = time.perf_counter()
-        population_evaluator = (
-            evaluate_population_vectorized
-            if args.vectorized_population
-            else evaluate_population
-        )
-        results = population_evaluator(
-            devices=args.candidate_devices,
-            config=forward_config,
-            base_state=base_state,
-            inner_batches=inner_batches,
-            trajectories=trajectories,
-            fitness_batches=fitness_batches,
-            heldout_batches=heldout_batches,
-            correct_batches=correct_batches,
-            initial_clean_loss=initial_clean.loss,
-            reversal_scale=args.reversal_scale,
-            vocabulary=vocabulary,
-        )
+        population_arguments = {
+            "devices": args.candidate_devices,
+            "config": forward_config,
+            "base_state": base_state,
+            "inner_batches": inner_batches,
+            "trajectories": trajectories,
+            "fitness_batches": fitness_batches,
+            "heldout_batches": heldout_batches,
+            "correct_batches": correct_batches,
+            "initial_clean_loss": initial_clean.loss,
+            "reversal_scale": args.reversal_scale,
+            "vocabulary": vocabulary,
+        }
+        if args.vectorized_population:
+            results = evaluate_population_vectorized(
+                **population_arguments,
+                chunk_size=args.vectorized_chunk_size,
+            )
+        else:
+            results = evaluate_population(**population_arguments)
         population_seconds = time.perf_counter() - population_started_at
         rewards = torch.tensor(
             [result.reward for result in results],
