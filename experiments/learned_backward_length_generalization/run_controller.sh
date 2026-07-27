@@ -5,12 +5,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUN_NAME="${RUN_NAME:-pointer-next-length20-fitness50-heldout400-seed7}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${ROOT}/artifacts/learned_backward_length_generalization}"
 GPU_DEVICES="${GPU_DEVICES:-cuda:0,cuda:1,cuda:2}"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 
 cd "${ROOT}"
 export PYTHONPATH="${ROOT}/src:${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 export WANDB__SERVICE_WAIT="${WANDB__SERVICE_WAIT:-300}"
 
-exec python -m list_sorting_transformer.shortcut_credit_experiment \
+exec "${PYTHON_BIN}" -m list_sorting_transformer.shortcut_credit_experiment \
   --run-name "${RUN_NAME}" \
   --output-dir "${OUTPUT_ROOT}" \
   --generations 200 \
