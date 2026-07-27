@@ -2468,3 +2468,79 @@ Tracked outputs:
 [`results/collapse_window_seed7700511_center.jsonl`](results/collapse_window_seed7700511_center.jsonl),
 and
 [`results/collapse_window_seed7700511_candidate63_full.jsonl`](results/collapse_window_seed7700511_candidate63_full.jsonl).
+
+### Seed-disjoint collapse-window gate
+
+The collapse itself is now the explicit optimization target. A scanner follows
+each forward trajectory for 3,600 updates and measures the permanent 512-item
+clean set every ten updates. Training-loss spikes are retained only as
+diagnostics: five large spikes in an initial exploratory pass did not lower
+clean accuracy, so spike magnitude is not used as collapse fitness.
+
+The first exploratory scan accidentally used the earlier generation-70
+checkpoint rather than the transition checkpoint used to create the original
+collapse windows. Those windows and candidate comparisons were discarded.
+All results below use
+`attention-router-random-list-transition-h3600-p64-elite1-g72-seed7/checkpoint_000073.pt`.
+The corrected scanner recovers the known seed-`57,155,105` event near update
+3,010. Dense capture remains necessary because a ten-update scan sees
+`86.33%`, while the exact update-3,009 minimum is `67.97%`.
+
+Six collapses were found among 20 untouched trajectories. Four were used for
+the first seed-disjoint evaluation of candidate 63:
+
+| Unseen trajectory | Centre minimum | Candidate 63 | Change |
+| --- | ---: | ---: | ---: |
+| Seed `67,172,112` | 41.02% | **55.86%** | **+14.84** |
+| Seed `67,122,077` | 61.72% | 61.72% | 0.00 |
+| Seed `67,112,070` | **74.61%** | 65.23% | **-9.38** |
+| Seed `67,222,147` | 58.20% | **62.89%** | **+4.69** |
+
+This is real transfer from the original two ranking windows, but it fails a
+maximin acceptance rule because one unseen collapse becomes worse. Candidate
+63 therefore remains a report-only proposal and does not update the persistent
+backward rule.
+
+#### Six-window maximin population
+
+The two original windows and the four seed-disjoint windows above were then
+used as a six-window ranking set. Two other discovered collapses, with exact
+centre minima of `10.55%` and `73.05%`, were reserved for acceptance only. A
+new P64 population at `sigma=0.00328125` took the literal minimum weaker-mode
+accuracy over every update and selected candidates by their worst improvement
+across all six ranking windows.
+
+No sampled candidate improved all six. Candidate 27 was strongest:
+
+| Ranking seed | Accuracy change |
+| --- | ---: |
+| `57,155,105` | +0.39 |
+| `7,700,511` | +21.09 |
+| `67,172,112` | +12.50 |
+| `67,122,077` | -0.78 |
+| `67,112,070` | -1.56 |
+| `67,222,147` | +5.08 |
+
+Its maximin change was `-1.56` points despite a mean gain of `+6.12`. The
+held-out acceptance windows were also conflicting: the catastrophic `10.55%`
+minimum improved to `24.22%` (`+13.67`), while the other fell from `73.05%`
+to `63.28%` (`-9.77`). The proposal was correctly rejected and
+`next_checkpoint.pt` retains the source centre.
+
+A ranking-only line search tested candidate 27 from `0.25x` through `1.5x`
+its sampled perturbation. The objective is highly nonlinear: smaller moves did
+not smoothly reduce harm, and the original `1.0x` scale remained the best
+maximin point at `-1.56`. The nearby `0.9x`, `0.95x`, `1.05x`, and `1.1x`
+scales had minima of `-19.92`, `-37.50`, `-23.83`, and `-36.33` points.
+
+The result supports collapse-targeted optimization: perturbations repeatedly
+produce large protection on both ranking and unseen events. It also rules out
+the current stronger claim that one small global EGGROLL update robustly
+protects every collapse. The candidate response correlations across windows
+are near zero, and only one of 64 candidates helped five of six ranking
+windows. The next useful design change is therefore to condition the backward
+adaptation on the current forward state or collapse signature, rather than
+spending another population on a single unconditional global delta.
+
+Tracked output:
+[`results/collapse_window_holdout_summary.json`](results/collapse_window_holdout_summary.json).
