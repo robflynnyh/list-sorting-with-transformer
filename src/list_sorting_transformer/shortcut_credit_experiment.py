@@ -7,6 +7,7 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Union
@@ -61,6 +62,7 @@ class ShortcutCreditExperimentConfig:
     max_length: int = 32
     leak_placement: LeakPlacement = "suffix"
     forward_learning_rate: float = 3e-4
+    forward_training_precision: str = "fp32"
     sigma: float = 0.08
     outer_learning_rate: float = 0.1
     outer_update_rule: str = "paper_standardized"
@@ -150,6 +152,8 @@ class ShortcutCreditExperimentConfig:
             "signed",
         }:
             raise ValueError("unknown routing credit mode")
+        if self.forward_training_precision not in {"fp32", "bf16"}:
+            raise ValueError("unknown forward training precision")
         if (
             self.routing_credit_mode != "suppress_renorm"
             and self.backward_rule_type != "attention_router"
@@ -646,7 +650,8 @@ def train_forward_trajectory(
     model.train()
     for step, batch in enumerate(inner_batches, start=1):
         optimizer.zero_grad(set_to_none=True)
-        loss = shortcut_loss(model, batch, backward_rule)
+        with forward_training_autocast_context(config, device):
+            loss = shortcut_loss(model, batch, backward_rule)
         loss.backward()
         optimizer.step()
         if step in checkpoint_step_set:
@@ -678,6 +683,31 @@ def train_forward_trajectory(
         heldout_correct=heldout_correct_metrics,
         checkpoint_clean=tuple(checkpoint_clean),
     )
+
+
+def forward_training_autocast_context(
+    config: ShortcutCreditExperimentConfig,
+    device: torch.device,
+    *,
+    vmap_compatible: bool = False,
+):
+    if config.forward_training_precision == "fp32" or device.type != "cuda":
+        return nullcontext()
+    if not torch.cuda.is_bf16_supported():
+        raise RuntimeError("BF16 training is not supported on this CUDA device")
+    contexts = ExitStack()
+    if vmap_compatible:
+        contexts.enter_context(
+            torch.backends.cuda.sdp_kernel(
+                enable_flash=False,
+                enable_math=True,
+                enable_mem_efficient=False,
+            )
+        )
+    contexts.enter_context(
+        torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    )
+    return contexts
 
 
 def worst_checkpoint_mode_loss(
@@ -2364,6 +2394,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
     started_at = time.monotonic()
     for generation in range(start_generation, config.generations):
         generation_started_at = time.monotonic()
+        for worker_device in candidate_devices:
+            if worker_device.type == "cuda":
+                torch.cuda.reset_peak_memory_stats(worker_device)
         generation_sigma = plateau_state.search_sigma
         if generation_sigma is None:
             raise RuntimeError("search sigma was not initialized")
@@ -3203,6 +3236,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "vectorized_chunk_size": float(
                     config.vectorized_chunk_size
                 ),
+                "forward/training_bf16": float(
+                    config.forward_training_precision == "bf16"
+                ),
                 "outer/update_rule_elite_centroid": float(
                     config.outer_update_rule == "elite_centroid"
                 ),
@@ -3235,6 +3271,15 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 paper_learning_rate=outer_learning_rate,
             )
         )
+        cuda_peak_allocated = [
+            torch.cuda.max_memory_allocated(worker_device) / 2**30
+            for worker_device in candidate_devices
+            if worker_device.type == "cuda"
+        ]
+        if cuda_peak_allocated:
+            summary["memory/peak_allocated_gib_max"] = max(
+                cuda_peak_allocated
+            )
         if elite_update_accepted is not None:
             summary["outer/update_accepted"] = float(
                 elite_update_accepted
@@ -3568,6 +3613,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="place the leak at the suffix or after a random list value",
     )
     parser.add_argument("--forward-learning-rate", type=float, default=3e-4)
+    parser.add_argument(
+        "--forward-training-precision",
+        choices=("fp32", "bf16"),
+        default="fp32",
+        help=(
+            "autocast forward-model training to BF16 while retaining FP32 "
+            "parameters, optimizer state, evaluation, and outer evolution"
+        ),
+    )
     parser.add_argument("--sigma", type=float, default=0.08)
     parser.add_argument("--outer-learning-rate", type=float, default=0.1)
     parser.add_argument(

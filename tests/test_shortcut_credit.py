@@ -78,6 +78,23 @@ def small_model() -> ShortcutDecoderTransformer:
     )
 
 
+def test_forward_training_precision_is_explicit() -> None:
+    assert (
+        ShortcutCreditExperimentConfig().forward_training_precision
+        == "fp32"
+    )
+    assert (
+        ShortcutCreditExperimentConfig(
+            forward_training_precision="bf16"
+        ).forward_training_precision
+        == "bf16"
+    )
+    with pytest.raises(ValueError, match="forward training precision"):
+        ShortcutCreditExperimentConfig(
+            forward_training_precision="fp16"
+        )
+
+
 def test_outer_update_metrics_only_report_active_step_size() -> None:
     elite_summary = outer_update_hyperparameter_summary(
         ShortcutCreditExperimentConfig(

@@ -24,6 +24,7 @@ from .shortcut_credit_experiment import (
     ForwardTrajectoryMetrics,
     ShortcutCreditExperimentConfig,
     candidate_fitness,
+    forward_training_autocast_context,
     initialize_forward_model,
     parse_fitness_checkpoints,
 )
@@ -347,18 +348,23 @@ def train_vectorized_routing_population(
             candidate_forward_parameters: dict[str, Tensor],
             candidate_rule_parameters: dict[str, Tensor],
         ) -> Tensor:
-            logits = functional_call(
-                model,
-                (
-                    _merged_parameters(
-                        candidate_forward_parameters,
-                        candidate_rule_parameters,
+            with forward_training_autocast_context(
+                config,
+                device,
+                vmap_compatible=True,
+            ):
+                logits = functional_call(
+                    model,
+                    (
+                        _merged_parameters(
+                            candidate_forward_parameters,
+                            candidate_rule_parameters,
+                        ),
+                        buffers,
                     ),
-                    buffers,
-                ),
-                (batch.input_ids,),
-            )
-            return F.cross_entropy(logits[:, -1], batch.targets)
+                    (batch.input_ids,),
+                )
+                return F.cross_entropy(logits[:, -1], batch.targets)
 
         gradients = vmap(
             grad(candidate_loss, argnums=0),

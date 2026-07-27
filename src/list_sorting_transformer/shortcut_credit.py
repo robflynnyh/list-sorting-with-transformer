@@ -663,7 +663,7 @@ class AttentionRoutingRule(nn.Module):
         normalized_forward_state = F.layer_norm(
             forward_state.detach(),
             (self.config.forward_d_model,),
-        )
+        ).to(dtype=routing_context.dtype)
         return routing_context + self.forward_state_projection(
             normalized_forward_state
         )
@@ -958,10 +958,17 @@ class ShortcutDecoderTransformer(DecoderTransformer):
                         captured_states.append(probe_hidden)
                         probe_hidden = block(probe_hidden)
                     forward_states = tuple(captured_states)
-            attention_gates = backward_rule.attention_gates(
-                token_ids,
-                forward_state=forward_states,
-            )
+            if torch.is_autocast_enabled() and token_ids.device.type == "cuda":
+                with torch.autocast(device_type="cuda", enabled=False):
+                    attention_gates = backward_rule.attention_gates(
+                        token_ids,
+                        forward_state=forward_states,
+                    )
+            else:
+                attention_gates = backward_rule.attention_gates(
+                    token_ids,
+                    forward_state=forward_states,
+                )
         for layer_index, block in enumerate(self.blocks):
             hidden = block(
                 hidden,

@@ -2948,3 +2948,33 @@ held-out metric was identical. Population time fell from 2.48 seconds to
 1.97 seconds (20.4%), acceptance time from 4.40 seconds to 4.12 seconds
 (6.3%), and complete generation time from 10.83 seconds to 9.32 seconds
 (14.0%).
+
+### Optional BF16 forward-model training
+
+`--forward-training-precision bf16` now autocasts only forward-model training
+operations and activations. Forward parameters, functional Adam moments,
+attention-router parameters, EGGROLL perturbations, fitness evaluation, and
+outer evolution remain FP32. BF16 evaluation is deliberately disabled so
+candidate scores continue to use full-precision logits. On PyTorch 2.0, the
+BF16 vectorized path selects the math SDPA backend because this release cannot
+apply `vmap` to Flash Attention.
+
+A matched seed-707, horizon-80, population-16 benchmark gave:
+
+| Precision | Population | Acceptance | Generation | Peak allocated |
+| --- | ---: | ---: | ---: | ---: |
+| FP32 | 7.98 s | 7.29 s | 20.11 s | 7.54 GiB |
+| BF16 | 5.37 s | 6.91 s | 18.73 s | 4.48 GiB |
+
+BF16 reduced peak allocated memory by 40.5%, population time by 32.7%, and
+complete generation time by 6.9%. The best fitness changed from `0.650109`
+to `0.650140`; the selected accept/reject outcome and held-out minimum-mode
+accuracy were unchanged.
+
+A population-22 BF16 smoke completed in one chunk using 6.13 GiB peak
+allocated memory. Its population phase took 6.86 seconds, less than the FP32
+chunk-16 phase despite evaluating 37.5% more candidates. Thus a population-64
+run can use three one-pass shards of approximately 22, 22, and 20 candidates
+with `--vectorized-chunk-size 22`. BF16 remains opt-in until a longer matched
+run confirms that its small numerical differences do not change search
+quality materially.
