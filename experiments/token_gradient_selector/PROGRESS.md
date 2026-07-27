@@ -149,3 +149,39 @@ gradient norm at zero and promote the horizon at the configured patience.
 
 Rejected W&B run:
 [`r9o0ejgo`](https://wandb.ai/wobrob101/list-sorting-token-gradient-selector/runs/r9o0ejgo).
+
+### Sparse selector initialization and runtime correction
+
+The corrected tied-group run established that reward separation becomes
+measurable around horizon 80, but its initial selector reversed 38--45% of all
+tokens. Two consecutive horizon-80 groups showed that selecting either the
+oracle leak token or ordinary tokens reduced reward. With no entropy bonus, the
+policy therefore learned to turn reversal off globally rather than identify
+the leak.
+
+The selector now starts near a configurable 5% reversal probability. This is
+an exploration prior, not a sparsity reward: the objective contains no penalty
+for selecting many tokens, and the learned policy remains free to become
+dense. Fixed-policy correlation probes gave:
+
+| Horizon | Group | Reward std | Reward vs oracle selection | Reward vs other selection |
+| ---: | ---: | ---: | ---: | ---: |
+| 80 | 64 | 0.000713 | -0.042 | -0.098 |
+| 160 | 64 | 0.002756 | +0.035 | -0.103 |
+
+At horizon 160, reversing ordinary tokens is measurably harmful while leak
+selection is approximately neutral at the initial 5% rate. This supports a
+possible two-phase trajectory in which the selector first suppresses reversal
+on ordinary tokens, leaving the useful leak decision relatively enriched.
+
+The original implementation also repeated the same selector Transformer
+forward pass once per group member when sampling actions and recomputing policy
+log-probabilities. Grouped sampling and policy scoring now share one selector
+forward per training batch while retaining independent actions for every group
+member. On a matched group-16, horizon-40 benchmark, wall time fell from 49.9
+seconds to 20.6 seconds with identical trajectories and rewards. Running
+multiple candidates concurrently on each GPU was tested and rejected because
+contention made the benchmark slower.
+
+Tracked output:
+[`results/sparse_selector_diagnostics.json`](results/sparse_selector_diagnostics.json).

@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import torch
 
 
 MODULE_PATH = (
@@ -58,3 +59,14 @@ def test_plateau_promotes_after_patience() -> None:
         patience=2,
         minimum_delta=0.1,
     )
+
+
+def test_pearson_correlation() -> None:
+    assert MODULE.pearson_correlation(
+        torch.tensor([1.0, 2.0, 3.0]),
+        torch.tensor([2.0, 4.0, 6.0]),
+    ) == pytest.approx(1.0)
+    assert MODULE.pearson_correlation(
+        torch.ones(3),
+        torch.arange(3, dtype=torch.float32),
+    ) == 0.0

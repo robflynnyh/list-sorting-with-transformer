@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from list_sorting_transformer.shortcut_credit import (
@@ -5,9 +6,12 @@ from list_sorting_transformer.shortcut_credit import (
     make_shortcut_batch,
 )
 from list_sorting_transformer.token_gradient_selector import (
+    SelectorTrajectory,
     TokenGradientSelector,
     TokenGradientSelectorConfig,
+    grouped_trajectory_policy_terms,
     sample_selector_trajectory,
+    sample_selector_trajectories,
     selector_probability_statistics,
     sinusoidal_positions,
     standardize_group_rewards,
@@ -41,6 +45,8 @@ def test_sinusoidal_positions_support_odd_dimensions() -> None:
 def test_selector_is_bidirectional() -> None:
     torch.manual_seed(3)
     selector = small_selector().eval()
+    with torch.no_grad():
+        selector.action_head.weight.normal_()
     first = torch.tensor([[1, 2, 3, 4]])
     second = torch.tensor([[1, 2, 3, 5]])
 
@@ -48,6 +54,42 @@ def test_selector_is_bidirectional() -> None:
     second_logits = selector(second)
 
     assert not torch.equal(first_logits[:, 0], second_logits[:, 0])
+
+
+def test_selector_starts_at_configured_reverse_probability() -> None:
+    selector = TokenGradientSelector(
+        TokenGradientSelectorConfig(
+            vocab_size=32,
+            d_model=16,
+            n_layers=2,
+            n_heads=2,
+            initial_reverse_probability=0.05,
+        )
+    ).eval()
+
+    probabilities = selector(
+        torch.tensor(
+            [
+                [1, 2, 3, 4],
+                [4, 3, 2, 1],
+                [5, 6, 7, 8],
+            ]
+        )
+    ).softmax(dim=-1)[..., 1]
+
+    assert float(probabilities.mean()) == pytest.approx(0.05, abs=0.015)
+    assert float(probabilities.max()) < 0.1
+
+
+@pytest.mark.parametrize("probability", [0.0, 1.0])
+def test_selector_rejects_degenerate_initial_probability(
+    probability: float,
+) -> None:
+    with pytest.raises(ValueError):
+        TokenGradientSelectorConfig(
+            vocab_size=32,
+            initial_reverse_probability=probability,
+        )
 
 
 def test_sampling_and_policy_terms_cover_every_token() -> None:
@@ -88,6 +130,68 @@ def test_sampling_and_policy_terms_cover_every_token() -> None:
     assert 0 <= trajectory.selected_fraction <= 1
     assert torch.isfinite(log_probability)
     assert entropy > 0
+
+
+def test_grouped_sampling_and_policy_terms_match_individual_terms() -> None:
+    vocabulary = ShortcutPointerVocabulary("numbers", 10)
+    torch.manual_seed(8)
+    selector = TokenGradientSelector(
+        TokenGradientSelectorConfig(
+            vocab_size=vocabulary.size,
+            d_model=16,
+            n_layers=2,
+            n_heads=2,
+        )
+    )
+    batches = (
+        make_shortcut_batch(
+            4,
+            5,
+            leak_mode="correct",
+            leak_placement="random_list",
+            generator=torch.Generator().manual_seed(9),
+            vocabulary=vocabulary,
+        ),
+    )
+    trajectories = sample_selector_trajectories(
+        selector,
+        batches,
+        group_size=2,
+        vocabulary=vocabulary,
+        generators=(
+            torch.Generator().manual_seed(10),
+            torch.Generator().manual_seed(11),
+        ),
+    )
+
+    grouped_log_probabilities, grouped_entropy = (
+        grouped_trajectory_policy_terms(
+            selector,
+            batches,
+            trajectories,
+        )
+    )
+    individual_terms = [
+        trajectory_policy_terms(
+            selector,
+            batches,
+            trajectory.actions,
+        )
+        for trajectory in trajectories
+    ]
+
+    assert all(
+        isinstance(trajectory, SelectorTrajectory)
+        for trajectory in trajectories
+    )
+    torch.testing.assert_close(
+        grouped_log_probabilities,
+        torch.stack([terms[0] for terms in individual_terms]),
+    )
+    torch.testing.assert_close(
+        grouped_entropy,
+        individual_terms[0][1],
+    )
 
 
 def test_selector_probability_statistics_separates_positions() -> None:

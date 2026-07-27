@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -33,10 +34,10 @@ from list_sorting_transformer.token_gradient_selector import (
     SelectorTrajectory,
     TokenGradientSelector,
     TokenGradientSelectorConfig,
-    sample_selector_trajectory,
+    grouped_trajectory_policy_terms,
+    sample_selector_trajectories,
     selector_probability_statistics,
     standardize_group_rewards,
-    trajectory_policy_terms,
 )
 
 
@@ -79,6 +80,17 @@ def metrics_summary(
             metrics.prediction_mode_fraction
         ),
     }
+
+
+def pearson_correlation(left: Tensor, right: Tensor) -> float:
+    if left.shape != right.shape or left.ndim != 1:
+        raise ValueError("correlation inputs must be matching vectors")
+    left = left - left.mean()
+    right = right - right.mean()
+    denominator = left.square().sum().sqrt() * right.square().sum().sqrt()
+    if float(denominator) < 1e-12:
+        return 0.0
+    return float((left * right).sum() / denominator)
 
 
 def train_candidate(
@@ -153,6 +165,7 @@ def train_candidate_shard(
     vocabulary: ShortcutPointerVocabulary,
 ) -> list[CandidateResult]:
     device = torch.device(device_name)
+    inner_batches = tuple(batch.to(device) for batch in inner_batches)
     fitness_batches = tuple(
         batch.to(device) for batch in fitness_batches_cpu
     )
@@ -198,7 +211,13 @@ def evaluate_population(
     vocabulary: ShortcutPointerVocabulary,
 ) -> tuple[CandidateResult, ...]:
     shards = tuple(
-        tuple(range(device_index, len(trajectories), len(devices)))
+        tuple(
+            range(
+                device_index,
+                len(trajectories),
+                len(devices),
+            )
+        )
         for device_index in range(len(devices))
     )
     with ThreadPoolExecutor(max_workers=len(devices)) as executor:
@@ -276,8 +295,8 @@ def main() -> None:
     parser.add_argument("--plateau-patience", type=int, default=25)
     parser.add_argument("--plateau-min-delta", type=float, default=0.005)
     parser.add_argument("--plateau-ema-decay", type=float, default=0.9)
-    parser.add_argument("--minimum-reward-std", type=float, default=1e-4)
-    parser.add_argument("--tied-group-patience", type=int, default=3)
+    parser.add_argument("--minimum-reward-std", type=float, default=1e-3)
+    parser.add_argument("--tied-group-patience", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--fitness-examples", type=int, default=512)
     parser.add_argument("--min-length", type=int, default=8)
@@ -285,10 +304,15 @@ def main() -> None:
     parser.add_argument("--forward-learning-rate", type=float, default=1e-4)
     parser.add_argument("--reversal-scale", type=float, default=4.0)
     parser.add_argument("--selector-learning-rate", type=float, default=3e-4)
-    parser.add_argument("--entropy-coefficient", type=float, default=0.01)
+    parser.add_argument("--entropy-coefficient", type=float, default=0.0)
     parser.add_argument("--gradient-clip-norm", type=float, default=1.0)
     parser.add_argument("--selector-d-model", type=int, default=64)
     parser.add_argument("--selector-heads", type=int, default=4)
+    parser.add_argument(
+        "--initial-reverse-probability",
+        type=float,
+        default=0.05,
+    )
     parser.add_argument(
         "--leak-placement",
         choices=("suffix", "random_list"),
@@ -342,6 +366,10 @@ def main() -> None:
         raise ValueError("entropy-coefficient must be nonnegative")
     if args.minimum_reward_std < 0:
         raise ValueError("minimum-reward-std must be nonnegative")
+    if not 0 < args.initial_reverse_probability < 1:
+        raise ValueError(
+            "initial-reverse-probability must be in (0, 1)"
+        )
 
     torch.set_num_threads(1)
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
@@ -365,6 +393,7 @@ def main() -> None:
         n_layers=2,
         n_heads=args.selector_heads,
         dropout=0.0,
+        initial_reverse_probability=args.initial_reverse_probability,
     )
     torch.manual_seed(args.seed + 20_000)
     selector = TokenGradientSelector(selector_config)
@@ -452,17 +481,19 @@ def main() -> None:
             generator=torch.Generator().manual_seed(generation_seed + 2),
             device=torch.device("cpu"),
         )
-        trajectories = tuple(
-            sample_selector_trajectory(
-                selector,
-                inner_batches,
-                vocabulary=vocabulary,
-                generator=torch.Generator().manual_seed(
+        trajectories = sample_selector_trajectories(
+            selector,
+            inner_batches,
+            group_size=args.group_size,
+            vocabulary=vocabulary,
+            generators=tuple(
+                torch.Generator().manual_seed(
                     generation_seed + 100 + candidate_index
-                ),
-            )
-            for candidate_index in range(args.group_size)
+                )
+                for candidate_index in range(args.group_size)
+            ),
         )
+        population_started_at = time.perf_counter()
         results = evaluate_population(
             devices=args.candidate_devices,
             config=forward_config,
@@ -476,6 +507,7 @@ def main() -> None:
             reversal_scale=args.reversal_scale,
             vocabulary=vocabulary,
         )
+        population_seconds = time.perf_counter() - population_started_at
         rewards = torch.tensor(
             [result.reward for result in results],
             dtype=torch.float32,
@@ -491,28 +523,25 @@ def main() -> None:
 
         selector.train()
         selector_optimizer.zero_grad(set_to_none=True)
-        policy_loss = 0.0
-        entropy = 0.0
-        for trajectory, advantage in zip(trajectories, advantages):
-            log_probability, member_entropy = trajectory_policy_terms(
+        log_probabilities, member_entropy = (
+            grouped_trajectory_policy_terms(
                 selector,
                 inner_batches,
-                trajectory.actions,
+                trajectories,
             )
-            member_loss = -advantage * log_probability / args.group_size
-            if not tied_group:
-                member_loss = member_loss - (
-                    args.entropy_coefficient
-                    * member_entropy
-                    / args.group_size
-                )
-                member_loss.backward()
-            policy_loss += float(member_loss.detach())
-            entropy += float(member_entropy.detach()) / args.group_size
+        )
+        policy_objective = (
+            -(advantages.to(log_probabilities.device) * log_probabilities)
+            .mean()
+            - args.entropy_coefficient * member_entropy
+        )
+        policy_loss = float(policy_objective.detach())
+        entropy = float(member_entropy.detach())
         if tied_group:
             gradient_norm = torch.zeros(())
             consecutive_tied_groups += 1
         else:
+            policy_objective.backward()
             gradient_norm = torch.nn.utils.clip_grad_norm_(
                 selector.parameters(),
                 args.gradient_clip_norm,
@@ -521,6 +550,24 @@ def main() -> None:
             consecutive_tied_groups = 0
 
         best = max(results, key=lambda result: result.reward)
+        oracle_selection_rates = torch.tensor(
+            [
+                trajectory.oracle_selected_fraction
+                for trajectory in trajectories
+            ]
+        )
+        other_selection_rates = torch.tensor(
+            [
+                trajectory.other_selected_fraction
+                for trajectory in trajectories
+            ]
+        )
+        selection_rates = torch.tensor(
+            [
+                trajectory.selected_fraction
+                for trajectory in trajectories
+            ]
+        )
         probabilities = selector_probability_statistics(
             selector,
             inner_batches,
@@ -538,6 +585,22 @@ def main() -> None:
             "policy/gradient_norm": float(gradient_norm),
             "policy/update_applied": int(not tied_group),
             "reward/tied_group": int(tied_group),
+            "runtime/population_seconds": population_seconds,
+            "runtime/candidate_steps_per_second": (
+                args.group_size * horizon / population_seconds
+            ),
+            "reward/oracle_selection_correlation": pearson_correlation(
+                rewards,
+                oracle_selection_rates,
+            ),
+            "reward/other_selection_correlation": pearson_correlation(
+                rewards,
+                other_selection_rates,
+            ),
+            "reward/selection_fraction_correlation": pearson_correlation(
+                rewards,
+                selection_rates,
+            ),
             "sample/selected_fraction": sum(
                 trajectory.selected_fraction for trajectory in trajectories
             )
