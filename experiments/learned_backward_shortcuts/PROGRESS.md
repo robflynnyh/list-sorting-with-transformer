@@ -2831,3 +2831,32 @@ A one-generation GPU smoke exercised all four proposals. Elite 8 had the best
 proposal fitness, but the controller correctly rejected it because it did not
 beat the unchanged centre, restored the exact centre, and reduced sigma from
 `0.21` to `0.105`.
+
+### Performance-driven horizon curriculum
+
+The first automatic run exposed a curriculum flaw. After 58 generations at
+horizon 160, it had accepted 42 proposals and rejected 16, reached 96.9%
+held-out minimum-mode accuracy at its best point, but never accumulated the
+five consecutive rejections required to probe horizon 320. Proposal acceptance
+measured whether a local update helped; it did not measure whether performance
+at the current training horizon had saturated.
+
+The `performance_plateau` controller separates those decisions. It tracks the
+persistent centre's post-training worst-mode CE on the fixed fitness set and:
+
+1. computes a rolling mean after a minimum dwell at each horizon;
+2. promotes on a sustained plateau, with a maximum dwell as a deterministic
+   safeguard against arbitrarily small noisy improvements;
+3. records the final rolling mean of the first completed horizon as the
+   reference score;
+4. resets the reference and failure count when a later horizon improves it by
+   the configured margin;
+5. stops after a configured number of consecutive horizon extensions fail to
+   beat the last genuinely improved reference.
+
+The default wrapper uses an eight-generation score window, 20–30 generations
+per horizon, a `0.01` worst-mode-CE improvement threshold, and a limit of two
+failed extensions. It can progress through horizons 160, 320, 640, and 1280.
+Thus a plateau at 160 promotes to 320; continued plateaus can reach 640, while
+two longer horizons that fail to improve over the last successful reference
+end the run cleanly. Held-out examples remain reporting-only throughout.

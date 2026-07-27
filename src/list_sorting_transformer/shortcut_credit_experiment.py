@@ -7,7 +7,7 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Union
 
@@ -77,6 +77,10 @@ class ShortcutCreditExperimentConfig:
     horizon_promotion_mode: str = "plateau"
     horizon_rejection_patience: int = 5
     horizon_probe_min_improvement: float = 0.0
+    horizon_score_window: int = 10
+    horizon_min_generations: int = 20
+    horizon_max_generations: int = 30
+    horizon_failed_extension_limit: int = 2
     d_model: int = 128
     backward_d_model: int = 128
     backward_rule_type: str = "gradient_transformer"
@@ -125,6 +129,10 @@ class ShortcutCreditExperimentConfig:
             self.elite_acceptance_trajectories,
             self.candidate_ranking_trajectories,
             self.horizon_rejection_patience,
+            self.horizon_score_window,
+            self.horizon_min_generations,
+            self.horizon_max_generations,
+            self.horizon_failed_extension_limit,
             self.vectorized_chunk_size,
         )
         if any(value < 1 for value in positive_integers):
@@ -189,6 +197,7 @@ class ShortcutCreditExperimentConfig:
         if self.horizon_promotion_mode not in {
             "plateau",
             "rejection_probe",
+            "performance_plateau",
         }:
             raise ValueError("unknown horizon promotion mode")
         if (
@@ -243,6 +252,14 @@ class ShortcutCreditExperimentConfig:
             raise ValueError(
                 "horizon probe minimum improvement must be nonnegative"
             )
+        if self.horizon_min_generations < self.horizon_score_window:
+            raise ValueError(
+                "horizon minimum generations must cover the score window"
+            )
+        if self.horizon_max_generations < self.horizon_min_generations:
+            raise ValueError(
+                "horizon maximum generations must be at least the minimum"
+            )
 
 
 @dataclass
@@ -253,6 +270,12 @@ class PlateauState:
     search_sigma: float | None = None
     consecutive_accepted_updates: int = 0
     consecutive_rejected_updates: int = 0
+    horizon_scores: list[float] = field(default_factory=list)
+    horizon_generations: int = 0
+    horizon_best_average: float = float("-inf")
+    horizon_stale_generations: int = 0
+    horizon_reference_average: float | None = None
+    failed_horizon_extensions: int = 0
 
 
 @dataclass(frozen=True)
@@ -281,6 +304,18 @@ class HorizonProbeResult:
     current_fitness: float
     longer_fitness: float
     next_horizon: int
+
+
+@dataclass(frozen=True)
+class PerformanceHorizonDecision:
+    promote: bool = False
+    stop: bool = False
+    stop_reason: str | None = None
+    rolling_average: float | None = None
+    plateau_detected: bool = False
+    maximum_dwell_reached: bool = False
+    extension_improved: bool | None = None
+    completed_horizon_average: float | None = None
 
 
 CandidateRankingInput = tuple[
@@ -1310,6 +1345,95 @@ def update_plateau_state(
     return state.stale_generations >= config.plateau_patience
 
 
+def reset_horizon_tracking(state: PlateauState) -> None:
+    state.horizon_scores = []
+    state.horizon_generations = 0
+    state.horizon_best_average = float("-inf")
+    state.horizon_stale_generations = 0
+
+
+def update_performance_horizon_state(
+    state: PlateauState,
+    *,
+    objective: float,
+    horizon: int,
+    config: ShortcutCreditExperimentConfig,
+) -> PerformanceHorizonDecision:
+    """Advance or stop after persistent centre performance plateaus."""
+
+    state.horizon_generations += 1
+    state.horizon_scores.append(objective)
+    if len(state.horizon_scores) > config.horizon_score_window:
+        del state.horizon_scores[0]
+    if len(state.horizon_scores) < config.horizon_score_window:
+        return PerformanceHorizonDecision()
+
+    rolling_average = sum(state.horizon_scores) / len(state.horizon_scores)
+    if (
+        rolling_average
+        > state.horizon_best_average + config.plateau_min_delta
+    ):
+        state.horizon_best_average = rolling_average
+        state.horizon_stale_generations = 0
+    else:
+        state.horizon_stale_generations += 1
+
+    plateau_detected = (
+        state.horizon_generations >= config.horizon_min_generations
+        and state.horizon_stale_generations >= config.plateau_patience
+    )
+    maximum_dwell_reached = (
+        state.horizon_generations >= config.horizon_max_generations
+    )
+    if not plateau_detected and not maximum_dwell_reached:
+        return PerformanceHorizonDecision(
+            rolling_average=rolling_average,
+        )
+
+    extension_improved = None
+    if state.horizon_reference_average is None:
+        state.horizon_reference_average = rolling_average
+        state.failed_horizon_extensions = 0
+    else:
+        extension_improved = (
+            rolling_average
+            > state.horizon_reference_average + config.plateau_min_delta
+        )
+        if extension_improved:
+            state.horizon_reference_average = rolling_average
+            state.failed_horizon_extensions = 0
+        else:
+            state.failed_horizon_extensions += 1
+
+    common = {
+        "rolling_average": rolling_average,
+        "plateau_detected": plateau_detected,
+        "maximum_dwell_reached": maximum_dwell_reached,
+        "extension_improved": extension_improved,
+        "completed_horizon_average": rolling_average,
+    }
+    if (
+        state.failed_horizon_extensions
+        >= config.horizon_failed_extension_limit
+    ):
+        return PerformanceHorizonDecision(
+            stop=True,
+            stop_reason="failed_horizon_extensions",
+            **common,
+        )
+    if horizon >= config.max_horizon:
+        return PerformanceHorizonDecision(
+            stop=True,
+            stop_reason="max_horizon_plateau",
+            **common,
+        )
+
+    return PerformanceHorizonDecision(
+        promote=True,
+        **common,
+    )
+
+
 def candidate_summary(
     fitnesses: Tensor,
     clean_metrics: list[ShortcutMetrics],
@@ -2016,6 +2140,7 @@ def apply_resume_horizon(
     if horizon != checkpoint_horizon:
         state.consecutive_accepted_updates = 0
         state.consecutive_rejected_updates = 0
+        reset_horizon_tracking(state)
     return horizon
 
 
@@ -3045,15 +3170,29 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     else "clean/loss_mean"
                 )
             ]
-        plateau_promote_horizon = update_plateau_state(
-            plateau_state,
-            objective=plateau_objective,
-            config=config,
-        )
-        horizon_probe_result = None
-        if config.horizon_promotion_mode == "plateau":
-            promote_horizon = plateau_promote_horizon
+        if config.fitness_objective == "worst_checkpoint_mode_ce":
+            center_plateau_objective = -worst_checkpoint_mode_loss(
+                center_trajectory.checkpoint_clean
+            )
+        elif config.fitness_objective == "worst_mode_ce":
+            center_plateau_objective = -max(
+                center_clean.mode_loss.values()
+            )
         else:
+            center_plateau_objective = -center_clean.loss
+
+        plateau_promote_horizon = False
+        horizon_probe_result = None
+        performance_horizon_decision = None
+        stop_training = False
+        if config.horizon_promotion_mode == "plateau":
+            plateau_promote_horizon = update_plateau_state(
+                plateau_state,
+                objective=plateau_objective,
+                config=config,
+            )
+            promote_horizon = plateau_promote_horizon
+        elif config.horizon_promotion_mode == "rejection_probe":
             promote_horizon = False
             if (
                 horizon < config.max_horizon
@@ -3072,17 +3211,35 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 )
                 promote_horizon = horizon_probe_result.promoted
                 plateau_state.consecutive_rejected_updates = 0
+        else:
+            performance_horizon_decision = (
+                update_performance_horizon_state(
+                    plateau_state,
+                    objective=center_plateau_objective,
+                    horizon=horizon,
+                    config=config,
+                )
+            )
+            promote_horizon = performance_horizon_decision.promote
+            stop_training = performance_horizon_decision.stop
         summary.update(
             {
                 "curriculum/objective_negative_clean_loss": plateau_objective,
+                "curriculum/center_objective": (
+                    center_plateau_objective
+                ),
                 "curriculum/ema_objective": plateau_state.ema_fitness,
                 "curriculum/stale_generations": plateau_state.stale_generations,
                 "curriculum/rejection_probe_mode": float(
                     config.horizon_promotion_mode == "rejection_probe"
                 ),
+                "curriculum/performance_plateau_mode": float(
+                    config.horizon_promotion_mode == "performance_plateau"
+                ),
                 "curriculum/promoted": float(
                     promote_horizon and horizon < config.max_horizon
                 ),
+                "curriculum/stop_triggered": float(stop_training),
             }
         )
         if horizon_probe_result is not None:
@@ -3103,6 +3260,60 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     ),
                 }
             )
+        if performance_horizon_decision is not None:
+            summary.update(
+                {
+                    "curriculum/horizon_generations": float(
+                        plateau_state.horizon_generations
+                    ),
+                    "curriculum/horizon_stale_generations": float(
+                        plateau_state.horizon_stale_generations
+                    ),
+                    "curriculum/failed_horizon_extensions": float(
+                        plateau_state.failed_horizon_extensions
+                    ),
+                    "curriculum/plateau_detected": float(
+                        performance_horizon_decision.plateau_detected
+                    ),
+                    "curriculum/maximum_dwell_reached": float(
+                        performance_horizon_decision.maximum_dwell_reached
+                    ),
+                }
+            )
+            if plateau_state.horizon_best_average != float("-inf"):
+                summary["curriculum/horizon_best_average"] = (
+                    plateau_state.horizon_best_average
+                )
+            if performance_horizon_decision.rolling_average is not None:
+                summary["curriculum/horizon_rolling_average"] = (
+                    performance_horizon_decision.rolling_average
+                )
+            if (
+                performance_horizon_decision.completed_horizon_average
+                is not None
+            ):
+                summary["curriculum/completed_horizon_average"] = (
+                    performance_horizon_decision.completed_horizon_average
+                )
+            if performance_horizon_decision.promote:
+                summary["curriculum/next_horizon"] = float(
+                    min(
+                        config.max_horizon,
+                        horizon * config.horizon_multiplier,
+                    )
+                )
+            if plateau_state.horizon_reference_average is not None:
+                summary["curriculum/reference_average"] = (
+                    plateau_state.horizon_reference_average
+                )
+            if performance_horizon_decision.extension_improved is not None:
+                summary["curriculum/extension_improved"] = float(
+                    performance_horizon_decision.extension_improved
+                )
+            if performance_horizon_decision.stop_reason is not None:
+                summary["curriculum/stop_reason"] = (
+                    performance_horizon_decision.stop_reason
+                )
         summary["search/consecutive_rejected_updates"] = float(
             plateau_state.consecutive_rejected_updates
         )
@@ -3114,25 +3325,29 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             wandb_run.log(summary, step=generation)
 
         if promote_horizon and horizon < config.max_horizon:
-            search_sigma = plateau_state.search_sigma
-            consecutive_accepted_updates = (
-                plateau_state.consecutive_accepted_updates
-            )
             horizon = min(
                 config.max_horizon,
                 horizon * config.horizon_multiplier,
             )
-            plateau_state = PlateauState(
-                search_sigma=search_sigma,
-                consecutive_accepted_updates=(
-                    consecutive_accepted_updates
-                ),
-            )
+            if config.horizon_promotion_mode != "performance_plateau":
+                search_sigma = plateau_state.search_sigma
+                consecutive_accepted_updates = (
+                    plateau_state.consecutive_accepted_updates
+                )
+                plateau_state = PlateauState(
+                    search_sigma=search_sigma,
+                    consecutive_accepted_updates=(
+                        consecutive_accepted_updates
+                    ),
+                )
+            else:
+                reset_horizon_tracking(plateau_state)
             print(f"Increasing evolved horizon to {horizon}", flush=True)
 
         if (
             (generation + 1) % config.checkpoint_interval == 0
             or generation + 1 == config.generations
+            or stop_training
         ):
             checkpoint_path = output_dir / f"checkpoint_{generation + 1:06d}.pt"
             save_checkpoint(
@@ -3151,6 +3366,14 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 horizon=horizon,
                 plateau_state=plateau_state,
             )
+
+        if stop_training:
+            print(
+                "Stopping curriculum: "
+                f"{performance_horizon_decision.stop_reason}",
+                flush=True,
+            )
+            break
 
     if wandb_run is not None:
         wandb_run.finish()
@@ -3241,7 +3464,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--horizon-promotion-mode",
-        choices=("plateau", "rejection_probe"),
+        choices=("plateau", "rejection_probe", "performance_plateau"),
         default="plateau",
     )
     parser.add_argument(
@@ -3255,6 +3478,30 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.0,
         help="fitness gain required to accept a longer-horizon probe",
+    )
+    parser.add_argument(
+        "--horizon-score-window",
+        type=int,
+        default=10,
+        help="recent centre-score generations averaged at each horizon",
+    )
+    parser.add_argument(
+        "--horizon-min-generations",
+        type=int,
+        default=20,
+        help="minimum generations spent at a horizon before promotion",
+    )
+    parser.add_argument(
+        "--horizon-max-generations",
+        type=int,
+        default=30,
+        help="maximum generations spent at a horizon before promotion",
+    )
+    parser.add_argument(
+        "--horizon-failed-extension-limit",
+        type=int,
+        default=2,
+        help="non-improving horizon extensions allowed before stopping",
     )
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--backward-d-model", type=int, default=128)

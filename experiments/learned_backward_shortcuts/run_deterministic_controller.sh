@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-RUN_NAME="${RUN_NAME:-attention-router-autoelite-h160-p64-seed7}"
+RUN_NAME="${RUN_NAME:-attention-router-performance-curriculum-h160-p64-seed7}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${ROOT}/artifacts/learned_backward_shortcuts}"
 GPU_DEVICES="${GPU_DEVICES:-cuda:0,cuda:1,cuda:2}"
 
@@ -13,14 +13,18 @@ export WANDB__SERVICE_WAIT="${WANDB__SERVICE_WAIT:-300}"
 exec python -m list_sorting_transformer.shortcut_credit_experiment \
   --run-name "${RUN_NAME}" \
   --output-dir "${OUTPUT_ROOT}" \
-  --generations 100 \
+  --generations 200 \
   --population-size 64 \
   --horizon 160 \
-  --max-horizon 320 \
+  --max-horizon 1280 \
   --horizon-multiplier 2 \
-  --horizon-promotion-mode rejection_probe \
-  --horizon-rejection-patience 5 \
-  --horizon-probe-min-improvement 0.01 \
+  --horizon-promotion-mode performance_plateau \
+  --horizon-score-window 8 \
+  --horizon-min-generations 20 \
+  --horizon-max-generations 30 \
+  --horizon-failed-extension-limit 2 \
+  --plateau-patience 5 \
+  --plateau-min-delta 0.01 \
   --batch-size 64 \
   --fitness-examples 512 \
   --fitness-batch-size 64 \

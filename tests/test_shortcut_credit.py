@@ -46,6 +46,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     parse_candidate_devices,
     parse_fitness_checkpoints,
     restore_center_parameters,
+    reset_horizon_tracking,
     resolve_resume_horizon,
     routing_population_summary,
     save_checkpoint,
@@ -53,6 +54,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     train_forward_trajectory,
     trajectory_summary,
     update_elite_search_state,
+    update_performance_horizon_state,
     update_plateau_state,
     worst_checkpoint_mode_loss,
 )
@@ -1637,6 +1639,143 @@ def test_plateau_state_tracks_a_comparable_objective() -> None:
     assert state.stale_generations == 0
 
 
+def test_performance_horizon_controller_promotes_then_stops_after_failures() -> None:
+    config = ShortcutCreditExperimentConfig(
+        horizon=2,
+        max_horizon=16,
+        horizon_promotion_mode="performance_plateau",
+        horizon_score_window=2,
+        horizon_min_generations=3,
+        horizon_max_generations=5,
+        horizon_failed_extension_limit=2,
+        plateau_patience=1,
+        plateau_min_delta=0.01,
+    )
+    state = PlateauState()
+
+    for objective in (-1.0, -1.0):
+        decision = update_performance_horizon_state(
+            state,
+            objective=objective,
+            horizon=2,
+            config=config,
+        )
+        assert not decision.promote
+    decision = update_performance_horizon_state(
+        state,
+        objective=-1.0,
+        horizon=2,
+        config=config,
+    )
+    assert decision.promote
+    assert state.horizon_reference_average == pytest.approx(-1.0)
+    assert state.failed_horizon_extensions == 0
+
+    reset_horizon_tracking(state)
+    for objective in (-1.1, -1.1, -1.1):
+        decision = update_performance_horizon_state(
+            state,
+            objective=objective,
+            horizon=4,
+            config=config,
+        )
+    assert decision.promote
+    assert decision.extension_improved is False
+    assert state.failed_horizon_extensions == 1
+
+    reset_horizon_tracking(state)
+    for objective in (-1.05, -1.05, -1.05):
+        decision = update_performance_horizon_state(
+            state,
+            objective=objective,
+            horizon=8,
+            config=config,
+        )
+    assert decision.stop
+    assert not decision.promote
+    assert decision.stop_reason == "failed_horizon_extensions"
+    assert state.failed_horizon_extensions == 2
+
+
+def test_performance_horizon_improvement_updates_reference() -> None:
+    config = ShortcutCreditExperimentConfig(
+        horizon=2,
+        max_horizon=8,
+        horizon_promotion_mode="performance_plateau",
+        horizon_score_window=2,
+        horizon_min_generations=3,
+        horizon_max_generations=5,
+        plateau_patience=1,
+        plateau_min_delta=0.01,
+    )
+    state = PlateauState(
+        horizon_reference_average=-1.0,
+        failed_horizon_extensions=1,
+    )
+
+    for objective in (-0.8, -0.8, -0.8):
+        decision = update_performance_horizon_state(
+            state,
+            objective=objective,
+            horizon=4,
+            config=config,
+        )
+
+    assert decision.promote
+    assert decision.extension_improved is True
+    assert state.horizon_reference_average == pytest.approx(-0.8)
+    assert state.failed_horizon_extensions == 0
+
+
+def test_performance_horizon_maximum_dwell_forces_decision() -> None:
+    config = ShortcutCreditExperimentConfig(
+        horizon=2,
+        max_horizon=8,
+        horizon_promotion_mode="performance_plateau",
+        horizon_score_window=2,
+        horizon_min_generations=2,
+        horizon_max_generations=3,
+        plateau_patience=100,
+    )
+    state = PlateauState()
+
+    for objective in (-1.0, -0.9, -0.8):
+        decision = update_performance_horizon_state(
+            state,
+            objective=objective,
+            horizon=2,
+            config=config,
+        )
+
+    assert decision.promote
+    assert not decision.plateau_detected
+    assert decision.maximum_dwell_reached
+
+
+def test_performance_horizon_stops_when_maximum_horizon_plateaus() -> None:
+    config = ShortcutCreditExperimentConfig(
+        horizon=4,
+        max_horizon=4,
+        horizon_promotion_mode="performance_plateau",
+        horizon_score_window=2,
+        horizon_min_generations=3,
+        horizon_max_generations=5,
+        plateau_patience=1,
+    )
+    state = PlateauState()
+
+    for objective in (-1.0, -1.0, -1.0):
+        decision = update_performance_horizon_state(
+            state,
+            objective=objective,
+            horizon=4,
+            config=config,
+        )
+
+    assert decision.stop
+    assert decision.stop_reason == "max_horizon_plateau"
+
+
 def test_candidate_device_parser_preserves_explicit_shard_order() -> None:
     devices = parse_candidate_devices(
         "cuda:2, cuda:0, cuda:1",
@@ -1706,6 +1845,10 @@ def test_attention_router_checkpoint_round_trip(tmp_path: Path) -> None:
             stale_generations=3,
             search_sigma=0.025,
             consecutive_accepted_updates=2,
+            horizon_scores=[-0.8, -0.7],
+            horizon_generations=7,
+            horizon_reference_average=-0.9,
+            failed_horizon_extensions=1,
         ),
     )
 
@@ -1720,6 +1863,10 @@ def test_attention_router_checkpoint_round_trip(tmp_path: Path) -> None:
     assert plateau.stale_generations == 3
     assert plateau.search_sigma == 0.025
     assert plateau.consecutive_accepted_updates == 2
+    assert plateau.horizon_scores == [-0.8, -0.7]
+    assert plateau.horizon_generations == 7
+    assert plateau.horizon_reference_average == -0.9
+    assert plateau.failed_horizon_extensions == 1
     for expected, actual in zip(rule.parameters(), loaded.parameters()):
         torch.testing.assert_close(expected, actual, rtol=0, atol=0)
 

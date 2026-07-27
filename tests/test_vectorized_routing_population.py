@@ -129,6 +129,69 @@ def test_adaptive_controller_replays_identically(tmp_path: Path) -> None:
         )
 
 
+def test_performance_curriculum_runs_to_max_horizon_and_stops(
+    tmp_path: Path,
+) -> None:
+    output_dir = run(
+        ShortcutCreditExperimentConfig(
+            run_name="performance-curriculum",
+            output_dir=str(tmp_path),
+            generations=10,
+            population_size=4,
+            horizon=1,
+            max_horizon=4,
+            horizon_multiplier=2,
+            horizon_promotion_mode="performance_plateau",
+            horizon_score_window=1,
+            horizon_min_generations=1,
+            horizon_max_generations=1,
+            horizon_failed_extension_limit=10,
+            batch_size=4,
+            fitness_examples=8,
+            fitness_batch_size=4,
+            correct_eval_examples=4,
+            min_length=4,
+            max_length=4,
+            d_model=16,
+            backward_d_model=16,
+            forward_layers=1,
+            backward_layers=1,
+            heads=2,
+            forward_learning_rate=1e-4,
+            backward_rule_type="attention_router",
+            shared_routing_map=True,
+            leak_placement="random_list",
+            outer_update_rule="elite_centroid",
+            elite_backtracking=True,
+            adaptive_elite_counts="1,2",
+            elite_acceptance_trajectories=1,
+            vectorized_population=True,
+            vectorized_chunk_size=4,
+            checkpoint_interval=10,
+            device="cpu",
+        )
+    )
+    metrics = [
+        json.loads(line)
+        for line in (output_dir / "metrics.jsonl").read_text().splitlines()
+    ]
+
+    assert [row["horizon"] for row in metrics] == [1, 2, 4]
+    assert [row["curriculum/promoted"] for row in metrics] == [
+        1.0,
+        1.0,
+        0.0,
+    ]
+    assert metrics[-1]["curriculum/stop_triggered"] == 1.0
+    assert (
+        metrics[-1]["curriculum/stop_reason"]
+        == "max_horizon_plateau"
+    )
+    checkpoint = torch.load(output_dir / "latest.pt", map_location="cpu")
+    assert checkpoint["generation"] == 2
+    assert checkpoint["horizon"] == 4
+
+
 def test_horizon_probe_replays_identically() -> None:
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
     config = ShortcutCreditExperimentConfig(
