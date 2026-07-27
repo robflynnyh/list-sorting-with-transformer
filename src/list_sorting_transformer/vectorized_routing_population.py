@@ -482,8 +482,8 @@ def train_vectorized_routing_candidate_chunks(
     inner_batches: tuple[ShortcutBatch, ...],
     fitness_batches: tuple[ShortcutBatch, ...],
     correct_batches: tuple[ShortcutBatch, ...],
-    heldout_fitness_batches: tuple[ShortcutBatch, ...],
-    heldout_correct_batches: tuple[ShortcutBatch, ...],
+    heldout_fitness_batches: tuple[ShortcutBatch, ...] | None,
+    heldout_correct_batches: tuple[ShortcutBatch, ...] | None,
     initial_clean_metrics: ShortcutMetrics,
     perturbation_sigma: float,
     additional_ranking_inputs: tuple[CandidateRankingInput, ...] = (),
@@ -508,11 +508,19 @@ def train_vectorized_routing_candidate_chunks(
     worker_correct_batches = tuple(
         batch.to(device) for batch in correct_batches
     )
-    worker_heldout_fitness_batches = tuple(
-        batch.to(device) for batch in heldout_fitness_batches
+    if (heldout_fitness_batches is None) != (
+        heldout_correct_batches is None
+    ):
+        raise ValueError("both held-out batch groups must be provided together")
+    worker_heldout_fitness_batches = (
+        None
+        if heldout_fitness_batches is None
+        else tuple(batch.to(device) for batch in heldout_fitness_batches)
     )
-    worker_heldout_correct_batches = tuple(
-        batch.to(device) for batch in heldout_correct_batches
+    worker_heldout_correct_batches = (
+        None
+        if heldout_correct_batches is None
+        else tuple(batch.to(device) for batch in heldout_correct_batches)
     )
     worker_additional_ranking_inputs = tuple(
         (

@@ -97,6 +97,29 @@ def test_forward_training_precision_is_explicit() -> None:
         )
 
 
+def test_fixed_horizon_supports_sparse_reporting() -> None:
+    config = ShortcutCreditExperimentConfig(
+        horizon=320,
+        max_horizon=320,
+        horizon_promotion_mode="fixed",
+        report_interval=10,
+    )
+
+    assert config.horizon == 320
+    assert config.report_interval == 10
+    with pytest.raises(ValueError, match="equal max_horizon"):
+        ShortcutCreditExperimentConfig(
+            horizon=160,
+            max_horizon=320,
+            horizon_promotion_mode="fixed",
+        )
+    with pytest.raises(ValueError, match="requires fixed horizon"):
+        ShortcutCreditExperimentConfig(
+            report_interval=10,
+            horizon_promotion_mode="plateau",
+        )
+
+
 def test_outer_update_metrics_only_report_active_step_size() -> None:
     elite_summary = outer_update_hyperparameter_summary(
         ShortcutCreditExperimentConfig(

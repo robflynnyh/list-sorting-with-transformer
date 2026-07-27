@@ -129,6 +129,67 @@ def test_adaptive_controller_replays_identically(tmp_path: Path) -> None:
         )
 
 
+def test_fixed_horizon_sparse_reporting_skips_only_reporting_metrics(
+    tmp_path: Path,
+) -> None:
+    output_dir = run(
+        ShortcutCreditExperimentConfig(
+            run_name="fixed-sparse",
+            output_dir=str(tmp_path),
+            generations=3,
+            population_size=2,
+            horizon=1,
+            max_horizon=1,
+            horizon_promotion_mode="fixed",
+            report_interval=2,
+            batch_size=2,
+            fitness_examples=4,
+            fitness_batch_size=2,
+            correct_eval_examples=2,
+            heldout_examples=2,
+            task_variant="pointer_next_length",
+            min_length=2,
+            max_length=3,
+            fitness_length=4,
+            heldout_length=6,
+            d_model=8,
+            backward_d_model=8,
+            forward_layers=1,
+            backward_layers=1,
+            heads=1,
+            backward_rule_type="attention_router",
+            outer_update_rule="elite_centroid",
+            elite_backtracking=True,
+            adaptive_elite_counts="1",
+            vectorized_population=True,
+            vectorized_chunk_size=2,
+            checkpoint_interval=1,
+            device="cpu",
+        )
+    )
+
+    rows = [
+        json.loads(line)
+        for line in (output_dir / "metrics.jsonl").read_text().splitlines()
+    ]
+    assert [row["report/full_generation"] for row in rows] == [
+        1.0,
+        0.0,
+        1.0,
+    ]
+    assert "length_6/center_accuracy" in rows[0]
+    assert "length_6/center_accuracy" not in rows[1]
+    assert "length_6/center_accuracy" in rows[2]
+    assert all(
+        not any(
+            term in key
+            for term in ("masked", "incorrect", "correct_leak")
+        )
+        for row in rows
+        for key in row
+    )
+
+
 def test_performance_curriculum_runs_to_max_horizon_and_stops(
     tmp_path: Path,
 ) -> None:

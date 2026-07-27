@@ -27,13 +27,17 @@ sequences?
 - Elite proposals are accepted only when they beat the existing centre on both
   independently initialized acceptance trajectories. Both use the same fixed
   length-50 fitness set.
-- Ordinary Adam from the same initialization and batches is rerun as the
-  generation-level control.
+- Ordinary Adam from the same initialization and batches is rerun as a
+  reporting-only control.
 
-The initial controller starts at horizon 160 and uses the same automatic
-performance-plateau horizon extension, adaptive elite counts, sigma control,
-and three-GPU vectorized population implementation as the shortcut-resistance
-experiment.
+The high-throughput controller uses a fixed 320-update inner horizon, a
+two-layer forward Transformer, BF16 forward training, 10,000 outer
+generations, and the full population of 64 candidates. It retains adaptive
+elite counts, sigma control, strict acceptance on two independent
+trajectories, and the three-GPU vectorized implementation. Length-400
+reporting, centre/ordinary controls, and proposal replay run every ten
+generations; they never affect optimization. Numbered checkpoints are written
+every 25 generations to keep the complete run below roughly 0.5 GB.
 
 ## Preserved shortcut-resistance run
 
@@ -60,17 +64,22 @@ allocated memory was 0.78 GiB for a population-8 chunk.
 
 The full repository test suite passes with 320 tests.
 
-## Active run
+## Preserved exploratory length run
 
 - W&B:
   <https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/ksbfapf2>
 - Run: `pointer-next-length20-fitness50-heldout400-seed7`
-- Service: `list-sorting-length-generalization-seed7-v3.service`
-- GPUs: 0, 1, and 2 through `with-gpu`; GPU 3 remains available.
+- Checkpoint:
+  `artifacts/learned_backward_length_generalization/pointer-next-length20-fitness50-heldout400-seed7/latest.pt`
 
-The first two horizon-160 generations took 37.9 and 36.3 seconds, with
-7.78 GiB peak allocation per worker. Generation 0 rejected a mixed-sign
-proposal. Generation 1 accepted elite count 2 because both independent
-acceptance deltas were positive (`+0.0163` and `+0.4578`). At the identity
-rule, ordinary training reached 79–80% on the fixed length-50 set, 100% on the
-mixed length-2-through-20 set, and 8.6–11.7% on the fixed length-400 set.
+The run was stopped after generation 69 at horizon 1280. It used a three-layer
+forward model and remains independently resumable. Its artifacts are not
+overwritten by the high-throughput run.
+
+## High-throughput validation
+
+The full repository suite passes with 323 tests. A three-generation real-GPU
+smoke covered BF16, the two-layer forward model, fixed horizon mode, adaptive
+P64-compatible elite selection, strict two-trajectory acceptance, and sparse
+reporting. The middle sparse generation retained both acceptance trajectories
+while omitting all length-400/control work and shortcut-only metric aliases.

@@ -61,6 +61,7 @@ class ShortcutCreditExperimentConfig:
     fitness_batch_size: int = 64
     correct_eval_examples: int = 128
     heldout_examples: int = 128
+    report_interval: int = 1
     task_variant: str = "shortcut"
     min_length: int = 8
     max_length: int = 32
@@ -126,6 +127,7 @@ class ShortcutCreditExperimentConfig:
             self.fitness_batch_size,
             self.correct_eval_examples,
             self.heldout_examples,
+            self.report_interval,
             self.min_length,
             self.max_length,
             self.d_model,
@@ -221,11 +223,26 @@ class ShortcutCreditExperimentConfig:
                 "adaptive elite counts must not exceed population size"
             )
         if self.horizon_promotion_mode not in {
+            "fixed",
             "plateau",
             "rejection_probe",
             "performance_plateau",
         }:
             raise ValueError("unknown horizon promotion mode")
+        if (
+            self.horizon_promotion_mode == "fixed"
+            and self.horizon != self.max_horizon
+        ):
+            raise ValueError(
+                "fixed horizon mode requires horizon to equal max_horizon"
+            )
+        if (
+            self.horizon_promotion_mode != "fixed"
+            and self.report_interval != 1
+        ):
+            raise ValueError(
+                "sparse reporting requires fixed horizon mode"
+            )
         if (
             self.horizon_promotion_mode == "rejection_probe"
             and not adaptive_counts
@@ -2590,6 +2607,10 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
     started_at = time.monotonic()
     for generation in range(start_generation, config.generations):
         generation_started_at = time.monotonic()
+        report_generation = (
+            generation % config.report_interval == 0
+            or generation + 1 == config.generations
+        )
         for worker_device in candidate_devices:
             if worker_device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats(worker_device)
@@ -2598,7 +2619,10 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             raise RuntimeError("search sigma was not initialized")
         generation_seed = config.seed * 1_000_003 + generation * 10_007
         initialization_seed = generation_seed + 1
-        if fixed_heldout_fitness_batches is not None:
+        if not report_generation:
+            heldout_fitness_batches = None
+            heldout_correct_batches = None
+        elif fixed_heldout_fitness_batches is not None:
             assert fixed_heldout_correct_batches is not None
             heldout_fitness_batches = fixed_heldout_fitness_batches
             heldout_correct_batches = fixed_heldout_correct_batches
@@ -2685,16 +2709,19 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 )
             )
         additional_ranking_inputs = tuple(additional_ranking_inputs_list)
-        masked_inner_generator = torch.Generator().manual_seed(
-            generation_seed + 2
-        )
-        masked_inner_batches = make_inner_batches(
-            config,
-            horizon=horizon,
-            vocabulary=vocabulary,
-            generator=masked_inner_generator,
-            device=device,
-            leak_mode="masked",
+        masked_inner_batches = (
+            make_inner_batches(
+                config,
+                horizon=horizon,
+                vocabulary=vocabulary,
+                generator=torch.Generator().manual_seed(
+                    generation_seed + 2
+                ),
+                device=device,
+                leak_mode="masked",
+            )
+            if report_generation
+            else None
         )
         direction_generator = torch.Generator().manual_seed(generation_seed + 3)
         directions = tuple(
@@ -2897,108 +2924,69 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             candidate_trajectories.append(trajectory)
             clean_results.append(trajectory.clean)
             correct_results.append(trajectory.correct)
-            if (
-                trajectory.heldout_clean is None
-                or trajectory.heldout_correct is None
-            ):
-                raise RuntimeError(
-                    "candidate held-out metrics were not produced"
-                )
-            heldout_clean_results.append(trajectory.heldout_clean)
-            heldout_correct_results.append(trajectory.heldout_correct)
+            if report_generation:
+                if (
+                    trajectory.heldout_clean is None
+                    or trajectory.heldout_correct is None
+                ):
+                    raise RuntimeError(
+                        "candidate held-out metrics were not produced"
+                    )
+                heldout_clean_results.append(trajectory.heldout_clean)
+                heldout_correct_results.append(trajectory.heldout_correct)
             candidate_statistics.append(statistics)
             if candidate_index == 0 and statistics:
                 captured_statistics = statistics
 
-        center_fitness, center_trajectory, _, _ = train_candidate(
-            config,
-            base_state=base_state,
-            center_rule=center_rule,
-            center_parameters=center_parameters,
-            direction=directions[0],
-            sign=1,
-            inner_batches=inner_batches,
-            fitness_batches=fitness_batches,
-            correct_batches=correct_batches,
-            initial_clean_metrics=initial_clean_metrics,
-            device=device,
-            capture_statistics=False,
-            perturbation_sigma=0.0,
-            heldout_fitness_batches=heldout_fitness_batches,
-            heldout_correct_batches=heldout_correct_batches,
-        )
-        ordinary_trajectory = train_forward_trajectory(
-            config,
-            base_state=base_state,
-            backward_rule=None,
-            inner_batches=inner_batches,
-            fitness_batches=fitness_batches,
-            correct_batches=correct_batches,
-            heldout_fitness_batches=heldout_fitness_batches,
-            heldout_correct_batches=heldout_correct_batches,
-            device=device,
-        )
-        masked_training_trajectory = (
-            ordinary_trajectory
-            if config.task_variant == "pointer_next_length"
-            else train_forward_trajectory(
+        center_fitness = None
+        center_trajectory = None
+        ordinary_trajectory = None
+        masked_training_trajectory = None
+        if report_generation:
+            center_fitness, center_trajectory, _, _ = train_candidate(
+                config,
+                base_state=base_state,
+                center_rule=center_rule,
+                center_parameters=center_parameters,
+                direction=directions[0],
+                sign=1,
+                inner_batches=inner_batches,
+                fitness_batches=fitness_batches,
+                correct_batches=correct_batches,
+                initial_clean_metrics=initial_clean_metrics,
+                device=device,
+                capture_statistics=False,
+                perturbation_sigma=0.0,
+                heldout_fitness_batches=heldout_fitness_batches,
+                heldout_correct_batches=heldout_correct_batches,
+            )
+            ordinary_trajectory = train_forward_trajectory(
                 config,
                 base_state=base_state,
                 backward_rule=None,
-                inner_batches=masked_inner_batches,
+                inner_batches=inner_batches,
                 fitness_batches=fitness_batches,
                 correct_batches=correct_batches,
                 heldout_fitness_batches=heldout_fitness_batches,
                 heldout_correct_batches=heldout_correct_batches,
                 device=device,
             )
-        )
-        ordinary_fitness = candidate_fitness(
-            config.fitness_objective,
-            initial_clean_metrics,
-            ordinary_trajectory.clean,
-            checkpoint_clean=ordinary_trajectory.checkpoint_clean,
-        )
-        masked_training_fitness = candidate_fitness(
-            config.fitness_objective,
-            initial_clean_metrics,
-            masked_training_trajectory.clean,
-            checkpoint_clean=masked_training_trajectory.checkpoint_clean,
-        )
-        center_clean = center_trajectory.clean
-        center_correct = center_trajectory.correct
-        ordinary_clean = ordinary_trajectory.clean
-        ordinary_correct = ordinary_trajectory.correct
-        masked_training_clean = masked_training_trajectory.clean
-        masked_training_correct = masked_training_trajectory.correct
-        if any(
-            metrics is None
-            for metrics in (
-                center_trajectory.heldout_clean,
-                center_trajectory.heldout_correct,
-                ordinary_trajectory.heldout_clean,
-                ordinary_trajectory.heldout_correct,
-                masked_training_trajectory.heldout_clean,
-                masked_training_trajectory.heldout_correct,
-            )
-        ):
-            raise RuntimeError("held-out trajectory metrics were not produced")
-        center_heldout_clean = center_trajectory.heldout_clean
-        center_heldout_correct = center_trajectory.heldout_correct
-        ordinary_heldout_clean = ordinary_trajectory.heldout_clean
-        ordinary_heldout_correct = ordinary_trajectory.heldout_correct
-        masked_training_heldout_clean = (
-            masked_training_trajectory.heldout_clean
-        )
-        masked_training_heldout_correct = (
-            masked_training_trajectory.heldout_correct
-        )
-        assert center_heldout_clean is not None
-        assert center_heldout_correct is not None
-        assert ordinary_heldout_clean is not None
-        assert ordinary_heldout_correct is not None
-        assert masked_training_heldout_clean is not None
-        assert masked_training_heldout_correct is not None
+            if config.task_variant == "pointer_next_length":
+                masked_training_trajectory = ordinary_trajectory
+            else:
+                if masked_inner_batches is None:
+                    raise RuntimeError("masked reporting batches are missing")
+                masked_training_trajectory = train_forward_trajectory(
+                    config,
+                    base_state=base_state,
+                    backward_rule=None,
+                    inner_batches=masked_inner_batches,
+                    fitness_batches=fitness_batches,
+                    correct_batches=correct_batches,
+                    heldout_fitness_batches=heldout_fitness_batches,
+                    heldout_correct_batches=heldout_correct_batches,
+                    device=device,
+                )
         fitness_tensor = torch.tensor(fitness_values, device=device)
         ranking_fitness_tensor = torch.tensor(
             ranking_fitness_groups,
@@ -3075,25 +3063,29 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 center_rule,
                 adaptive_result.selected_parameters,
             )
-            elite_proposal_trajectory = train_forward_trajectory(
-                config,
-                base_state=base_state,
-                backward_rule=center_rule,
-                inner_batches=inner_batches,
-                fitness_batches=fitness_batches,
-                correct_batches=correct_batches,
-                heldout_fitness_batches=heldout_fitness_batches,
-                heldout_correct_batches=heldout_correct_batches,
-                device=device,
-            )
-            elite_proposal_fitness = candidate_fitness(
-                config.fitness_objective,
-                initial_clean_metrics,
-                elite_proposal_trajectory.clean,
-                checkpoint_clean=(
-                    elite_proposal_trajectory.checkpoint_clean
-                ),
-            )
+            if report_generation:
+                elite_proposal_trajectory = train_forward_trajectory(
+                    config,
+                    base_state=base_state,
+                    backward_rule=center_rule,
+                    inner_batches=inner_batches,
+                    fitness_batches=fitness_batches,
+                    correct_batches=correct_batches,
+                    heldout_fitness_batches=heldout_fitness_batches,
+                    heldout_correct_batches=heldout_correct_batches,
+                    device=device,
+                )
+                elite_proposal_fitness = candidate_fitness(
+                    config.fitness_objective,
+                    initial_clean_metrics,
+                    elite_proposal_trajectory.clean,
+                    checkpoint_clean=(
+                        elite_proposal_trajectory.checkpoint_clean
+                    ),
+                )
+            else:
+                elite_proposal_trajectory = None
+                elite_proposal_fitness = None
             elite_update_accepted = adaptive_result.accepted
             elite_acceptance_center_fitnesses = list(
                 adaptive_result.center_fitnesses
@@ -3291,159 +3283,212 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         summary.update(
             checkpoint_population_summary(candidate_trajectories)
         )
-        summary.update(
-            heldout_candidate_summary(
-                fitness_tensor.cpu(),
-                clean_results,
-                heldout_clean_results,
-                heldout_correct_results,
+        if report_generation:
+            if (
+                center_fitness is None
+                or center_trajectory is None
+                or ordinary_trajectory is None
+                or masked_training_trajectory is None
+            ):
+                raise RuntimeError("reporting trajectories were not produced")
+            center_clean = center_trajectory.clean
+            center_correct = center_trajectory.correct
+            ordinary_clean = ordinary_trajectory.clean
+            ordinary_correct = ordinary_trajectory.correct
+            masked_training_clean = masked_training_trajectory.clean
+            masked_training_correct = masked_training_trajectory.correct
+            if any(
+                metrics is None
+                for metrics in (
+                    center_trajectory.heldout_clean,
+                    center_trajectory.heldout_correct,
+                    ordinary_trajectory.heldout_clean,
+                    ordinary_trajectory.heldout_correct,
+                    masked_training_trajectory.heldout_clean,
+                    masked_training_trajectory.heldout_correct,
+                )
+            ):
+                raise RuntimeError(
+                    "held-out reporting metrics were not produced"
+                )
+            center_heldout_clean = center_trajectory.heldout_clean
+            center_heldout_correct = center_trajectory.heldout_correct
+            ordinary_heldout_clean = ordinary_trajectory.heldout_clean
+            ordinary_heldout_correct = ordinary_trajectory.heldout_correct
+            masked_training_heldout_clean = (
+                masked_training_trajectory.heldout_clean
             )
-        )
-        summary.update(
-            center_rule_summary(
-                center_fitness,
-                center_clean,
-                center_correct,
+            masked_training_heldout_correct = (
+                masked_training_trajectory.heldout_correct
             )
-        )
-        summary.update(
-            checkpoint_trajectory_summary(
-                "center_rule",
-                center_trajectory,
-            )
-        )
-        summary.update(
-            trajectory_summary(
-                "ordinary_rule",
-                ordinary_fitness,
+            assert center_heldout_clean is not None
+            assert center_heldout_correct is not None
+            assert ordinary_heldout_clean is not None
+            assert ordinary_heldout_correct is not None
+            assert masked_training_heldout_clean is not None
+            assert masked_training_heldout_correct is not None
+            ordinary_fitness = candidate_fitness(
+                config.fitness_objective,
+                initial_clean_metrics,
                 ordinary_clean,
-                ordinary_correct,
+                checkpoint_clean=ordinary_trajectory.checkpoint_clean,
             )
-        )
-        summary.update(
-            checkpoint_trajectory_summary(
-                "ordinary_rule",
-                ordinary_trajectory,
-            )
-        )
-        summary.update(
-            trajectory_summary(
-                "masked_training",
-                masked_training_fitness,
+            masked_training_fitness = candidate_fitness(
+                config.fitness_objective,
+                initial_clean_metrics,
                 masked_training_clean,
-                masked_training_correct,
+                checkpoint_clean=(
+                    masked_training_trajectory.checkpoint_clean
+                ),
             )
-        )
-        summary.update(
-            checkpoint_trajectory_summary(
-                "masked_training",
-                masked_training_trajectory,
+            summary.update(
+                heldout_candidate_summary(
+                    fitness_tensor.cpu(),
+                    clean_results,
+                    heldout_clean_results,
+                    heldout_correct_results,
+                )
             )
-        )
-        summary.update(
-            trajectory_summary(
-                "heldout_center_rule",
-                None,
-                center_heldout_clean,
-                center_heldout_correct,
+            summary.update(
+                center_rule_summary(
+                    center_fitness,
+                    center_clean,
+                    center_correct,
+                )
             )
-        )
-        summary.update(
-            trajectory_summary(
-                "heldout_ordinary_rule",
-                None,
-                ordinary_heldout_clean,
-                ordinary_heldout_correct,
+            summary.update(
+                checkpoint_trajectory_summary(
+                    "center_rule",
+                    center_trajectory,
+                )
             )
-        )
-        summary.update(
-            trajectory_summary(
-                "heldout_masked_training",
-                None,
-                masked_training_heldout_clean,
-                masked_training_heldout_correct,
+            summary.update(
+                trajectory_summary(
+                    "ordinary_rule",
+                    ordinary_fitness,
+                    ordinary_clean,
+                    ordinary_correct,
+                )
             )
-        )
-        center_min_accuracy = min(center_clean.mode_accuracy.values())
-        ordinary_min_accuracy = min(ordinary_clean.mode_accuracy.values())
-        masked_training_min_accuracy = min(
-            masked_training_clean.mode_accuracy.values()
-        )
-        center_heldout_min_accuracy = min(
-            center_heldout_clean.mode_accuracy.values()
-        )
-        ordinary_heldout_min_accuracy = min(
-            ordinary_heldout_clean.mode_accuracy.values()
-        )
-        summary.update(
-            {
-                "comparison/center_minus_ordinary_min_accuracy": (
-                    center_min_accuracy - ordinary_min_accuracy
-                ),
-                "comparison/masked_training_minus_ordinary_min_accuracy": (
-                    masked_training_min_accuracy - ordinary_min_accuracy
-                ),
-                "comparison/center_clean_loss_improvement_over_ordinary": (
-                    ordinary_clean.loss - center_clean.loss
-                ),
-                "comparison/masked_training_clean_loss_improvement_over_ordinary": (
-                    ordinary_clean.loss - masked_training_clean.loss
-                ),
-                "heldout_comparison/center_minus_ordinary_min_accuracy": (
-                    center_heldout_min_accuracy
-                    - ordinary_heldout_min_accuracy
-                ),
-                "heldout_comparison/center_clean_loss_improvement_over_ordinary": (
-                    ordinary_heldout_clean.loss - center_heldout_clean.loss
-                ),
-            }
-        )
-        if config.task_variant == "pointer_next_length":
-            assert config.fitness_length is not None
-            assert config.heldout_length is not None
-            fitness_prefix = f"length_{config.fitness_length}"
-            heldout_prefix = f"length_{config.heldout_length}"
+            summary.update(
+                checkpoint_trajectory_summary(
+                    "ordinary_rule",
+                    ordinary_trajectory,
+                )
+            )
+            summary.update(
+                trajectory_summary(
+                    "masked_training",
+                    masked_training_fitness,
+                    masked_training_clean,
+                    masked_training_correct,
+                )
+            )
+            summary.update(
+                checkpoint_trajectory_summary(
+                    "masked_training",
+                    masked_training_trajectory,
+                )
+            )
+            summary.update(
+                trajectory_summary(
+                    "heldout_center_rule",
+                    None,
+                    center_heldout_clean,
+                    center_heldout_correct,
+                )
+            )
+            summary.update(
+                trajectory_summary(
+                    "heldout_ordinary_rule",
+                    None,
+                    ordinary_heldout_clean,
+                    ordinary_heldout_correct,
+                )
+            )
+            summary.update(
+                trajectory_summary(
+                    "heldout_masked_training",
+                    None,
+                    masked_training_heldout_clean,
+                    masked_training_heldout_correct,
+                )
+            )
             summary.update(
                 {
-                    "task/train_max_length": float(config.max_length),
-                    "task/fitness_length": float(config.fitness_length),
-                    "task/heldout_length": float(config.heldout_length),
-                    f"{fitness_prefix}/center_accuracy": (
-                        center_clean.accuracy
+                    "comparison/center_minus_ordinary_min_accuracy": (
+                        min(center_clean.mode_accuracy.values())
+                        - min(ordinary_clean.mode_accuracy.values())
                     ),
-                    f"{fitness_prefix}/center_loss": center_clean.loss,
-                    f"{fitness_prefix}/ordinary_accuracy": (
-                        ordinary_clean.accuracy
+                    "comparison/masked_training_minus_ordinary_min_accuracy": (
+                        min(masked_training_clean.mode_accuracy.values())
+                        - min(ordinary_clean.mode_accuracy.values())
                     ),
-                    f"{fitness_prefix}/ordinary_loss": ordinary_clean.loss,
-                    f"{fitness_prefix}/center_minus_ordinary_accuracy": (
-                        center_clean.accuracy - ordinary_clean.accuracy
+                    "comparison/center_clean_loss_improvement_over_ordinary": (
+                        ordinary_clean.loss - center_clean.loss
                     ),
-                    f"{heldout_prefix}/center_accuracy": (
-                        center_heldout_clean.accuracy
+                    "comparison/masked_training_clean_loss_improvement_over_ordinary": (
+                        ordinary_clean.loss - masked_training_clean.loss
                     ),
-                    f"{heldout_prefix}/center_loss": (
-                        center_heldout_clean.loss
+                    "heldout_comparison/center_minus_ordinary_min_accuracy": (
+                        min(center_heldout_clean.mode_accuracy.values())
+                        - min(ordinary_heldout_clean.mode_accuracy.values())
                     ),
-                    f"{heldout_prefix}/ordinary_accuracy": (
-                        ordinary_heldout_clean.accuracy
-                    ),
-                    f"{heldout_prefix}/ordinary_loss": (
+                    "heldout_comparison/center_clean_loss_improvement_over_ordinary": (
                         ordinary_heldout_clean.loss
-                    ),
-                    f"{heldout_prefix}/center_minus_ordinary_accuracy": (
-                        center_heldout_clean.accuracy
-                        - ordinary_heldout_clean.accuracy
-                    ),
-                    "train_domain/center_accuracy": center_correct.accuracy,
-                    "train_domain/ordinary_accuracy": (
-                        ordinary_correct.accuracy
-                    ),
-                    "train_domain/center_minus_ordinary_accuracy": (
-                        center_correct.accuracy - ordinary_correct.accuracy
+                        - center_heldout_clean.loss
                     ),
                 }
             )
+            if config.task_variant == "pointer_next_length":
+                assert config.fitness_length is not None
+                assert config.heldout_length is not None
+                fitness_prefix = f"length_{config.fitness_length}"
+                heldout_prefix = f"length_{config.heldout_length}"
+                summary.update(
+                    {
+                        "task/train_max_length": float(config.max_length),
+                        "task/fitness_length": float(config.fitness_length),
+                        "task/heldout_length": float(config.heldout_length),
+                        f"{fitness_prefix}/center_accuracy": (
+                            center_clean.accuracy
+                        ),
+                        f"{fitness_prefix}/center_loss": center_clean.loss,
+                        f"{fitness_prefix}/ordinary_accuracy": (
+                            ordinary_clean.accuracy
+                        ),
+                        f"{fitness_prefix}/ordinary_loss": ordinary_clean.loss,
+                        f"{fitness_prefix}/center_minus_ordinary_accuracy": (
+                            center_clean.accuracy - ordinary_clean.accuracy
+                        ),
+                        f"{heldout_prefix}/center_accuracy": (
+                            center_heldout_clean.accuracy
+                        ),
+                        f"{heldout_prefix}/center_loss": (
+                            center_heldout_clean.loss
+                        ),
+                        f"{heldout_prefix}/ordinary_accuracy": (
+                            ordinary_heldout_clean.accuracy
+                        ),
+                        f"{heldout_prefix}/ordinary_loss": (
+                            ordinary_heldout_clean.loss
+                        ),
+                        f"{heldout_prefix}/center_minus_ordinary_accuracy": (
+                            center_heldout_clean.accuracy
+                            - ordinary_heldout_clean.accuracy
+                        ),
+                        "train_domain/center_accuracy": (
+                            center_correct.accuracy
+                        ),
+                        "train_domain/ordinary_accuracy": (
+                            ordinary_correct.accuracy
+                        ),
+                        "train_domain/center_minus_ordinary_accuracy": (
+                            center_correct.accuracy
+                            - ordinary_correct.accuracy
+                        ),
+                    }
+                )
         if isinstance(center_rule, AttentionRoutingRule):
             summary.update(
                 routing_population_summary(
@@ -3465,6 +3510,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "generation": generation,
                 "horizon": horizon,
                 "population_size": config.population_size,
+                "report/full_generation": float(report_generation),
+                "report/interval": float(config.report_interval),
                 "search/sigma": generation_sigma,
                 "search/next_sigma": plateau_state.search_sigma,
                 "search/consecutive_accepted_updates": float(
@@ -3619,22 +3666,26 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     else "clean/loss_mean"
                 )
             ]
-        if config.fitness_objective == "worst_checkpoint_mode_ce":
-            center_plateau_objective = -worst_checkpoint_mode_loss(
-                center_trajectory.checkpoint_clean
-            )
-        elif config.fitness_objective == "worst_mode_ce":
-            center_plateau_objective = -max(
-                center_clean.mode_loss.values()
-            )
-        else:
-            center_plateau_objective = -center_clean.loss
+        center_plateau_objective = None
+        if center_trajectory is not None:
+            if config.fitness_objective == "worst_checkpoint_mode_ce":
+                center_plateau_objective = -worst_checkpoint_mode_loss(
+                    center_trajectory.checkpoint_clean
+                )
+            elif config.fitness_objective == "worst_mode_ce":
+                center_plateau_objective = -max(
+                    center_trajectory.clean.mode_loss.values()
+                )
+            else:
+                center_plateau_objective = -center_trajectory.clean.loss
 
         plateau_promote_horizon = False
         horizon_probe_result = None
         performance_horizon_decision = None
         stop_training = False
-        if config.horizon_promotion_mode == "plateau":
+        if config.horizon_promotion_mode == "fixed":
+            promote_horizon = False
+        elif config.horizon_promotion_mode == "plateau":
             plateau_promote_horizon = update_plateau_state(
                 plateau_state,
                 objective=plateau_objective,
@@ -3661,6 +3712,10 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 promote_horizon = horizon_probe_result.promoted
                 plateau_state.consecutive_rejected_updates = 0
         else:
+            if center_plateau_objective is None:
+                raise RuntimeError(
+                    "performance horizon mode requires centre reporting"
+                )
             performance_horizon_decision = (
                 update_performance_horizon_state(
                     plateau_state,
@@ -3674,11 +3729,11 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         summary.update(
             {
                 "curriculum/objective_negative_clean_loss": plateau_objective,
-                "curriculum/center_objective": (
-                    center_plateau_objective
-                ),
                 "curriculum/ema_objective": plateau_state.ema_fitness,
                 "curriculum/stale_generations": plateau_state.stale_generations,
+                "curriculum/fixed_horizon_mode": float(
+                    config.horizon_promotion_mode == "fixed"
+                ),
                 "curriculum/rejection_probe_mode": float(
                     config.horizon_promotion_mode == "rejection_probe"
                 ),
@@ -3691,6 +3746,10 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "curriculum/stop_triggered": float(stop_training),
             }
         )
+        if center_plateau_objective is not None:
+            summary["curriculum/center_objective"] = (
+                center_plateau_objective
+            )
         if horizon_probe_result is not None:
             summary.update(
                 {
@@ -3852,6 +3911,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--correct-eval-examples", type=int, default=128)
     parser.add_argument("--heldout-examples", type=int, default=128)
     parser.add_argument(
+        "--report-interval",
+        type=int,
+        default=1,
+        help=(
+            "run reporting-only held-out and control trajectories every N "
+            "generations; sparse reporting requires fixed horizon mode"
+        ),
+    )
+    parser.add_argument(
         "--task-variant",
         choices=("shortcut", "pointer_next_length"),
         default="shortcut",
@@ -3933,7 +4001,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--horizon-promotion-mode",
-        choices=("plateau", "rejection_probe", "performance_plateau"),
+        choices=(
+            "fixed",
+            "plateau",
+            "rejection_probe",
+            "performance_plateau",
+        ),
         default="plateau",
     )
     parser.add_argument(
