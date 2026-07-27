@@ -13,6 +13,9 @@ from .shortcut_credit import (
 )
 
 
+REVERSAL_SCOPES = ("attention_scores", "qkv", "complete_attention")
+
+
 def oracle_shortcut_selection(
     token_ids: Tensor,
     vocabulary: ShortcutPointerVocabulary,
@@ -57,11 +60,14 @@ def forward_with_source_gradient_reversal(
     selection: Tensor,
     *,
     reversal_scale: float = 1.0,
+    reversal_scope: str = "complete_attention",
 ) -> Tensor:
     """Run the model with one shared source-reversal mask in every layer."""
 
     if selection.shape != token_ids.shape:
         raise ValueError("selection must match token_ids")
+    if reversal_scope not in REVERSAL_SCOPES:
+        raise ValueError(f"unknown reversal scope: {reversal_scope}")
     multipliers = source_gradient_multipliers(
         selection,
         reversal_scale=reversal_scale,
@@ -71,6 +77,12 @@ def forward_with_source_gradient_reversal(
         hidden = block(
             hidden,
             backward_source_multipliers=multipliers,
+            reverse_source_value_credit=(
+                reversal_scope != "attention_scores"
+            ),
+            route_source_output_projection=(
+                reversal_scope == "complete_attention"
+            ),
         )
     hidden = model.final_norm(hidden)
     return F.linear(hidden, model.token_embedding.weight)
@@ -82,6 +94,7 @@ def oracle_reversal_shortcut_loss(
     vocabulary: ShortcutPointerVocabulary,
     *,
     reversal_scale: float = 1.0,
+    reversal_scope: str = "complete_attention",
 ) -> Tensor:
     """Cross entropy with oracle reversal of the leaked answer source."""
 
@@ -91,5 +104,6 @@ def oracle_reversal_shortcut_loss(
         batch.input_ids,
         selection,
         reversal_scale=reversal_scale,
+        reversal_scope=reversal_scope,
     )
     return F.cross_entropy(logits[:, -1], batch.targets)

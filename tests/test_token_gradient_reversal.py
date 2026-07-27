@@ -116,6 +116,41 @@ def test_source_reversal_negates_selected_value_credit_only() -> None:
     )
 
 
+def test_score_only_reversal_keeps_ordinary_value_credit() -> None:
+    generator = torch.Generator().manual_seed(23)
+    query = torch.randn(
+        1, 1, 3, 4, generator=generator, requires_grad=True
+    )
+    key = torch.randn(
+        1, 1, 3, 4, generator=generator, requires_grad=True
+    )
+    ordinary_value = torch.randn(
+        1, 1, 3, 4, generator=generator, requires_grad=True
+    )
+    reversed_value = ordinary_value.detach().clone().requires_grad_()
+    output_gradient = torch.randn(1, 1, 3, 4, generator=generator)
+
+    ordinary = F.scaled_dot_product_attention(
+        query,
+        key,
+        ordinary_value,
+        dropout_p=0.0,
+        is_causal=True,
+    )
+    reversed_output, _ = source_reversed_scaled_dot_product_attention(
+        query.detach().clone().requires_grad_(),
+        key.detach().clone().requires_grad_(),
+        reversed_value,
+        source_multipliers=torch.tensor([[1.0, -1.0, 1.0]]),
+        reverse_value_credit=False,
+        is_causal=True,
+    )
+    ordinary.backward(output_gradient)
+    reversed_output.backward(output_gradient)
+
+    torch.testing.assert_close(reversed_value.grad, ordinary_value.grad)
+
+
 @pytest.mark.parametrize("leak_placement", ("suffix", "random_list"))
 def test_oracle_selects_answer_after_leak(leak_placement: str) -> None:
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
@@ -192,3 +227,26 @@ def test_oracle_reversal_preserves_model_forward_but_changes_gradient() -> None:
         ordinary.blocks[0].attention.qkv.weight.grad,
         reversed_model.blocks[0].attention.qkv.weight.grad,
     )
+
+
+def test_reversal_scope_validation() -> None:
+    vocabulary = ShortcutPointerVocabulary("numbers", 10)
+    model = ShortcutDecoderTransformer(
+        ModelConfig(
+            vocab_size=vocabulary.size,
+            symbol_count=10,
+            d_model=16,
+            n_layers=1,
+            n_heads=2,
+        )
+    )
+    token_ids = torch.tensor(
+        [[vocabulary.leak_token, vocabulary.value_token(2)]]
+    )
+    with pytest.raises(ValueError):
+        forward_with_source_gradient_reversal(
+            model,
+            token_ids,
+            torch.tensor([[False, True]]),
+            reversal_scope="unknown",
+        )

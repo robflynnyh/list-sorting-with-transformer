@@ -23,6 +23,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     make_mode_batches,
 )
 from list_sorting_transformer.token_gradient_reversal import (
+    REVERSAL_SCOPES,
     oracle_reversal_shortcut_loss,
 )
 
@@ -65,6 +66,11 @@ def main() -> None:
     parser.add_argument("--max-length", type=int, default=32)
     parser.add_argument("--forward-learning-rate", type=float, default=3e-4)
     parser.add_argument("--reversal-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--reversal-scope",
+        choices=REVERSAL_SCOPES,
+        default="complete_attention",
+    )
     parser.add_argument(
         "--leak-placement",
         choices=("suffix", "random_list"),
@@ -150,6 +156,7 @@ def main() -> None:
                     batch,
                     vocabulary,
                     reversal_scale=args.reversal_scale,
+                    reversal_scope=args.reversal_scope,
                 )
             else:
                 loss = shortcut_loss(model, batch)
@@ -170,6 +177,7 @@ def main() -> None:
             "seed": args.seed,
             "horizon": horizon,
             "reversal_scale": args.reversal_scale,
+            "reversal_scope": args.reversal_scope,
             "train_loss_last_100": (
                 sum(recent_losses) / len(recent_losses)
                 if recent_losses
@@ -201,6 +209,7 @@ def main() -> None:
                 "seed": args.seed,
                 "horizon": completed_steps,
                 "reversal_scale": args.reversal_scale,
+                "reversal_scope": args.reversal_scope,
                 "config": asdict(config),
                 "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),

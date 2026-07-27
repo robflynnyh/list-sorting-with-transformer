@@ -76,7 +76,9 @@ class _SourceReversedAttentionBackward(torch.autograd.Function):
         value: Tensor,
         weights: Tensor,
         source_multipliers: Tensor,
+        reverse_value_credit: bool,
     ) -> Tensor:
+        ctx.reverse_value_credit = reverse_value_credit
         ctx.save_for_backward(
             query,
             key,
@@ -90,7 +92,7 @@ class _SourceReversedAttentionBackward(torch.autograd.Function):
     def backward(
         ctx: object,
         output_gradient: Tensor,
-    ) -> tuple[None, Tensor, Tensor, Tensor, None, None]:
+    ) -> tuple[None, Tensor, Tensor, Tensor, None, None, None]:
         (
             query,
             key,
@@ -102,7 +104,9 @@ class _SourceReversedAttentionBackward(torch.autograd.Function):
         edge_multipliers = source_multipliers[:, None, None, :]
 
         value_gradient = (
-            weights * edge_multipliers
+            (weights * edge_multipliers)
+            if ctx.reverse_value_credit
+            else weights
         ).transpose(-2, -1) @ output_gradient
         weight_gradient = (
             output_gradient @ value.transpose(-2, -1)
@@ -120,6 +124,7 @@ class _SourceReversedAttentionBackward(torch.autograd.Function):
             query_gradient,
             key_gradient,
             value_gradient,
+            None,
             None,
             None,
         )
@@ -247,6 +252,7 @@ def source_reversed_scaled_dot_product_attention(
     value: Tensor,
     *,
     source_multipliers: Tensor,
+    reverse_value_credit: bool = True,
     attention_mask: Tensor | None = None,
     is_causal: bool = False,
 ) -> tuple[Tensor, Tensor]:
@@ -289,8 +295,13 @@ def source_reversed_scaled_dot_product_attention(
         dtype=weights.dtype,
     )
     backward_attended = (
-        weights * multipliers[:, None, None, :]
-    ) @ value.detach()
+        (
+            weights * multipliers[:, None, None, :]
+            if reverse_value_credit
+            else weights
+        )
+        @ value.detach()
+    )
     reversed_attended = _SourceReversedAttentionBackward.apply(
         attended.detach(),
         query,
@@ -298,6 +309,7 @@ def source_reversed_scaled_dot_product_attention(
         value,
         weights,
         multipliers,
+        reverse_value_credit,
     )
     return reversed_attended, backward_attended
 
@@ -516,6 +528,8 @@ class CausalSelfAttention(nn.Module):
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
         backward_source_multipliers: Tensor | None = None,
+        reverse_source_value_credit: bool = True,
+        route_source_output_projection: bool = True,
         route_output_projection: bool = False,
     ) -> tuple[Tensor, KeyValueCache]:
         batch_size, sequence_length, model_dim = hidden.shape
@@ -605,6 +619,7 @@ class CausalSelfAttention(nn.Module):
                     key,
                     value,
                     source_multipliers=backward_source_multipliers,
+                    reverse_value_credit=reverse_source_value_credit,
                     attention_mask=combined_mask,
                     is_causal=combined_mask is None,
                 )
@@ -635,7 +650,10 @@ class CausalSelfAttention(nn.Module):
         )
         if (
             route_output_projection
-            or backward_source_multipliers is not None
+            or (
+                backward_source_multipliers is not None
+                and route_source_output_projection
+            )
         ):
             if routed_attended is None:
                 raise ValueError(
@@ -664,6 +682,8 @@ class CausalSelfAttention(nn.Module):
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
         backward_source_multipliers: Tensor | None = None,
+        reverse_source_value_credit: bool = True,
+        route_source_output_projection: bool = True,
         route_output_projection: bool = False,
     ) -> Tensor:
         attended, _ = self.forward_with_cache(
@@ -671,6 +691,8 @@ class CausalSelfAttention(nn.Module):
             attention_mask=attention_mask,
             backward_attention_gate=backward_attention_gate,
             backward_source_multipliers=backward_source_multipliers,
+            reverse_source_value_credit=reverse_source_value_credit,
+            route_source_output_projection=route_source_output_projection,
             route_output_projection=route_output_projection,
         )
         return attended
@@ -705,6 +727,8 @@ class TransformerBlock(nn.Module):
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
         backward_source_multipliers: Tensor | None = None,
+        reverse_source_value_credit: bool = True,
+        route_source_output_projection: bool = True,
         route_output_projection: bool = False,
     ) -> Tensor:
         hidden = hidden + self.dropout(
@@ -713,6 +737,8 @@ class TransformerBlock(nn.Module):
                 attention_mask=attention_mask,
                 backward_attention_gate=backward_attention_gate,
                 backward_source_multipliers=backward_source_multipliers,
+                reverse_source_value_credit=reverse_source_value_credit,
+                route_source_output_projection=route_source_output_projection,
                 route_output_projection=route_output_projection,
             )
         )
