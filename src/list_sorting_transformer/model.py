@@ -247,8 +247,6 @@ def routed_scaled_dot_product_attention(
         key.shape[-2],
     ):
         raise ValueError("backward gate must match the attention map")
-    if bool((backward_gate <= 0).any()) or bool((backward_gate > 1).any()):
-        raise ValueError("backward gate values must be in (0, 1]")
     attended = F.scaled_dot_product_attention(
         query,
         key,
@@ -258,23 +256,24 @@ def routed_scaled_dot_product_attention(
         is_causal=is_causal,
     )
     routed_weights = _routed_attention_weights(
-        query.detach(),
-        key.detach(),
+        query,
+        key,
         backward_gate=backward_gate.detach(),
         attention_mask=attention_mask,
         is_causal=is_causal,
     )
-    routed_attended = (
+    routed_surrogate = routed_weights @ value
+    routed = (
         attended.detach()
-        if bool(backward_gate.eq(1).all())
-        else routed_weights @ value.detach()
+        + (routed_surrogate - routed_surrogate.detach())
     )
-    routed = _RoutedAttentionBackward.apply(
+    manually_routed_attended = (
+        routed_weights.detach() @ value.detach()
+    )
+    routed_attended = torch.where(
+        backward_gate.eq(1).all(),
         attended.detach(),
-        query,
-        key,
-        value,
-        routed_weights,
+        manually_routed_attended,
     )
     return routed, routed_attended
 

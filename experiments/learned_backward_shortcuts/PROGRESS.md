@@ -2719,3 +2719,72 @@ held-out seeds, with evaluation dense enough to catch one-step collapses.
 
 Tracked output:
 [`results/on_policy_collapse_correction_summary.json`](results/on_policy_collapse_correction_summary.json).
+
+### Vectorized population execution
+
+The successful attention-router population path can now batch independent
+forward models, frozen candidate routers, gradients, and Adam moments with
+`torch.func.vmap`. The ordinary forward result remains unchanged, while the
+routed backward is expressed as an equivalent pure-PyTorch surrogate so it can
+be transformed by `torch.func`. A direct test compares this expression against
+the former custom autograd implementation, and a candidate-level test compares
+the resulting losses, accuracies, and updated forward parameters against the
+serial trainer.
+
+The mode is opt-in:
+
+```bash
+sort-shortcut-credit \
+  ... \
+  --backward-rule-type attention_router \
+  --vectorized-population \
+  --vectorized-chunk-size 16
+```
+
+It currently supports the configuration used by the successful random-list
+experiments: an input-conditioned attention router without forward-state
+conditioning or output-projection routing. The old serial path remains the
+default and supports the other backward-rule variants. Vectorized execution
+does not collect the redundant Python-side per-candidate routing statistics
+from every inner step; fitness, clean and held-out metrics, function-space
+diagnostics, elite selection, proposal acceptance, and checkpoints are
+retained.
+
+A matched three-GPU benchmark used population 48, horizon 40, batch size 64,
+the full `d_model=128`, three-layer forward model, random leak placement,
+worst-mode CE fitness, and an elite-4 update:
+
+| Runtime | Serial candidates | Vectorized candidates | Speedup |
+| --- | ---: | ---: | ---: |
+| Population phase | 21.93 s | 8.40 s | 2.61x |
+| Complete generation | 24.86 s | 11.47 s | 2.17x |
+
+Both modes selected candidates `[46, 19, 14, 9]`. Their best clean losses
+differed by `8.9e-8`, and the resulting backward-router checkpoints were
+bit-for-bit identical. On one GPU, chunk 16 used approximately 9.2 GiB and
+was 2.16x faster than the serial equivalent; smaller chunks underutilized the
+GPU.
+
+### Automation audit
+
+The previous method is reproducible, but its complete meta-procedure was not
+automatic:
+
+- Horizon promotion code tracks an EMA of post-training clean loss and doubles
+  the horizon after a configurable plateau.
+- Elite backtracking accepts a proposal only on matched independent
+  trajectories. Rejection restores the centre and halves sigma; three
+  consecutive accepted proposals double sigma up to its initial value.
+- The switch from paper-standardized EGGROLL to an elite centroid was selected
+  manually after function-space analysis showed coherent top candidates and a
+  misaligned all-population update.
+- Elite 4 versus elite 8, population 64 versus 128, and the successful
+  long-horizon transitions were selected by explicit matched ablations rather
+  than by a coded controller.
+
+A fully repeatable follow-up should construct nested elite-1/2/4/8 centroid
+proposals from the same population, evaluate them together on the same
+independent acceptance trajectories, and accept only the best improvement.
+Horizon promotion should require both repeated proposal rejection and a
+matched doubled-horizon probe that improves forward learning. The vectorized
+population path makes these extra matched proposals practical.

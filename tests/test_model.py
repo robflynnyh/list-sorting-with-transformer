@@ -4,7 +4,13 @@ import torch
 
 from list_sorting_transformer.data import make_sorting_batch
 from list_sorting_transformer.evaluation import output_cross_entropy
-from list_sorting_transformer.model import DecoderTransformer, ModelConfig
+from list_sorting_transformer.model import (
+    DecoderTransformer,
+    ModelConfig,
+    _RoutedAttentionBackward,
+    _routed_attention_weights,
+    routed_scaled_dot_product_attention,
+)
 from list_sorting_transformer.recurrent import LSTMConfig, LSTMSorter
 from list_sorting_transformer.tokens import SymbolVocabulary
 
@@ -30,6 +36,68 @@ def small_config(
 def test_default_layers_interleave_rotary_and_nope() -> None:
     model = DecoderTransformer(small_config())
     assert model.layer_position_modes == ("rotary", "none", "rotary", "none")
+
+
+def test_functional_routed_attention_matches_legacy_backward() -> None:
+    torch.manual_seed(31)
+    query = torch.randn(2, 2, 5, 4, requires_grad=True)
+    key = torch.randn(2, 2, 5, 4, requires_grad=True)
+    value = torch.randn(2, 2, 5, 4, requires_grad=True)
+    gate = torch.rand(2, 2, 5, 5).mul(0.8).add(0.2)
+    upstream = torch.randn_like(query)
+
+    routed, _ = routed_scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        backward_gate=gate,
+        is_causal=True,
+    )
+    functional_gradients = torch.autograd.grad(
+        (routed * upstream).sum(),
+        (query, key, value),
+    )
+
+    legacy_query = query.detach().clone().requires_grad_()
+    legacy_key = key.detach().clone().requires_grad_()
+    legacy_value = value.detach().clone().requires_grad_()
+    attended = torch.nn.functional.scaled_dot_product_attention(
+        legacy_query,
+        legacy_key,
+        legacy_value,
+        dropout_p=0.0,
+        is_causal=True,
+    )
+    routed_weights = _routed_attention_weights(
+        legacy_query.detach(),
+        legacy_key.detach(),
+        backward_gate=gate,
+        attention_mask=None,
+        is_causal=True,
+    )
+    legacy = _RoutedAttentionBackward.apply(
+        attended.detach(),
+        legacy_query,
+        legacy_key,
+        legacy_value,
+        routed_weights,
+    )
+    legacy_gradients = torch.autograd.grad(
+        (legacy * upstream).sum(),
+        (legacy_query, legacy_key, legacy_value),
+    )
+
+    torch.testing.assert_close(routed, attended, rtol=0, atol=0)
+    for functional, expected in zip(
+        functional_gradients,
+        legacy_gradients,
+    ):
+        torch.testing.assert_close(
+            functional,
+            expected,
+            rtol=2e-5,
+            atol=2e-6,
+        )
 
 
 def test_value_rotary_mode_is_reported_for_rotary_layers() -> None:

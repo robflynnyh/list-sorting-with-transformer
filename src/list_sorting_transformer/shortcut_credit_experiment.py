@@ -93,6 +93,8 @@ class ShortcutCreditExperimentConfig:
     resume: str | None = None
     resume_horizon: int | None = None
     candidate_devices: str | None = None
+    vectorized_population: bool = False
+    vectorized_chunk_size: int = 16
 
     def __post_init__(self) -> None:
         positive_integers = (
@@ -118,6 +120,7 @@ class ShortcutCreditExperimentConfig:
             self.elite_acceptance_patience,
             self.elite_acceptance_trajectories,
             self.candidate_ranking_trajectories,
+            self.vectorized_chunk_size,
         )
         if any(value < 1 for value in positive_integers):
             raise ValueError("integer configuration values must be positive")
@@ -128,6 +131,15 @@ class ShortcutCreditExperimentConfig:
             "attention_router",
         }:
             raise ValueError("unknown backward_rule_type")
+        if self.vectorized_population and (
+            self.backward_rule_type != "attention_router"
+            or self.route_output_projection
+            or self.condition_on_forward_state
+        ):
+            raise ValueError(
+                "vectorized populations require an unconditioned attention "
+                "router without output-projection routing"
+            )
         if self.fitness_objective not in {
             "mean_clean_ce",
             "worst_mode_ce",
@@ -1888,7 +1900,82 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 tuple[float, ...],
             ]
         ] = []
-        if len(candidate_devices) == 1:
+        population_started_at = time.monotonic()
+        if config.vectorized_population:
+            from .vectorized_routing_population import (
+                train_vectorized_routing_candidate_chunks,
+            )
+
+            if not isinstance(center_rule, AttentionRoutingRule):
+                raise TypeError(
+                    "vectorized populations require an attention router"
+                )
+            shards = shard_candidate_specs(
+                candidate_specs,
+                len(candidate_devices),
+            )
+            if len(candidate_devices) == 1:
+                candidate_outputs.extend(
+                    train_vectorized_routing_candidate_chunks(
+                        config=config,
+                        candidate_specs=shards[0],
+                        chunk_size=config.vectorized_chunk_size,
+                        device=candidate_devices[0],
+                        base_state=base_state,
+                        center_rule_config=center_rule.config,
+                        center_parameters=center_parameters,
+                        directions=directions,
+                        inner_batches=inner_batches,
+                        fitness_batches=fitness_batches,
+                        correct_batches=correct_batches,
+                        heldout_fitness_batches=heldout_fitness_batches,
+                        heldout_correct_batches=heldout_correct_batches,
+                        initial_clean_metrics=initial_clean_metrics,
+                        perturbation_sigma=generation_sigma,
+                        additional_ranking_inputs=(
+                            additional_ranking_inputs
+                        ),
+                    )
+                )
+            else:
+                with ThreadPoolExecutor(
+                    max_workers=len(candidate_devices)
+                ) as executor:
+                    futures = [
+                        executor.submit(
+                            train_vectorized_routing_candidate_chunks,
+                            config=config,
+                            candidate_specs=shard,
+                            chunk_size=config.vectorized_chunk_size,
+                            device=worker_device,
+                            base_state=base_state,
+                            center_rule_config=center_rule.config,
+                            center_parameters=center_parameters,
+                            directions=directions,
+                            inner_batches=inner_batches,
+                            fitness_batches=fitness_batches,
+                            correct_batches=correct_batches,
+                            heldout_fitness_batches=(
+                                heldout_fitness_batches
+                            ),
+                            heldout_correct_batches=(
+                                heldout_correct_batches
+                            ),
+                            initial_clean_metrics=initial_clean_metrics,
+                            perturbation_sigma=generation_sigma,
+                            additional_ranking_inputs=(
+                                additional_ranking_inputs
+                            ),
+                        )
+                        for shard, worker_device in zip(
+                            shards,
+                            candidate_devices,
+                        )
+                        if shard
+                    ]
+                    for future in futures:
+                        candidate_outputs.extend(future.result())
+        elif len(candidate_devices) == 1:
             for candidate_index, direction_index, sign in candidate_specs:
                 (
                     fitness,
@@ -1962,6 +2049,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 ]
                 for future in futures:
                     candidate_outputs.extend(future.result())
+        population_seconds = time.monotonic() - population_started_at
 
         candidate_outputs.sort(key=lambda result: result[0])
         fitness_values = []
@@ -2439,6 +2527,12 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     plateau_state.consecutive_accepted_updates
                 ),
                 "candidate_device_count": len(candidate_devices),
+                "vectorized_population": float(
+                    config.vectorized_population
+                ),
+                "vectorized_chunk_size": float(
+                    config.vectorized_chunk_size
+                ),
                 "outer_learning_rate": outer_learning_rate,
                 "outer/update_rule_elite_centroid": float(
                     config.outer_update_rule == "elite_centroid"
@@ -2460,6 +2554,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "timing/generation_seconds": (
                     time.monotonic() - generation_started_at
                 ),
+                "timing/population_seconds": population_seconds,
                 "timing/elapsed_seconds": time.monotonic() - started_at,
             }
         )
@@ -2741,6 +2836,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--candidate-devices",
         help="comma-separated CUDA devices for parallel candidate shards",
+    )
+    parser.add_argument(
+        "--vectorized-population",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="batch independent attention-router candidates with torch.func",
+    )
+    parser.add_argument(
+        "--vectorized-chunk-size",
+        type=int,
+        default=16,
+        help="number of candidate trajectories batched on each GPU",
     )
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument(
