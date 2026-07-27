@@ -64,6 +64,67 @@ class _RoutedAttentionBackward(torch.autograd.Function):
         )
 
 
+class _SourceReversedAttentionBackward(torch.autograd.Function):
+    """Keep attention forward exact while reversing selected source credit."""
+
+    @staticmethod
+    def forward(
+        ctx: object,
+        attended: Tensor,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        weights: Tensor,
+        source_multipliers: Tensor,
+    ) -> Tensor:
+        ctx.save_for_backward(
+            query,
+            key,
+            value,
+            weights,
+            source_multipliers,
+        )
+        return attended
+
+    @staticmethod
+    def backward(
+        ctx: object,
+        output_gradient: Tensor,
+    ) -> tuple[None, Tensor, Tensor, Tensor, None, None]:
+        (
+            query,
+            key,
+            value,
+            weights,
+            source_multipliers,
+        ) = ctx.saved_tensors
+        scale = query.shape[-1] ** -0.5
+        edge_multipliers = source_multipliers[:, None, None, :]
+
+        value_gradient = (
+            weights * edge_multipliers
+        ).transpose(-2, -1) @ output_gradient
+        weight_gradient = (
+            output_gradient @ value.transpose(-2, -1)
+        ) * edge_multipliers
+        score_gradient = weights * (
+            weight_gradient
+            - (weight_gradient * weights).sum(dim=-1, keepdim=True)
+        )
+        query_gradient = (score_gradient @ key) * scale
+        key_gradient = (
+            score_gradient.transpose(-2, -1) @ query
+        ) * scale
+        return (
+            None,
+            query_gradient,
+            key_gradient,
+            value_gradient,
+            None,
+            None,
+        )
+
+
 class _RoutedLinearBackward(torch.autograd.Function):
     """Keep a linear forward exact while changing its parameter credit."""
 
@@ -178,6 +239,67 @@ def routed_scaled_dot_product_attention(
         routed_weights,
     )
     return routed, routed_attended
+
+
+def source_reversed_scaled_dot_product_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    *,
+    source_multipliers: Tensor,
+    attention_mask: Tensor | None = None,
+    is_causal: bool = False,
+) -> tuple[Tensor, Tensor]:
+    """Run exact attention forward with per-source backward multipliers."""
+
+    expected_shape = (query.shape[0], key.shape[-2])
+    if source_multipliers.shape != expected_shape:
+        raise ValueError(
+            "source multipliers must have shape [batch, key_time]"
+        )
+    if not bool(torch.isfinite(source_multipliers).all()):
+        raise ValueError("source multipliers must be finite")
+
+    attended = F.scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attention_mask,
+        dropout_p=0.0,
+        is_causal=is_causal,
+    )
+    scores = query.detach() @ key.detach().transpose(
+        -2, -1
+    ) / query.shape[-1] ** 0.5
+    if is_causal:
+        query_length = query.shape[-2]
+        key_length = key.shape[-2]
+        causal_mask = torch.ones(
+            query_length,
+            key_length,
+            dtype=torch.bool,
+            device=query.device,
+        ).tril(diagonal=key_length - query_length)
+        scores = scores.masked_fill(~causal_mask, float("-inf"))
+    if attention_mask is not None:
+        scores = scores.masked_fill(~attention_mask, float("-inf"))
+    weights = scores.softmax(dim=-1)
+    multipliers = source_multipliers.detach().to(
+        device=weights.device,
+        dtype=weights.dtype,
+    )
+    backward_attended = (
+        weights * multipliers[:, None, None, :]
+    ) @ value.detach()
+    reversed_attended = _SourceReversedAttentionBackward.apply(
+        attended.detach(),
+        query,
+        key,
+        value,
+        weights,
+        multipliers,
+    )
+    return reversed_attended, backward_attended
 
 
 def routed_linear(
@@ -393,6 +515,7 @@ class CausalSelfAttention(nn.Module):
         cache: KeyValueCache | None = None,
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
+        backward_source_multipliers: Tensor | None = None,
         route_output_projection: bool = False,
     ) -> tuple[Tensor, KeyValueCache]:
         batch_size, sequence_length, model_dim = hidden.shape
@@ -400,6 +523,15 @@ class CausalSelfAttention(nn.Module):
             raise ValueError("custom attention masks are not supported with a cache")
         if cache is not None and backward_attention_gate is not None:
             raise ValueError("backward attention routing is not cacheable")
+        if cache is not None and backward_source_multipliers is not None:
+            raise ValueError("source-gradient reversal is not cacheable")
+        if (
+            backward_attention_gate is not None
+            and backward_source_multipliers is not None
+        ):
+            raise ValueError(
+                "attention routing and source-gradient reversal are exclusive"
+            )
         query, key, value = self.qkv(hidden).chunk(3, dim=-1)
         query = self._split_heads(query)
         key = self._split_heads(key)
@@ -458,6 +590,25 @@ class CausalSelfAttention(nn.Module):
                 attention_mask=combined_mask,
                 is_causal=combined_mask is None,
             )
+        elif backward_source_multipliers is not None:
+            if self.top_k is not None:
+                raise ValueError(
+                    "source-gradient reversal does not support top-k attention"
+                )
+            if self.dropout and self.training:
+                raise ValueError(
+                    "source-gradient reversal requires zero attention dropout"
+                )
+            attended, routed_attended = (
+                source_reversed_scaled_dot_product_attention(
+                    query,
+                    key,
+                    value,
+                    source_multipliers=backward_source_multipliers,
+                    attention_mask=combined_mask,
+                    is_causal=combined_mask is None,
+                )
+            )
         elif self.top_k is None:
             routed_attended = None
             attended = F.scaled_dot_product_attention(
@@ -482,10 +633,13 @@ class CausalSelfAttention(nn.Module):
             sequence_length,
             model_dim,
         )
-        if route_output_projection:
+        if (
+            route_output_projection
+            or backward_source_multipliers is not None
+        ):
             if routed_attended is None:
                 raise ValueError(
-                    "output-projection routing requires a backward attention gate"
+                    "output-projection routing requires backward routing"
                 )
             routed_attended = routed_attended.transpose(
                 1, 2
@@ -509,12 +663,14 @@ class CausalSelfAttention(nn.Module):
         *,
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
+        backward_source_multipliers: Tensor | None = None,
         route_output_projection: bool = False,
     ) -> Tensor:
         attended, _ = self.forward_with_cache(
             hidden,
             attention_mask=attention_mask,
             backward_attention_gate=backward_attention_gate,
+            backward_source_multipliers=backward_source_multipliers,
             route_output_projection=route_output_projection,
         )
         return attended
@@ -548,6 +704,7 @@ class TransformerBlock(nn.Module):
         *,
         attention_mask: Tensor | None = None,
         backward_attention_gate: Tensor | None = None,
+        backward_source_multipliers: Tensor | None = None,
         route_output_projection: bool = False,
     ) -> Tensor:
         hidden = hidden + self.dropout(
@@ -555,6 +712,7 @@ class TransformerBlock(nn.Module):
                 self.attention_norm(hidden),
                 attention_mask=attention_mask,
                 backward_attention_gate=backward_attention_gate,
+                backward_source_multipliers=backward_source_multipliers,
                 route_output_projection=route_output_projection,
             )
         )
