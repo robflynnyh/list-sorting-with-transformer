@@ -240,5 +240,25 @@ selector generation 34 with:
 - a 30-minute external wall-clock limit, with a checkpoint after every
   completed generation.
 
-The run is intentionally not inspected while active. Its outputs are under
+The run completed 31 generations, from generation 35 through 65. Its outputs
+are under
 `/exp/exp4/acp21rjf/.scratch/list-sorting-token-reversal/selector_background_30m_h160_g128`.
+
+The continuation did not produce a meaningful reward increase:
+
+| Metric | First 5 generations | Last 5 generations |
+| --- | ---: | ---: |
+| Mean reward | 0.748195 | 0.751224 |
+| Maximum candidate reward | 0.755475 | 0.756892 |
+| Best fixed clean loss | 2.297194 | 2.288780 |
+| Best fixed clean accuracy | 22.54% | 22.50% |
+| Best held-out clean loss | 2.367152 | 2.352241 |
+| Best held-out clean accuracy | 19.84% | 19.61% |
+
+Mean reward started at 0.751661 and ended at 0.751948. Although the last-five
+average was 0.003029 higher than the first-five average, the fitted trend over
+all generations was slightly negative (`-0.000562` per generation) amid large
+generation-to-generation variation (`0.601366` to `0.868562`). Fixed and
+held-out loss decreased slightly, but neither clean-accuracy series improved.
+The longer unattended continuation therefore provides no evidence that this
+selector configuration is steadily learning a better credit-assignment rule.
