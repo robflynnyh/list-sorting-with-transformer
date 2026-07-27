@@ -2303,9 +2303,14 @@ and
 [`results/random_transition_h3600_g71_metrics.jsonl`](results/random_transition_h3600_g71_metrics.jsonl).
 
 The run also exposed an engineering bottleneck. Four candidate shards used
-four GPUs but shared one Python process and completed the population phase in
-about 52 minutes; the small model is dominated by Python/launch overhead and
-the threads provide little wall-clock scaling. Before running many more
-transition generations, candidate shards should move to separate processes
-and the centre/control/independent-acceptance trajectories should be
-distributed across the GPUs as well.
+four GPUs but completed the population phase in about 52 minutes. A controlled
+two-GPU benchmark compared threads with separate spawned processes using the
+same seed, population, model, batches, and transition checkpoints. Every
+non-timing metric matched exactly, but internal generation time improved only
+from `88.81s` to `84.80s` (`4.5%`; total wall time `110.85s -> 106.02s`).
+That gain does not justify CPU-copy and multiprocessing complexity, so the
+process backend was dropped. The likely useful optimization is evaluating
+multiple perturbations in one batched functional model call rather than
+launching one complete candidate trajectory at a time. The
+centre/control/independent-acceptance trajectories can also be distributed
+across otherwise idle GPUs.
