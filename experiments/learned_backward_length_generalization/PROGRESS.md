@@ -59,3 +59,18 @@ proposal was correctly rejected because its matched deltas were
 allocated memory was 0.78 GiB for a population-8 chunk.
 
 The full repository test suite passes with 320 tests.
+
+## Active run
+
+- W&B:
+  <https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/ksbfapf2>
+- Run: `pointer-next-length20-fitness50-heldout400-seed7`
+- Service: `list-sorting-length-generalization-seed7-v3.service`
+- GPUs: 0, 1, and 2 through `with-gpu`; GPU 3 remains available.
+
+The first two horizon-160 generations took 37.9 and 36.3 seconds, with
+7.78 GiB peak allocation per worker. Generation 0 rejected a mixed-sign
+proposal. Generation 1 accepted elite count 2 because both independent
+acceptance deltas were positive (`+0.0163` and `+0.4578`). At the identity
+rule, ordinary training reached 79–80% on the fixed length-50 set, 100% on the
+mixed length-2-through-20 set, and 8.6–11.7% on the fixed length-400 set.
