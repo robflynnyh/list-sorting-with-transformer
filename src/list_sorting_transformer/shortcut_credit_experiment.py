@@ -817,13 +817,11 @@ def forward_training_autocast_context(
         raise RuntimeError("BF16 training is not supported on this CUDA device")
     contexts = ExitStack()
     if vmap_compatible:
-        contexts.enter_context(
-            torch.backends.cuda.sdp_kernel(
-                enable_flash=False,
-                enable_math=True,
-                enable_mem_efficient=False,
-            )
-        )
+        # SDPA backend flags are process-global in this PyTorch version.
+        # Context managers race when candidate shards run in worker threads.
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
     contexts.enter_context(
         torch.autocast(device_type="cuda", dtype=torch.bfloat16)
     )
