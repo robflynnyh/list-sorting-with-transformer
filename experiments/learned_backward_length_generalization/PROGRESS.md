@@ -107,3 +107,17 @@ acceptance trajectories intact. The measured weighted runtime is approximately
 40.3 seconds per generation. This run was stopped after generation 17 because
 the asymmetric sigma rule had already reached its minimum: every rejection
 halved sigma, but recovery required three consecutive accepted proposals.
+
+## Active balanced-sigma run
+
+- W&B:
+  <https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/xgcg2kik>
+- Run:
+  `pointer-next-length20-fitness50-heldout400-h320-2l-p64-10k-seed7-v4`
+- Service:
+  `list-sorting-length-generalization-h320-2l-p64-10k-seed7-v4.service`
+
+The live controller behaved as configured: generation 0 was accepted at the
+maximum sigma `0.21`, which remained capped at `0.21`; generation 1 was
+rejected and reduced sigma to `0.168` rather than halving it. The full and
+sparse generations took 54.7 and 39.4 seconds respectively.
