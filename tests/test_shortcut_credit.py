@@ -54,6 +54,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     routing_population_summary,
     save_checkpoint,
     shard_candidate_specs,
+    strip_shortcut_only_metrics,
     train_forward_trajectory,
     trajectory_summary,
     update_elite_search_state,
@@ -815,6 +816,24 @@ def test_trajectory_summary_can_omit_fitness_for_heldout_data() -> None:
 
     assert "heldout_center_rule/fitness" not in summary
     assert summary["heldout_center_rule/min_mode_accuracy"] == 0.4
+
+
+def test_clean_task_reporting_strips_shortcut_only_metric_aliases() -> None:
+    summary = strip_shortcut_only_metrics(
+        {
+            "clean/accuracy_mean": 0.7,
+            "clean/masked_accuracy_mean": 0.7,
+            "best/incorrect_accuracy": 0.6,
+            "center_rule/correct_leak_accuracy": 0.8,
+            "masked_training/clean_accuracy": 0.7,
+            "length_400/center_accuracy": 0.5,
+        }
+    )
+
+    assert summary == {
+        "clean/accuracy_mean": 0.7,
+        "length_400/center_accuracy": 0.5,
+    }
 
 
 def test_heldout_candidate_summary_keeps_outer_selection_indices() -> None:

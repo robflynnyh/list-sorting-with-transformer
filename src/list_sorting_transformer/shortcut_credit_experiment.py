@@ -868,6 +868,19 @@ def trajectory_summary(
     return summary
 
 
+def strip_shortcut_only_metrics(
+    summary: dict[str, float | str | None],
+) -> dict[str, float | str | None]:
+    """Remove legacy shortcut-condition aliases from clean-task reporting."""
+
+    shortcut_terms = ("masked", "incorrect", "correct_leak")
+    return {
+        key: value
+        for key, value in summary.items()
+        if not any(term in key for term in shortcut_terms)
+    }
+
+
 def checkpoint_trajectory_summary(
     prefix: str,
     trajectory: ForwardTrajectoryMetrics,
@@ -3753,6 +3766,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         summary["search/consecutive_rejected_updates"] = float(
             plateau_state.consecutive_rejected_updates
         )
+        if config.task_variant == "pointer_next_length":
+            summary = strip_shortcut_only_metrics(summary)
 
         with metrics_path.open("a") as handle:
             handle.write(json.dumps(summary, sort_keys=True) + "\n")
