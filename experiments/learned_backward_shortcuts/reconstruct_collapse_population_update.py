@@ -26,6 +26,7 @@ def load_fitnesses(
     path: Path,
     *,
     population_size: int,
+    fitness_field: str = "fitness",
 ) -> torch.Tensor:
     rows = [
         json.loads(line)
@@ -39,7 +40,7 @@ def load_fitnesses(
             "candidate file must contain every population index exactly once"
         )
     return torch.tensor(
-        [float(row["fitness"]) for row in rows],
+        [float(row[fitness_field]) for row in rows],
         dtype=torch.float32,
     )
 
@@ -52,6 +53,7 @@ def reconstruct_update(
     population_seed: int,
     sigma: float,
     outer_learning_rate: float,
+    fitness_field: str,
     parameter_prefixes: tuple[str, ...],
     output: Path,
 ) -> dict[str, object]:
@@ -81,6 +83,7 @@ def reconstruct_update(
     fitnesses = load_fitnesses(
         candidates,
         population_size=population_size,
+        fitness_field=fitness_field,
     )
     standardized = paper_eggroll_update(
         rule,
@@ -115,6 +118,7 @@ def reconstruct_update(
         "population_seed": population_seed,
         "sigma": sigma,
         "outer_learning_rate": outer_learning_rate,
+        "fitness_field": fitness_field,
         "parameter_prefixes": list(parameter_prefixes),
     }
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -138,6 +142,12 @@ def main() -> None:
     parser.add_argument("--sigma", type=float, required=True)
     parser.add_argument("--outer-learning-rate", type=float, required=True)
     parser.add_argument(
+        "--fitness-field",
+        choices=("fitness", "mean_window_fitness"),
+        default="fitness",
+        help="candidate JSONL field standardized to form the EGGROLL update",
+    )
+    parser.add_argument(
         "--perturb-parameter-prefixes",
         type=parse_parameter_prefixes,
         default=(),
@@ -153,6 +163,7 @@ def main() -> None:
                 population_seed=args.population_seed,
                 sigma=args.sigma,
                 outer_learning_rate=args.outer_learning_rate,
+                fitness_field=args.fitness_field,
                 parameter_prefixes=args.perturb_parameter_prefixes,
                 output=args.output,
             ),

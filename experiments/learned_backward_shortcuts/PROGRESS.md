@@ -2677,3 +2677,45 @@ gate.
 
 Tracked output:
 [`results/trimmed_collapse_evolution_summary.json`](results/trimmed_collapse_evolution_summary.json).
+
+### Correction: acceptance must be on-policy from initialization
+
+The first fitness-weighted rank-32 update reconstructed from the trimmed P64
+population appeared to pass the six saved collapse slices. At outer learning
+rate `0.0002`, it tied or improved every serialized slice, with changes of
+`0.00`, `+1.17`, `+10.94`, `0.00`, `0.00`, and `0.00` accuracy points. A
+longer replay also appeared non-worse, but that replay still began from saved
+model and Adam states on the original trajectory. Calling it a full-trajectory
+acceptance test was incorrect.
+
+The backward rule acts during every optimizer step, so changing it can change
+the trajectory before a saved collapse state is reached. The update was
+therefore replayed from the identical forward-model initialization, using the
+identical per-seed training batches and dense evaluation around every known
+collapse. The exact on-policy results were:
+
+| Seed | Centre minimum | Updated minimum | Change |
+| --- | ---: | ---: | ---: |
+| `57,155,105` | 67.97% | 69.92% | +1.95 |
+| `7,700,511` | 38.67% | 72.66% | +33.98 |
+| `67,172,112` | 41.02% | 39.45% | -1.56 |
+| `67,122,077` | 61.72% | 61.72% | 0.00 |
+| `67,112,070` | 74.61% | 74.61% | 0.00 |
+| `67,222,147` | 58.20% | 57.81% | -0.39 |
+| `67,062,035` (holdout) | 10.55% | 12.11% | +1.56 |
+| `67,132,084` (holdout) | 73.05% | 57.81% | -15.23 |
+
+The update is rejected. A coarse scan every ten steps had missed this because
+some failures lasted only one or two optimizer steps. A second reconstruction
+using mean-window fitness also passed stale slices but failed longer saved
+windows: learning rate `0.0002` reduced seed `67,172,112` by 4.30 points, and
+learning rate `0.0001` reduced holdout seed `67,132,084` by 5.08 points.
+
+The corrected conclusion is narrower: serialized collapse slices are useful
+and much cheaper for candidate ranking, but they are not a valid final
+acceptance test for a rule used throughout training. Any persistent backward
+rule must be accepted by replaying from initialization on both ranking and
+held-out seeds, with evaluation dense enough to catch one-step collapses.
+
+Tracked output:
+[`results/on_policy_collapse_correction_summary.json`](results/on_policy_collapse_correction_summary.json).

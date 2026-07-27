@@ -39,6 +39,41 @@ def test_load_fitnesses_sorts_candidate_rows(tmp_path: Path) -> None:
     )
 
 
+def test_load_fitnesses_supports_mean_window_field(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "candidates.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "candidate_index": 1,
+                "fitness": -0.2,
+                "mean_window_fitness": 0.4,
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "candidate_index": 0,
+                "fitness": 0.3,
+                "mean_window_fitness": -0.1,
+            }
+        )
+        + "\n"
+    )
+
+    fitnesses = MODULE.load_fitnesses(
+        path,
+        population_size=2,
+        fitness_field="mean_window_fitness",
+    )
+
+    torch.testing.assert_close(
+        fitnesses,
+        torch.tensor([-0.1, 0.4]),
+    )
+
+
 def test_load_fitnesses_requires_complete_population(
     tmp_path: Path,
 ) -> None:
