@@ -135,10 +135,21 @@ def _merged_parameters(
     return {**forward_parameters, **rule_parameters}
 
 
+def _strip_parameter_prefix(
+    tensors: dict[str, Tensor],
+    prefix: str,
+) -> dict[str, Tensor]:
+    if any(not name.startswith(prefix) for name in tensors):
+        raise ValueError(f"all tensor names must start with {prefix!r}")
+    return {
+        name[len(prefix) :]: tensor
+        for name, tensor in tensors.items()
+    }
+
+
 def _population_metrics(
     model: _RoutedForwardModel,
     forward_parameters: dict[str, Tensor],
-    rule_parameters: dict[str, Tensor],
     buffers: dict[str, Tensor],
     batches: tuple[ShortcutBatch, ...],
     *,
@@ -170,20 +181,24 @@ def _population_metrics(
         device=device,
     )
     total_examples = 0
+    forward_buffers = _strip_parameter_prefix(
+        buffers,
+        "forward_model.",
+    )
 
     def candidate_logits(
         candidate_forward_parameters: dict[str, Tensor],
-        candidate_rule_parameters: dict[str, Tensor],
         input_ids: Tensor,
     ) -> Tensor:
+        unprefixed_parameters = _strip_parameter_prefix(
+            candidate_forward_parameters,
+            "forward_model.",
+        )
         return functional_call(
-            model,
+            model.forward_model,
             (
-                _merged_parameters(
-                    candidate_forward_parameters,
-                    candidate_rule_parameters,
-                ),
-                buffers,
+                unprefixed_parameters,
+                forward_buffers,
             ),
             (input_ids,),
         )[:, -1]
@@ -192,11 +207,10 @@ def _population_metrics(
         batch = cpu_batch.to(device)
         logits = vmap(
             candidate_logits,
-            in_dims=(0, 0, None),
+            in_dims=(0, None),
             randomness="different",
         )(
             forward_parameters,
-            rule_parameters,
             batch.input_ids,
         )
         targets = batch.targets.unsqueeze(0).expand(
@@ -368,7 +382,6 @@ def train_vectorized_routing_population(
             checkpoint_metrics[step] = _population_metrics(
                 model,
                 forward_parameters,
-                rule_parameters,
                 buffers,
                 fitness_batches,
                 vocabulary=vocabulary,
@@ -384,7 +397,6 @@ def train_vectorized_routing_population(
         else _population_metrics(
             model,
             forward_parameters,
-            rule_parameters,
             buffers,
             fitness_batches,
             vocabulary=vocabulary,
@@ -394,7 +406,6 @@ def train_vectorized_routing_population(
     correct = _population_metrics(
         model,
         forward_parameters,
-        rule_parameters,
         buffers,
         correct_batches,
         vocabulary=vocabulary,
@@ -406,7 +417,6 @@ def train_vectorized_routing_population(
         else _population_metrics(
             model,
             forward_parameters,
-            rule_parameters,
             buffers,
             heldout_fitness_batches,
             vocabulary=vocabulary,
@@ -419,7 +429,6 @@ def train_vectorized_routing_population(
         else _population_metrics(
             model,
             forward_parameters,
-            rule_parameters,
             buffers,
             heldout_correct_batches,
             vocabulary=vocabulary,

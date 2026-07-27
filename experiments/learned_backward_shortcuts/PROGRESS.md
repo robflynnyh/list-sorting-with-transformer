@@ -2930,3 +2930,21 @@ acceptance phase from 4.40 seconds to 2.94 seconds (1.50x). The smoke
 population had only eight candidates, so three-way population sharding was
 dominated by overhead; the full population-64 run remains large enough to
 benefit from the existing three-GPU population path.
+
+### Forward-only vectorized fitness evaluation
+
+Vectorized population evaluation now calls each trained forward model directly
+instead of invoking `forward_with_backward_rule`. The attention router changes
+only backward credit and deliberately preserves the ordinary forward output,
+so constructing routing masks and routed-attention surrogates during
+inference was redundant. Training still uses the complete router on every
+optimizer step. Candidate fitness, checkpoint fitness, clean/correct metrics,
+and held-out reporting all use the unchanged forward-model parameters and
+predictions.
+
+On the same seed-707, horizon-80, population-8 benchmark used for acceptance
+parallelism, every fitness value, acceptance delta, selected elite, and
+held-out metric was identical. Population time fell from 2.48 seconds to
+1.97 seconds (20.4%), acceptance time from 4.40 seconds to 4.12 seconds
+(6.3%), and complete generation time from 10.83 seconds to 9.32 seconds
+(14.0%).
