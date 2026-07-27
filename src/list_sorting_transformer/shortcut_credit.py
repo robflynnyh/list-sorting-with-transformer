@@ -502,6 +502,7 @@ class BidirectionalRoutingBlock(nn.Module):
 class AttentionRoutingRuleConfig:
     vocab_size: int
     d_model: int = 128
+    forward_d_model: int = 128
     n_heads: int = 4
     forward_layers: int = 3
     ffn_multiplier: float = 4.0
@@ -509,11 +510,13 @@ class AttentionRoutingRuleConfig:
     max_log_suppression: float = 8.0
     route_output_projection: bool = False
     shared_routing_map: bool = False
+    condition_on_forward_state: bool = False
 
     def __post_init__(self) -> None:
         if min(
             self.vocab_size,
             self.d_model,
+            self.forward_d_model,
             self.n_heads,
             self.forward_layers,
         ) < 1:
@@ -563,12 +566,23 @@ class AttentionRoutingRule(nn.Module):
             routing_width,
             bias=False,
         )
+        self.forward_state_projection = (
+            nn.Linear(
+                config.forward_d_model,
+                config.d_model,
+                bias=False,
+            )
+            if config.condition_on_forward_state
+            else None
+        )
         self.gates = nn.Parameter(
             torch.zeros(self.routing_layer_count, self.routing_head_count)
         )
         self.capture_statistics = False
         self.statistics: list[dict[str, float]] = []
         self.apply(DecoderTransformer._initialize)
+        if self.forward_state_projection is not None:
+            nn.init.zeros_(self.forward_state_projection.weight)
         nn.init.zeros_(self.gates)
         self.requires_grad_(False)
 
@@ -611,19 +625,46 @@ class AttentionRoutingRule(nn.Module):
         )
         return encoding[:, : self.config.d_model].to(dtype=dtype)
 
-    def attention_gates(self, token_ids: Tensor) -> tuple[Tensor, ...]:
-        """Return one existing-edge suppression map per forward layer."""
-
-        batch_size, sequence_length = token_ids.shape
+    def _routing_context(self, token_ids: Tensor) -> Tensor:
+        sequence_length = token_ids.shape[1]
         hidden = self.token_embedding(token_ids)
         hidden = hidden + self._position_encoding(
             sequence_length,
             device=hidden.device,
             dtype=hidden.dtype,
         )
-        hidden = self.context(hidden)
-        hidden = self.routing_norm(hidden)
+        return self.context(hidden)
 
+    def _conditioned_context(
+        self,
+        routing_context: Tensor,
+        forward_state: Tensor,
+    ) -> Tensor:
+        expected_shape = (
+            routing_context.shape[0],
+            routing_context.shape[1],
+            self.config.forward_d_model,
+        )
+        if forward_state.shape != expected_shape:
+            raise ValueError(
+                "forward state must have shape "
+                f"{expected_shape}, got {tuple(forward_state.shape)}"
+            )
+        if self.forward_state_projection is None:
+            raise ValueError(
+                "forward state was provided to an unconditioned router"
+            )
+        normalized_forward_state = F.layer_norm(
+            forward_state.detach(),
+            (self.config.forward_d_model,),
+        )
+        return routing_context + self.forward_state_projection(
+            normalized_forward_state
+        )
+
+    def _forward_gates(self, hidden: Tensor) -> Tensor:
+        batch_size, sequence_length, _ = hidden.shape
+        hidden = self.routing_norm(hidden)
         routing_shape = (
             batch_size,
             sequence_length,
@@ -681,13 +722,74 @@ class AttentionRoutingRule(nn.Module):
                 sequence_length,
                 sequence_length,
             )
+        return forward_gates
 
+    def attention_gates(
+        self,
+        token_ids: Tensor,
+        *,
+        forward_state: Tensor | tuple[Tensor, ...] | None = None,
+    ) -> tuple[Tensor, ...]:
+        """Return one existing-edge suppression map per forward layer."""
+
+        batch_size, sequence_length = token_ids.shape
+        routing_context = self._routing_context(token_ids)
+        if self.forward_state_projection is not None:
+            if forward_state is None:
+                raise ValueError(
+                    "state-conditioned routing requires forward state"
+                )
+            if isinstance(forward_state, tuple):
+                if len(forward_state) != self.config.forward_layers:
+                    raise ValueError(
+                        "forward state tuple must contain one state per layer"
+                    )
+                forward_gates = torch.stack(
+                    tuple(
+                        self._forward_gates(
+                            self._conditioned_context(
+                                routing_context,
+                                layer_state,
+                            )
+                        )[:, layer_index]
+                        for layer_index, layer_state in enumerate(
+                            forward_state
+                        )
+                    ),
+                    dim=1,
+                )
+            elif isinstance(forward_state, Tensor):
+                forward_gates = self._forward_gates(
+                    self._conditioned_context(
+                        routing_context,
+                        forward_state,
+                    )
+                )
+            else:
+                raise ValueError(
+                    "forward state must be a tensor or tuple of tensors"
+                )
+        elif forward_state is not None:
+            raise ValueError(
+                "forward state was provided to an unconditioned router"
+            )
+        else:
+            forward_gates = self._forward_gates(routing_context)
+        active_strength = (
+            self.config.max_log_suppression * F.relu(self.gates)
+        ).view(
+            1,
+            self.routing_layer_count,
+            self.routing_head_count,
+            1,
+            1,
+        )
         if self.capture_statistics:
             causal = torch.ones(
                 sequence_length,
                 sequence_length,
                 dtype=torch.bool,
-                device=hidden.device,
+                device=forward_gates.device,
             ).tril()
             valid_gates = forward_gates[..., causal]
             position_profile = forward_gates.mean(dim=0)
@@ -729,7 +831,7 @@ class AttentionRoutingRule(nn.Module):
                 batch_size,
                 sequence_length,
                 dtype=torch.bool,
-                device=hidden.device,
+                device=forward_gates.device,
             )
             other_mask.scatter_(
                 1,
@@ -759,7 +861,7 @@ class AttentionRoutingRule(nn.Module):
             valid_hint_destinations = (
                 torch.arange(
                     sequence_length,
-                    device=hidden.device,
+                    device=forward_gates.device,
                 )[None, :]
                 >= hint_positions[:, None]
             )
@@ -802,7 +904,7 @@ class AttentionRoutingRule(nn.Module):
                     "routing_leak_relative_gate": float(
                         leak_gates.mean()
                         / other_query_gates.mean().clamp_min(
-                            torch.finfo(hidden.dtype).tiny
+                            torch.finfo(forward_gates.dtype).tiny
                         )
                     ),
                     "routing_hint_source_gate": float(
@@ -814,7 +916,7 @@ class AttentionRoutingRule(nn.Module):
                     "routing_hint_source_relative_gate": float(
                         hint_source_gates.mean()
                         / other_source_gates.mean().clamp_min(
-                            torch.finfo(hidden.dtype).tiny
+                            torch.finfo(forward_gates.dtype).tiny
                         )
                     ),
                 }
@@ -834,11 +936,21 @@ class ShortcutDecoderTransformer(DecoderTransformer):
         backward_rule: BackwardRule | None,
     ) -> Tensor:
         hidden = self.embed(token_ids)
-        attention_gates = (
-            backward_rule.attention_gates(token_ids)
-            if isinstance(backward_rule, AttentionRoutingRule)
-            else None
-        )
+        attention_gates = None
+        if isinstance(backward_rule, AttentionRoutingRule):
+            forward_states = None
+            if backward_rule.config.condition_on_forward_state:
+                with torch.no_grad():
+                    probe_hidden = hidden.detach()
+                    captured_states = []
+                    for block in self.blocks:
+                        captured_states.append(probe_hidden)
+                        probe_hidden = block(probe_hidden)
+                    forward_states = tuple(captured_states)
+            attention_gates = backward_rule.attention_gates(
+                token_ids,
+                forward_state=forward_states,
+            )
         for layer_index, block in enumerate(self.blocks):
             hidden = block(
                 hidden,

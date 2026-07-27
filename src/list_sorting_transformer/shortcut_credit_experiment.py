@@ -78,6 +78,7 @@ class ShortcutCreditExperimentConfig:
     backward_rule_type: str = "gradient_transformer"
     route_output_projection: bool = False
     shared_routing_map: bool = True
+    condition_on_forward_state: bool = False
     fitness_objective: str = "mean_clean_ce"
     fitness_checkpoints: str | None = None
     forward_layers: int = 3
@@ -311,10 +312,12 @@ def make_rule_config(
     return AttentionRoutingRuleConfig(
         vocab_size=vocabulary.size,
         d_model=config.backward_d_model,
+        forward_d_model=config.d_model,
         n_heads=config.heads,
         forward_layers=config.forward_layers,
         route_output_projection=config.route_output_projection,
         shared_routing_map=config.shared_routing_map,
+        condition_on_forward_state=config.condition_on_forward_state,
     )
 
 
@@ -2702,6 +2705,15 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="reuse one backward suppression map across all layers and heads",
+    )
+    parser.add_argument(
+        "--condition-on-forward-state",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "condition backward attention suppression on detached forward "
+            "input embeddings"
+        ),
     )
     parser.add_argument(
         "--fitness-objective",

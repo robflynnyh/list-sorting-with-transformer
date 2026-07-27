@@ -7,6 +7,10 @@ from pathlib import Path
 
 import torch
 
+from experiments.learned_backward_shortcuts.collapse_window_population import (
+    parse_parameter_prefixes,
+    restrict_direction,
+)
 from list_sorting_transformer.shortcut_credit import (
     apply_eggroll_direction,
     clone_center_parameters,
@@ -24,6 +28,11 @@ def main() -> None:
     parser.add_argument("--population-seed", type=int, required=True)
     parser.add_argument("--sigma", type=float, required=True)
     parser.add_argument("--candidate-index", type=int, required=True)
+    parser.add_argument(
+        "--perturb-parameter-prefixes",
+        type=parse_parameter_prefixes,
+        default=(),
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.population_size < 2 or args.population_size % 2:
@@ -45,7 +54,10 @@ def main() -> None:
     center_parameters = clone_center_parameters(rule)
     generator = torch.Generator().manual_seed(args.population_seed)
     directions = tuple(
-        sample_eggroll_direction(rule, generator=generator)
+        restrict_direction(
+            sample_eggroll_direction(rule, generator=generator),
+            parameter_prefixes=args.perturb_parameter_prefixes,
+        )
         for _ in range(args.population_size // 2)
     )
     direction_index = args.candidate_index // 2
@@ -71,6 +83,7 @@ def main() -> None:
         "candidate_index": args.candidate_index,
         "direction_index": direction_index,
         "sign": sign,
+        "parameter_prefixes": list(args.perturb_parameter_prefixes),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     torch.save(checkpoint, args.output)

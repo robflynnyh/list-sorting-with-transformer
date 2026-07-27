@@ -96,6 +96,45 @@ def aggregate_window_fitness(
     )
 
 
+def parse_parameter_prefixes(value: str | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    prefixes = tuple(
+        prefix.strip() for prefix in value.split(",") if prefix.strip()
+    )
+    if not prefixes or len(prefixes) != len(set(prefixes)):
+        raise argparse.ArgumentTypeError(
+            "parameter prefixes must be unique nonempty comma-separated names"
+        )
+    return prefixes
+
+
+def restrict_direction(
+    direction: EggrollDirection,
+    *,
+    parameter_prefixes: tuple[str, ...],
+) -> EggrollDirection:
+    if not parameter_prefixes:
+        return direction
+    matched = {
+        name
+        for name in direction.tensors
+        if any(name.startswith(prefix) for prefix in parameter_prefixes)
+    }
+    if not matched:
+        raise ValueError("parameter prefixes did not match any rule parameters")
+    return EggrollDirection(
+        {
+            name: (
+                tensor
+                if name in matched
+                else torch.zeros_like(tensor)
+            )
+            for name, tensor in direction.tensors.items()
+        }
+    )
+
+
 def evaluate_rule_windows(
     *,
     config: ShortcutCreditExperimentConfig,
@@ -367,6 +406,14 @@ def main() -> None:
         help="combine each candidate's per-window fitness values",
     )
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument(
+        "--perturb-parameter-prefixes",
+        type=parse_parameter_prefixes,
+        help=(
+            "comma-separated rule parameter prefixes to perturb; all other "
+            "direction tensors are zeroed"
+        ),
+    )
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--candidate-devices")
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -417,9 +464,12 @@ def main() -> None:
     direction_generator = torch.Generator().manual_seed(args.seed)
     directions = tuple(
         move_eggroll_direction(
-            sample_eggroll_direction(
-                center_rule,
-                generator=direction_generator,
+            restrict_direction(
+                sample_eggroll_direction(
+                    center_rule,
+                    generator=direction_generator,
+                ),
+                parameter_prefixes=args.perturb_parameter_prefixes,
             ),
             "cpu",
         )
@@ -586,6 +636,9 @@ def main() -> None:
         "sigma": args.sigma,
         "fitness_metric": args.fitness_metric,
         "window_aggregation": args.window_aggregation,
+        "perturb_parameter_prefixes": list(
+            args.perturb_parameter_prefixes
+        ),
         "seed": args.seed,
         "selected_candidate_index": best_index,
         "selected_fitness": float(fitnesses[best_index]),

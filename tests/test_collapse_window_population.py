@@ -2,6 +2,9 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+import torch
+
+from list_sorting_transformer.shortcut_credit import EggrollDirection
 
 
 MODULE_PATH = (
@@ -64,3 +67,37 @@ def test_window_fitness_can_require_every_window_to_improve() -> None:
 def test_window_fitness_rejects_empty_input() -> None:
     with pytest.raises(ValueError, match="at least one"):
         MODULE.aggregate_window_fitness([], aggregation="minimum")
+
+
+def test_direction_can_be_restricted_to_parameter_prefix() -> None:
+    direction = EggrollDirection(
+        {
+            "token_embedding.weight": torch.ones(2, 3),
+            "forward_state_projection.weight": torch.ones(3, 4),
+            "gates": torch.ones(1),
+        }
+    )
+
+    restricted = MODULE.restrict_direction(
+        direction,
+        parameter_prefixes=("forward_state_projection",),
+    )
+
+    assert not bool(restricted.tensors["token_embedding.weight"].any())
+    assert bool(restricted.tensors["forward_state_projection.weight"].all())
+    assert not bool(restricted.tensors["gates"].any())
+
+
+def test_direction_prefix_must_match_parameter() -> None:
+    direction = EggrollDirection({"gates": torch.ones(1)})
+    with pytest.raises(ValueError, match="did not match"):
+        MODULE.restrict_direction(
+            direction,
+            parameter_prefixes=("missing",),
+        )
+
+
+def test_parse_parameter_prefixes() -> None:
+    assert MODULE.parse_parameter_prefixes(
+        "state_projection, gates"
+    ) == ("state_projection", "gates")

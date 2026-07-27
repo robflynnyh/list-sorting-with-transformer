@@ -2544,3 +2544,80 @@ spending another population on a single unconditional global delta.
 
 Tracked output:
 [`results/collapse_window_holdout_summary.json`](results/collapse_window_holdout_summary.json).
+
+### Forward-state-conditioned collapse routing
+
+The six-window result above suggested that a fixed token-conditioned router
+could not distinguish forward trajectories that require conflicting updates.
+An opt-in extension therefore adds a zero-initialized
+`forward_state_projection.weight` (`128 x 128`, 16,384 parameters) to the
+shared suppression router. It is training-only: the supplied forward states
+are detached and influence only backward attention gates.
+
+The original transition checkpoint upgrades without changing its behavior.
+With the new projection at exact zero, all six dense collapse JSONLs are
+byte-for-byte identical to the unmodified centre. The upgrade therefore does
+not silently alter forward predictions, ordinary gradients, optimizer state,
+or collapse timing.
+
+#### Input-embedding state
+
+The first version conditioned every layer's router on the forward model's
+current input embeddings. A P2 smoke looked highly promising, improving its
+ranking collapse by `+16.80` points and a second collapse by `+32.03`.
+The complete matched P64 test rejected that conclusion:
+
+| Six-window candidate-19 change | Value |
+| --- | ---: |
+| Seed `57,155,105` | +10.16 |
+| Seed `7,700,511` | +35.94 |
+| Seed `67,172,112` | +12.50 |
+| Seed `67,122,077` | 0.00 |
+| Seed `67,112,070` | -4.69 |
+| Seed `67,222,147` | +5.86 |
+
+The two held-out changes were `-1.95` and `-36.33`, so the proposal was
+rejected. Candidate response correlations across windows again remained near
+zero.
+
+The population was also reconstructed using the paper's standardized,
+fitness-weighted EGGROLL update rather than selecting one rank-one member.
+Combining 32 antithetic directions produced a rank-32 projection update. Outer
+learning rates from `0.007` through `1.0` were selected on ranking windows
+only. The best scale was `1.0`, with mean improvement `+6.38` points but
+maximin change `-4.30`; higher update rank therefore did not resolve the
+conflict.
+
+#### Per-layer residual state
+
+The conditioning signal was then strengthened to the exact detached residual
+stream entering each forward layer. A no-grad probe pass collects these
+states; because backward routing does not change forward values, a zero
+projection still reproduces all six centre trajectories byte-for-byte.
+
+A staged P64 screened all candidates on the two original collapse windows.
+Five candidates improved both and were then replayed on the other four
+ranking windows. The strongest six-window survivor was candidate 12:
+
+| Ranking seed | Accuracy change |
+| --- | ---: |
+| `57,155,105` | +2.73 |
+| `7,700,511` | +27.34 |
+| `67,172,112` | +21.48 |
+| `67,122,077` | 0.00 |
+| `67,112,070` | -3.52 |
+| `67,222,147` | -9.38 |
+
+It did not reach the acceptance set. The experiment therefore rules out the
+simple claim that exposing one rank-one projection to richer current-state
+features is sufficient in one EGGROLL generation. It does not rule out learned
+conditional credit assignment: the projection began at zero and received only
+one random-search generation.
+
+The next test will trim each serialized trajectory to the updates immediately
+around its collapse. This targets the proposed event directly, removes long
+recovery tails from every fitness call, and makes multi-generation evolution
+of the conditional projection computationally practical.
+
+Tracked output:
+[`results/state_conditioned_collapse_summary.json`](results/state_conditioned_collapse_summary.json).

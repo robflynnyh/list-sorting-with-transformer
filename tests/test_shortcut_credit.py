@@ -91,16 +91,19 @@ def small_routing_rule(
     *,
     route_output_projection: bool = False,
     shared_routing_map: bool = False,
+    condition_on_forward_state: bool = False,
 ) -> AttentionRoutingRule:
     return AttentionRoutingRule(
         AttentionRoutingRuleConfig(
             vocab_size=small_vocabulary().size,
             d_model=32,
+            forward_d_model=32,
             n_heads=4,
             forward_layers=2,
             ffn_multiplier=2.0,
             route_output_projection=route_output_projection,
             shared_routing_map=shared_routing_map,
+            condition_on_forward_state=condition_on_forward_state,
         )
     )
 
@@ -1285,6 +1288,181 @@ def test_shared_attention_router_reuses_one_map_everywhere() -> None:
         torch.testing.assert_close(
             attention_gates[0][:, 0],
             attention_gates[0][:, head_index],
+        )
+
+
+def test_zero_state_projection_matches_unconditioned_router() -> None:
+    torch.manual_seed(63)
+    ordinary = small_routing_rule(shared_routing_map=True)
+    conditioned = small_routing_rule(
+        shared_routing_map=True,
+        condition_on_forward_state=True,
+    )
+    missing, unexpected = conditioned.load_state_dict(
+        ordinary.state_dict(),
+        strict=False,
+    )
+    assert missing == ["forward_state_projection.weight"]
+    assert unexpected == []
+    batch = make_shortcut_batch(
+        4,
+        8,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(64),
+        vocabulary=small_vocabulary(),
+    )
+    forward_state = torch.randn(4, batch.input_ids.shape[1], 32)
+
+    ordinary_gates = ordinary.attention_gates(batch.input_ids)
+    conditioned_gates = conditioned.attention_gates(
+        batch.input_ids,
+        forward_state=forward_state,
+    )
+
+    for ordinary_gate, conditioned_gate in zip(
+        ordinary_gates,
+        conditioned_gates,
+    ):
+        torch.testing.assert_close(
+            conditioned_gate,
+            ordinary_gate,
+            rtol=0,
+            atol=0,
+        )
+
+
+def test_state_projection_changes_routing_by_forward_state() -> None:
+    torch.manual_seed(65)
+    rule = small_routing_rule(
+        shared_routing_map=True,
+        condition_on_forward_state=True,
+    )
+    with torch.no_grad():
+        rule.gates.fill_(0.2)
+        rule.forward_state_projection.weight.normal_(std=0.1)
+    batch = make_shortcut_batch(
+        4,
+        8,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(66),
+        vocabulary=small_vocabulary(),
+    )
+    sequence_length = batch.input_ids.shape[1]
+    first_state = torch.randn(4, sequence_length, 32)
+    second_state = torch.randn(4, sequence_length, 32)
+
+    first_gates = rule.attention_gates(
+        batch.input_ids,
+        forward_state=first_state,
+    )
+    second_gates = rule.attention_gates(
+        batch.input_ids,
+        forward_state=second_state,
+    )
+
+    assert any(
+        not torch.equal(first_gate, second_gate)
+        for first_gate, second_gate in zip(first_gates, second_gates)
+    )
+
+
+def test_state_projection_uses_each_layers_residual_stream() -> None:
+    torch.manual_seed(68)
+    rule = small_routing_rule(
+        shared_routing_map=True,
+        condition_on_forward_state=True,
+    )
+    with torch.no_grad():
+        rule.gates.fill_(0.2)
+        rule.forward_state_projection.weight.normal_(std=0.1)
+    batch = make_shortcut_batch(
+        4,
+        8,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(69),
+        vocabulary=small_vocabulary(),
+    )
+    sequence_length = batch.input_ids.shape[1]
+    forward_states = (
+        torch.randn(4, sequence_length, 32),
+        torch.randn(4, sequence_length, 32),
+    )
+
+    gates = rule.attention_gates(
+        batch.input_ids,
+        forward_state=forward_states,
+    )
+
+    assert not torch.equal(gates[0], gates[1])
+
+
+def test_zero_state_conditioning_preserves_forward_and_gradients() -> None:
+    torch.manual_seed(70)
+    ordinary = small_model()
+    conditioned_model = deepcopy(ordinary)
+    ordinary_rule = small_routing_rule(shared_routing_map=True)
+    conditioned_rule = small_routing_rule(
+        shared_routing_map=True,
+        condition_on_forward_state=True,
+    )
+    incompatible = conditioned_rule.load_state_dict(
+        ordinary_rule.state_dict(),
+        strict=False,
+    )
+    assert incompatible.missing_keys == [
+        "forward_state_projection.weight"
+    ]
+    batch = make_shortcut_batch(
+        4,
+        8,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(71),
+        vocabulary=small_vocabulary(),
+    )
+
+    ordinary_loss = shortcut_loss(ordinary, batch, ordinary_rule)
+    ordinary_loss.backward()
+    conditioned_loss = shortcut_loss(
+        conditioned_model,
+        batch,
+        conditioned_rule,
+    )
+    conditioned_loss.backward()
+
+    torch.testing.assert_close(
+        conditioned_loss,
+        ordinary_loss,
+        rtol=0,
+        atol=0,
+    )
+    for ordinary_parameter, conditioned_parameter in zip(
+        ordinary.parameters(),
+        conditioned_model.parameters(),
+    ):
+        torch.testing.assert_close(
+            conditioned_parameter.grad,
+            ordinary_parameter.grad,
+            rtol=0,
+            atol=0,
+        )
+
+
+def test_state_conditioned_router_requires_matching_forward_state() -> None:
+    rule = small_routing_rule(condition_on_forward_state=True)
+    batch = make_shortcut_batch(
+        4,
+        8,
+        leak_mode="correct",
+        generator=torch.Generator().manual_seed(67),
+        vocabulary=small_vocabulary(),
+    )
+
+    with pytest.raises(ValueError, match="requires forward state"):
+        rule.attention_gates(batch.input_ids)
+    with pytest.raises(ValueError, match="forward state must have shape"):
+        rule.attention_gates(
+            batch.input_ids,
+            forward_state=torch.randn(4, 3, 32),
         )
 
 
