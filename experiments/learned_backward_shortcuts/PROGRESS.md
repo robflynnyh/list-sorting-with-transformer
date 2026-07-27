@@ -2885,3 +2885,18 @@ causal edges currently assigned negative credit.
 Set `ROUTING_CREDIT_MODE=signed` when invoking
 `run_deterministic_controller.sh`. The default remains `suppress_renorm`, so
 existing checkpoints and baseline launches retain their previous behavior.
+
+### Update-rule-specific step-size metrics
+
+The controller no longer logs the generic `outer_learning_rate` metric for
+every update rule. That value only affects `paper_standardized` EGGROLL and is
+now reported as `outer/paper_learning_rate`.
+
+Elite-centroid runs instead report the settings that determine their proposal:
+
+- `outer/elite_interpolation`: fraction of the selected candidate centroid
+  applied to the centre;
+- `outer/elite_step_scale`: `search/sigma * outer/elite_interpolation`, before
+  averaging the selected perturbation directions;
+- `outer/update_rms`: the measured RMS parameter change of the resulting
+  proposal.

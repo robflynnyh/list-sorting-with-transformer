@@ -43,6 +43,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     initialize_fresh_backward_rule,
     load_checkpoint,
     make_inner_batches,
+    outer_update_hyperparameter_summary,
     parse_candidate_devices,
     parse_fitness_checkpoints,
     restore_center_parameters,
@@ -74,6 +75,37 @@ def small_model() -> ShortcutDecoderTransformer:
             n_heads=4,
         )
     )
+
+
+def test_outer_update_metrics_only_report_active_step_size() -> None:
+    elite_summary = outer_update_hyperparameter_summary(
+        ShortcutCreditExperimentConfig(
+            outer_update_rule="elite_centroid",
+            elite_count=4,
+            elite_interpolation=0.5,
+        ),
+        sigma=0.2,
+        paper_learning_rate=0.007,
+    )
+    assert elite_summary == {
+        "outer/elite_count": 4.0,
+        "outer/elite_interpolation": 0.5,
+        "outer/elite_step_scale": pytest.approx(0.1),
+    }
+    assert "outer/paper_learning_rate" not in elite_summary
+
+    paper_summary = outer_update_hyperparameter_summary(
+        ShortcutCreditExperimentConfig(
+            outer_update_rule="paper_standardized",
+        ),
+        sigma=0.2,
+        paper_learning_rate=0.007,
+    )
+    assert paper_summary == {
+        "outer/paper_learning_rate": pytest.approx(0.007),
+    }
+    assert "outer/elite_interpolation" not in paper_summary
+    assert "outer/elite_step_scale" not in paper_summary
 
 
 def small_rule() -> LearnedBackwardRule:

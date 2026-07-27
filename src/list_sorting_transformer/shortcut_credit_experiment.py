@@ -975,6 +975,23 @@ def linear_outer_learning_rate(
     return config.outer_learning_rate * fraction_remaining
 
 
+def outer_update_hyperparameter_summary(
+    config: ShortcutCreditExperimentConfig,
+    *,
+    sigma: float,
+    paper_learning_rate: float,
+) -> dict[str, float]:
+    if config.outer_update_rule == "paper_standardized":
+        return {
+            "outer/paper_learning_rate": paper_learning_rate,
+        }
+    return {
+        "outer/elite_count": float(config.elite_count),
+        "outer/elite_interpolation": config.elite_interpolation,
+        "outer/elite_step_scale": sigma * config.elite_interpolation,
+    }
+
+
 @torch.no_grad()
 def elite_centroid_update(
     module: BackwardRule,
@@ -3070,15 +3087,12 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "vectorized_chunk_size": float(
                     config.vectorized_chunk_size
                 ),
-                "outer_learning_rate": outer_learning_rate,
                 "outer/update_rule_elite_centroid": float(
                     config.outer_update_rule == "elite_centroid"
                 ),
-                "outer/elite_count": float(config.elite_count),
                 "outer/selected_elite_count": float(
                     selected_elite_count or 0
                 ),
-                "outer/elite_interpolation": config.elite_interpolation,
                 "fitness/standardized_mean": float(standardized.mean()),
                 "fitness/standardized_std": float(
                     standardized.std(unbiased=False)
@@ -3097,6 +3111,13 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "timing/population_seconds": population_seconds,
                 "timing/elapsed_seconds": time.monotonic() - started_at,
             }
+        )
+        summary.update(
+            outer_update_hyperparameter_summary(
+                config,
+                sigma=generation_sigma,
+                paper_learning_rate=outer_learning_rate,
+            )
         )
         if elite_update_accepted is not None:
             summary["outer/update_accepted"] = float(
