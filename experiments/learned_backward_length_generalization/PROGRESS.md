@@ -39,6 +39,11 @@ reporting, centre/ordinary controls, and proposal replay run every ten
 generations; they never affect optimization. Numbered checkpoints are written
 every 25 generations to keep the complete run below roughly 0.5 GB.
 
+Sigma adapts symmetrically in log-space: an accepted proposal doubles sigma,
+while a rejected proposal multiplies it by 0.8. This gives an equilibrium
+acceptance rate of approximately 24% and, unlike the initial three-success
+streak rule, allows one accepted update to escape the minimum sigma.
+
 ## Preserved shortcut-resistance run
 
 The signed-credit random-leak controller was stopped after completed generation
@@ -84,7 +89,7 @@ P64-compatible elite selection, strict two-trajectory acceptance, and sparse
 reporting. The middle sparse generation retained both acceptance trajectories
 while omitting all length-400/control work and shortcut-only metric aliases.
 
-## Active high-throughput run
+## Superseded high-throughput run
 
 - W&B:
   <https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/k8sj7g3n>
@@ -99,4 +104,6 @@ Generation 0 completed in 52.9 seconds with full reporting, 7.72 GiB peak
 allocation, and an accepted elite-4 update. Generation 1 completed in 38.9
 seconds on the sparse path with 2.27 GiB peak allocation and both strict
 acceptance trajectories intact. The measured weighted runtime is approximately
-40.3 seconds per generation, or 4.7 days for 10,000 generations.
+40.3 seconds per generation. This run was stopped after generation 17 because
+the asymmetric sigma rule had already reached its minimum: every rejection
+halved sigma, but recovery required three consecutive accepted proposals.
