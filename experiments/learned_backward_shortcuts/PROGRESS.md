@@ -2788,3 +2788,46 @@ independent acceptance trajectories, and accept only the best improvement.
 Horizon promotion should require both repeated proposal rejection and a
 matched doubled-horizon probe that improves forward learning. The vectorized
 population path makes these extra matched proposals practical.
+
+### Deterministic adaptive controller
+
+The proposed follow-up is now implemented. With
+`--adaptive-elite-counts 1,2,4,8`, every generation:
+
+1. ranks one antithetic EGGROLL population on shared shortcut-training
+   trajectories and the fixed 512-example clean fitness set;
+2. constructs nested elite-1, elite-2, elite-4, and elite-8 centroid
+   proposals from that same ranked population;
+3. trains the unchanged centre and all four proposals from identical,
+   independently seeded forward-model initializations and shortcut batches;
+4. selects the proposal with the highest mean acceptance fitness, preferring
+   the smaller elite count on an exact tie;
+5. commits it only when it strictly beats the unchanged centre.
+
+Fresh held-out examples remain reporting-only. They do not rank candidates,
+select an elite count, accept a proposal, or promote the horizon. Rejected
+proposals restore the centre exactly and use the existing automatic sigma
+reduction; accepted proposals use the existing success-streak sigma growth.
+The selected elite count, every proposal's acceptance fitness, the decision,
+and both success/rejection streaks are checkpointed or logged.
+
+The optional `rejection_probe` horizon controller waits for a configured
+number of consecutive rejected proposals. It then trains the current rule at
+the current and doubled horizons from one matched fresh initialization and
+shared batch prefix, scoring both on the same fixed fitness set. The horizon
+is promoted only when the longer trajectory beats the current trajectory by
+the configured margin. A failed probe resets the rejection counter before
+collecting another full patience window.
+
+The reproducible launch wrapper is
+[`run_deterministic_controller.sh`](run_deterministic_controller.sh). Its
+default run starts from a fresh router at horizon 160, uses population 64,
+two independent acceptance trajectories, vectorized execution across three
+GPUs, and can promote once to horizon 320. Horizon 160 is the first random-leak
+setting where ordinary training reliably acquires the shortcut, so shorter
+training does not consistently expose the credit-assignment failure.
+
+A one-generation GPU smoke exercised all four proposals. Elite 8 had the best
+proposal fitness, but the controller correctly rejected it because it did not
+beat the unchanged centre, restored the exact centre, and reduced sigma from
+`0.21` to `0.105`.

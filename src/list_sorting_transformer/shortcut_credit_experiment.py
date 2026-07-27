@@ -73,6 +73,10 @@ class ShortcutCreditExperimentConfig:
     elite_acceptance_sigma_growth: float = 2.0
     elite_acceptance_trajectories: int = 1
     candidate_ranking_trajectories: int = 1
+    adaptive_elite_counts: str | None = None
+    horizon_promotion_mode: str = "plateau"
+    horizon_rejection_patience: int = 5
+    horizon_probe_min_improvement: float = 0.0
     d_model: int = 128
     backward_d_model: int = 128
     backward_rule_type: str = "gradient_transformer"
@@ -120,6 +124,7 @@ class ShortcutCreditExperimentConfig:
             self.elite_acceptance_patience,
             self.elite_acceptance_trajectories,
             self.candidate_ranking_trajectories,
+            self.horizon_rejection_patience,
             self.vectorized_chunk_size,
         )
         if any(value < 1 for value in positive_integers):
@@ -165,8 +170,37 @@ class ShortcutCreditExperimentConfig:
             "elite_centroid",
         }:
             raise ValueError("unknown outer_update_rule")
+        adaptive_counts = parse_adaptive_elite_counts(
+            self.adaptive_elite_counts
+        )
+        if adaptive_counts and (
+            self.outer_update_rule != "elite_centroid"
+            or not self.elite_backtracking
+            or not self.vectorized_population
+        ):
+            raise ValueError(
+                "adaptive elite selection requires vectorized elite-centroid "
+                "backtracking"
+            )
+        if adaptive_counts and adaptive_counts[-1] > self.population_size:
+            raise ValueError(
+                "adaptive elite counts must not exceed population size"
+            )
+        if self.horizon_promotion_mode not in {
+            "plateau",
+            "rejection_probe",
+        }:
+            raise ValueError("unknown horizon promotion mode")
+        if (
+            self.horizon_promotion_mode == "rejection_probe"
+            and not adaptive_counts
+        ):
+            raise ValueError(
+                "rejection-probe horizon promotion requires adaptive elites"
+            )
         if (
             self.outer_update_rule == "elite_centroid"
+            and not adaptive_counts
             and self.elite_count > self.population_size
         ):
             raise ValueError("elite_count must not exceed population_size")
@@ -205,6 +239,10 @@ class ShortcutCreditExperimentConfig:
             self.outer_learning_rate,
         ) <= 0:
             raise ValueError("learning rates and sigma must be positive")
+        if self.horizon_probe_min_improvement < 0:
+            raise ValueError(
+                "horizon probe minimum improvement must be nonnegative"
+            )
 
 
 @dataclass
@@ -214,6 +252,7 @@ class PlateauState:
     stale_generations: int = 0
     search_sigma: float | None = None
     consecutive_accepted_updates: int = 0
+    consecutive_rejected_updates: int = 0
 
 
 @dataclass(frozen=True)
@@ -225,11 +264,52 @@ class ForwardTrajectoryMetrics:
     checkpoint_clean: tuple[tuple[int, ShortcutMetrics], ...] = ()
 
 
+@dataclass(frozen=True)
+class AdaptiveEliteResult:
+    accepted: bool
+    selected_count: int
+    selected_indices: Tensor
+    selected_parameters: dict[str, Tensor]
+    center_fitnesses: tuple[float, ...]
+    selected_fitnesses: tuple[float, ...]
+    mean_fitness_by_count: dict[int, float]
+
+
+@dataclass(frozen=True)
+class HorizonProbeResult:
+    promoted: bool
+    current_fitness: float
+    longer_fitness: float
+    next_horizon: int
+
+
 CandidateRankingInput = tuple[
     dict[str, Tensor],
     tuple[ShortcutBatch, ...],
     ShortcutMetrics,
 ]
+
+
+def parse_adaptive_elite_counts(
+    value: str | None,
+) -> tuple[int, ...]:
+    if value is None:
+        return ()
+    try:
+        counts = tuple(int(item.strip()) for item in value.split(","))
+    except ValueError as error:
+        raise ValueError(
+            "adaptive elite counts must be integers"
+        ) from error
+    if (
+        not counts
+        or any(count < 1 for count in counts)
+        or tuple(sorted(set(counts))) != counts
+    ):
+        raise ValueError(
+            "adaptive elite counts must be unique increasing positives"
+        )
+    return counts
 
 
 def parse_fitness_checkpoints(value: str | None) -> tuple[int, ...]:
@@ -880,6 +960,35 @@ def elite_centroid_update(
 
 
 @torch.no_grad()
+def elite_centroid_parameters(
+    module: BackwardRule,
+    center_parameters: dict[str, Tensor],
+    directions: tuple[EggrollDirection, ...],
+    fitnesses: Tensor,
+    *,
+    sigma: float,
+    elite_count: int,
+    interpolation: float,
+) -> tuple[dict[str, Tensor], Tensor]:
+    """Build one elite proposal without changing the supplied centre."""
+
+    restore_center_parameters(module, center_parameters)
+    elite_indices = elite_centroid_update(
+        module,
+        directions,
+        fitnesses,
+        sigma=sigma,
+        elite_count=elite_count,
+        interpolation=interpolation,
+    )
+    if isinstance(module, AttentionRoutingRule):
+        module.project_parameters_()
+    proposal = clone_center_parameters(module)
+    restore_center_parameters(module, center_parameters)
+    return proposal, elite_indices
+
+
+@torch.no_grad()
 def restore_center_parameters(
     module: BackwardRule,
     center_parameters: dict[str, Tensor],
@@ -898,12 +1007,14 @@ def update_elite_search_state(
         raise ValueError("search sigma must be initialized")
     if not accepted:
         state.consecutive_accepted_updates = 0
+        state.consecutive_rejected_updates += 1
         state.search_sigma = max(
             config.elite_min_sigma,
             state.search_sigma * config.elite_rejection_sigma_decay,
         )
         return
 
+    state.consecutive_rejected_updates = 0
     state.consecutive_accepted_updates += 1
     if (
         state.consecutive_accepted_updates
@@ -967,6 +1078,214 @@ def independent_elite_acceptance_seeds(
             start_index,
             start_index + trajectory_count,
         )
+    )
+
+
+def select_adaptive_elite_proposal(
+    config: ShortcutCreditExperimentConfig,
+    *,
+    center_rule: AttentionRoutingRule,
+    center_parameters: dict[str, Tensor],
+    directions: tuple[EggrollDirection, ...],
+    fitnesses: Tensor,
+    sigma: float,
+    generation_seed: int,
+    horizon: int,
+    vocabulary: ShortcutPointerVocabulary,
+    fitness_batches: tuple[ShortcutBatch, ...],
+    correct_batches: tuple[ShortcutBatch, ...],
+    device: torch.device,
+) -> AdaptiveEliteResult:
+    """Choose a nested elite proposal on matched independent trajectories."""
+
+    from .vectorized_routing_population import (
+        stack_rule_parameter_sets,
+        train_vectorized_routing_population,
+    )
+
+    elite_counts = parse_adaptive_elite_counts(
+        config.adaptive_elite_counts
+    )
+    if not elite_counts:
+        raise ValueError("adaptive elite selection requires elite counts")
+    proposals = []
+    indices_by_count = {}
+    for elite_count in elite_counts:
+        parameters, indices = elite_centroid_parameters(
+            center_rule,
+            center_parameters,
+            directions,
+            fitnesses,
+            sigma=sigma,
+            elite_count=elite_count,
+            interpolation=config.elite_interpolation,
+        )
+        proposals.append(parameters)
+        indices_by_count[elite_count] = indices
+    parameter_sets = (center_parameters, *proposals)
+    stacked_parameters = stack_rule_parameter_sets(
+        parameter_sets,
+        device=device,
+    )
+    fitness_groups = [
+        [] for _ in parameter_sets
+    ]
+    for acceptance_seed in independent_elite_acceptance_seeds(
+        generation_seed,
+        config.elite_acceptance_trajectories,
+        start_index=config.candidate_ranking_trajectories,
+    ):
+        acceptance_model = initialize_forward_model(
+            config,
+            vocabulary,
+            initialization_seed=acceptance_seed + 1,
+            device=device,
+        )
+        acceptance_base_state = {
+            name: tensor.detach().clone()
+            for name, tensor in acceptance_model.state_dict().items()
+        }
+        acceptance_initial = evaluate_shortcut_batches(
+            acceptance_model,
+            fitness_batches,
+        )
+        del acceptance_model
+        acceptance_inner_batches = make_inner_batches(
+            config,
+            horizon=horizon,
+            vocabulary=vocabulary,
+            generator=torch.Generator().manual_seed(
+                acceptance_seed + 2
+            ),
+            device=device,
+        )
+        population = train_vectorized_routing_population(
+            config=config,
+            base_state=acceptance_base_state,
+            center_rule=center_rule,
+            rule_parameters=stacked_parameters,
+            inner_batches=acceptance_inner_batches,
+            fitness_batches=fitness_batches,
+            correct_batches=correct_batches,
+            heldout_fitness_batches=None,
+            heldout_correct_batches=None,
+            device=device,
+        )
+        for index, trajectory in enumerate(population.trajectories):
+            fitness_groups[index].append(
+                candidate_fitness(
+                    config.fitness_objective,
+                    acceptance_initial,
+                    trajectory.clean,
+                    checkpoint_clean=trajectory.checkpoint_clean,
+                )
+            )
+    means = tuple(
+        sum(group) / len(group)
+        for group in fitness_groups
+    )
+    selected_offset = max(
+        range(len(elite_counts)),
+        key=lambda index: (means[index + 1], -elite_counts[index]),
+    )
+    selected_count = elite_counts[selected_offset]
+    accepted = means[selected_offset + 1] > means[0]
+    return AdaptiveEliteResult(
+        accepted=accepted,
+        selected_count=selected_count,
+        selected_indices=indices_by_count[selected_count],
+        selected_parameters=proposals[selected_offset],
+        center_fitnesses=tuple(fitness_groups[0]),
+        selected_fitnesses=tuple(
+            fitness_groups[selected_offset + 1]
+        ),
+        mean_fitness_by_count={
+            elite_count: means[index + 1]
+            for index, elite_count in enumerate(elite_counts)
+        },
+    )
+
+
+def probe_longer_horizon(
+    config: ShortcutCreditExperimentConfig,
+    *,
+    center_rule: BackwardRule,
+    generation_seed: int,
+    horizon: int,
+    vocabulary: ShortcutPointerVocabulary,
+    fitness_batches: tuple[ShortcutBatch, ...],
+    correct_batches: tuple[ShortcutBatch, ...],
+    device: torch.device,
+) -> HorizonProbeResult:
+    """Compare current and doubled horizons on one matched fresh trajectory."""
+
+    next_horizon = min(
+        config.max_horizon,
+        horizon * config.horizon_multiplier,
+    )
+    if next_horizon <= horizon:
+        raise ValueError("horizon probe requires a larger available horizon")
+    probe_seed = generation_seed + 9_000_000_063
+    probe_model = initialize_forward_model(
+        config,
+        vocabulary,
+        initialization_seed=probe_seed + 1,
+        device=device,
+    )
+    base_state = {
+        name: tensor.detach().clone()
+        for name, tensor in probe_model.state_dict().items()
+    }
+    initial = evaluate_shortcut_batches(
+        probe_model,
+        fitness_batches,
+    )
+    del probe_model
+    longer_batches = make_inner_batches(
+        config,
+        horizon=next_horizon,
+        vocabulary=vocabulary,
+        generator=torch.Generator().manual_seed(probe_seed + 2),
+        device=device,
+    )
+    current = train_forward_trajectory(
+        config,
+        base_state=base_state,
+        backward_rule=center_rule,
+        inner_batches=longer_batches[:horizon],
+        fitness_batches=fitness_batches,
+        correct_batches=correct_batches,
+        device=device,
+    )
+    longer = train_forward_trajectory(
+        config,
+        base_state=base_state,
+        backward_rule=center_rule,
+        inner_batches=longer_batches,
+        fitness_batches=fitness_batches,
+        correct_batches=correct_batches,
+        device=device,
+    )
+    current_fitness = candidate_fitness(
+        config.fitness_objective,
+        initial,
+        current.clean,
+        checkpoint_clean=current.checkpoint_clean,
+    )
+    longer_fitness = candidate_fitness(
+        config.fitness_objective,
+        initial,
+        longer.clean,
+        checkpoint_clean=longer.checkpoint_clean,
+    )
+    return HorizonProbeResult(
+        promoted=(
+            longer_fitness
+            > current_fitness + config.horizon_probe_min_improvement
+        ),
+        current_fitness=current_fitness,
+        longer_fitness=longer_fitness,
+        next_horizon=next_horizon,
     )
 
 
@@ -1696,6 +2015,7 @@ def apply_resume_horizon(
     horizon = resolve_resume_horizon(config, checkpoint_horizon)
     if horizon != checkpoint_horizon:
         state.consecutive_accepted_updates = 0
+        state.consecutive_rejected_updates = 0
     return horizon
 
 
@@ -2197,6 +2517,11 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         standardized = (
             fitness_tensor - fitness_tensor.mean()
         ) / torch.sqrt(fitness_tensor.var(unbiased=False) + 1e-5)
+        adaptive_elite_counts = parse_adaptive_elite_counts(
+            config.adaptive_elite_counts
+        )
+        adaptive_elite_fitnesses: dict[int, float] = {}
+        selected_elite_count: int | None = None
         if config.outer_update_rule == "paper_standardized":
             standardized = paper_eggroll_update(
                 center_rule,
@@ -2211,7 +2536,73 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             elite_update_accepted = None
             elite_acceptance_center_fitnesses = None
             elite_acceptance_proposal_fitnesses = None
+        elif adaptive_elite_counts:
+            if not isinstance(center_rule, AttentionRoutingRule):
+                raise TypeError(
+                    "adaptive elites require an attention router"
+                )
+            adaptive_result = select_adaptive_elite_proposal(
+                config,
+                center_rule=center_rule,
+                center_parameters=center_parameters,
+                directions=directions,
+                fitnesses=fitness_tensor,
+                sigma=generation_sigma,
+                generation_seed=generation_seed,
+                horizon=horizon,
+                vocabulary=vocabulary,
+                fitness_batches=fitness_batches,
+                correct_batches=correct_batches,
+                device=device,
+            )
+            selected_elite_count = adaptive_result.selected_count
+            elite_indices = adaptive_result.selected_indices
+            adaptive_elite_fitnesses = (
+                adaptive_result.mean_fitness_by_count
+            )
+            restore_center_parameters(
+                center_rule,
+                adaptive_result.selected_parameters,
+            )
+            elite_proposal_trajectory = train_forward_trajectory(
+                config,
+                base_state=base_state,
+                backward_rule=center_rule,
+                inner_batches=inner_batches,
+                fitness_batches=fitness_batches,
+                correct_batches=correct_batches,
+                heldout_fitness_batches=heldout_fitness_batches,
+                heldout_correct_batches=heldout_correct_batches,
+                device=device,
+            )
+            elite_proposal_fitness = candidate_fitness(
+                config.fitness_objective,
+                initial_clean_metrics,
+                elite_proposal_trajectory.clean,
+                checkpoint_clean=(
+                    elite_proposal_trajectory.checkpoint_clean
+                ),
+            )
+            elite_update_accepted = adaptive_result.accepted
+            elite_acceptance_center_fitnesses = list(
+                adaptive_result.center_fitnesses
+            )
+            elite_acceptance_proposal_fitnesses = list(
+                adaptive_result.selected_fitnesses
+            )
+            if not elite_update_accepted:
+                restore_center_parameters(
+                    center_rule,
+                    center_parameters,
+                )
+            center_rule.project_parameters_()
+            update_elite_search_state(
+                plateau_state,
+                accepted=elite_update_accepted,
+                config=config,
+            )
         else:
+            selected_elite_count = config.elite_count
             elite_indices = elite_centroid_update(
                 center_rule,
                 directions,
@@ -2225,6 +2616,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         if (
             config.outer_update_rule == "elite_centroid"
             and config.elite_backtracking
+            and not adaptive_elite_counts
         ):
             elite_proposal_trajectory = train_forward_trajectory(
                 config,
@@ -2347,7 +2739,10 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 accepted=elite_update_accepted,
                 config=config,
             )
-        elif config.outer_update_rule == "elite_centroid":
+        elif (
+            config.outer_update_rule == "elite_centroid"
+            and not adaptive_elite_counts
+        ):
             elite_proposal_fitness = None
             elite_proposal_trajectory = None
             elite_update_accepted = True
@@ -2526,6 +2921,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "search/consecutive_accepted_updates": float(
                     plateau_state.consecutive_accepted_updates
                 ),
+                "search/consecutive_rejected_updates": float(
+                    plateau_state.consecutive_rejected_updates
+                ),
                 "candidate_device_count": len(candidate_devices),
                 "vectorized_population": float(
                     config.vectorized_population
@@ -2538,6 +2936,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     config.outer_update_rule == "elite_centroid"
                 ),
                 "outer/elite_count": float(config.elite_count),
+                "outer/selected_elite_count": float(
+                    selected_elite_count or 0
+                ),
                 "outer/elite_interpolation": config.elite_interpolation,
                 "fitness/standardized_mean": float(standardized.mean()),
                 "fitness/standardized_std": float(
@@ -2562,6 +2963,10 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             summary["outer/update_accepted"] = float(
                 elite_update_accepted
             )
+        for elite_count, mean_fitness in adaptive_elite_fitnesses.items():
+            summary[
+                f"outer/adaptive_elite_{elite_count}_acceptance_fitness"
+            ] = mean_fitness
         if (
             elite_proposal_fitness is not None
             and elite_proposal_trajectory is not None
@@ -2640,20 +3045,66 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     else "clean/loss_mean"
                 )
             ]
-        promote_horizon = update_plateau_state(
+        plateau_promote_horizon = update_plateau_state(
             plateau_state,
             objective=plateau_objective,
             config=config,
         )
+        horizon_probe_result = None
+        if config.horizon_promotion_mode == "plateau":
+            promote_horizon = plateau_promote_horizon
+        else:
+            promote_horizon = False
+            if (
+                horizon < config.max_horizon
+                and plateau_state.consecutive_rejected_updates
+                >= config.horizon_rejection_patience
+            ):
+                horizon_probe_result = probe_longer_horizon(
+                    config,
+                    center_rule=center_rule,
+                    generation_seed=generation_seed,
+                    horizon=horizon,
+                    vocabulary=vocabulary,
+                    fitness_batches=fitness_batches,
+                    correct_batches=correct_batches,
+                    device=device,
+                )
+                promote_horizon = horizon_probe_result.promoted
+                plateau_state.consecutive_rejected_updates = 0
         summary.update(
             {
                 "curriculum/objective_negative_clean_loss": plateau_objective,
                 "curriculum/ema_objective": plateau_state.ema_fitness,
                 "curriculum/stale_generations": plateau_state.stale_generations,
+                "curriculum/rejection_probe_mode": float(
+                    config.horizon_promotion_mode == "rejection_probe"
+                ),
                 "curriculum/promoted": float(
                     promote_horizon and horizon < config.max_horizon
                 ),
             }
+        )
+        if horizon_probe_result is not None:
+            summary.update(
+                {
+                    "curriculum/probe_current_fitness": (
+                        horizon_probe_result.current_fitness
+                    ),
+                    "curriculum/probe_longer_fitness": (
+                        horizon_probe_result.longer_fitness
+                    ),
+                    "curriculum/probe_improvement": (
+                        horizon_probe_result.longer_fitness
+                        - horizon_probe_result.current_fitness
+                    ),
+                    "curriculum/probe_next_horizon": float(
+                        horizon_probe_result.next_horizon
+                    ),
+                }
+            )
+        summary["search/consecutive_rejected_updates"] = float(
+            plateau_state.consecutive_rejected_updates
         )
 
         with metrics_path.open("a") as handle:
@@ -2780,6 +3231,30 @@ def build_parser() -> argparse.ArgumentParser:
             "number of shared model/data trajectories used to rank every "
             "population candidate"
         ),
+    )
+    parser.add_argument(
+        "--adaptive-elite-counts",
+        help=(
+            "comma-separated nested elite counts selected automatically on "
+            "matched independent acceptance trajectories"
+        ),
+    )
+    parser.add_argument(
+        "--horizon-promotion-mode",
+        choices=("plateau", "rejection_probe"),
+        default="plateau",
+    )
+    parser.add_argument(
+        "--horizon-rejection-patience",
+        type=int,
+        default=5,
+        help="rejected adaptive updates before a matched longer-horizon probe",
+    )
+    parser.add_argument(
+        "--horizon-probe-min-improvement",
+        type=float,
+        default=0.0,
+        help="fitness gain required to accept a longer-horizon probe",
     )
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--backward-d-model", type=int, default=128)

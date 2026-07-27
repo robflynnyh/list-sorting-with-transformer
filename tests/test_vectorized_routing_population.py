@@ -1,4 +1,6 @@
 from copy import deepcopy
+import json
+from pathlib import Path
 
 import pytest
 import torch
@@ -18,6 +20,9 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     initialize_forward_model,
     initialize_fresh_backward_rule,
+    parse_adaptive_elite_counts,
+    probe_longer_horizon,
+    run,
 )
 from list_sorting_transformer.vectorized_routing_population import (
     stack_candidate_rule_parameters,
@@ -40,6 +45,160 @@ def test_vectorized_population_rejects_unsupported_rules() -> None:
             vectorized_population=True,
             route_output_projection=True,
         )
+
+
+def test_adaptive_elite_counts_require_sorted_unique_positives() -> None:
+    assert parse_adaptive_elite_counts("1,2,4,8") == (1, 2, 4, 8)
+    for invalid in ("", "2,1", "1,1", "0,1", "one"):
+        with pytest.raises(ValueError):
+            parse_adaptive_elite_counts(invalid)
+
+
+def test_adaptive_controller_replays_identically(tmp_path: Path) -> None:
+    common = dict(
+        output_dir=str(tmp_path),
+        generations=1,
+        population_size=4,
+        horizon=2,
+        max_horizon=2,
+        batch_size=4,
+        fitness_examples=8,
+        fitness_batch_size=4,
+        correct_eval_examples=4,
+        min_length=4,
+        max_length=4,
+        d_model=16,
+        backward_d_model=16,
+        forward_layers=1,
+        backward_layers=1,
+        heads=2,
+        forward_learning_rate=1e-4,
+        backward_rule_type="attention_router",
+        shared_routing_map=True,
+        leak_placement="random_list",
+        outer_update_rule="elite_centroid",
+        elite_backtracking=True,
+        adaptive_elite_counts="1,2",
+        elite_acceptance_trajectories=1,
+        vectorized_population=True,
+        vectorized_chunk_size=4,
+        horizon_promotion_mode="rejection_probe",
+        checkpoint_interval=1,
+        device="cpu",
+    )
+    first_dir = run(
+        ShortcutCreditExperimentConfig(
+            run_name="first",
+            **common,
+        )
+    )
+    second_dir = run(
+        ShortcutCreditExperimentConfig(
+            run_name="second",
+            **common,
+        )
+    )
+    first_metrics = json.loads(
+        (first_dir / "metrics.jsonl").read_text()
+    )
+    second_metrics = json.loads(
+        (second_dir / "metrics.jsonl").read_text()
+    )
+    for key in (
+        "outer/selected_elite_count",
+        "outer/update_accepted",
+        "outer/adaptive_elite_1_acceptance_fitness",
+        "outer/adaptive_elite_2_acceptance_fitness",
+    ):
+        assert first_metrics[key] == second_metrics[key]
+
+    first_state = torch.load(
+        first_dir / "latest.pt",
+        map_location="cpu",
+    )["backward_rule_state"]
+    second_state = torch.load(
+        second_dir / "latest.pt",
+        map_location="cpu",
+    )["backward_rule_state"]
+    for name in first_state:
+        torch.testing.assert_close(
+            first_state[name],
+            second_state[name],
+            rtol=0,
+            atol=0,
+        )
+
+
+def test_horizon_probe_replays_identically() -> None:
+    vocabulary = ShortcutPointerVocabulary("numbers", 10)
+    config = ShortcutCreditExperimentConfig(
+        population_size=4,
+        horizon=2,
+        max_horizon=4,
+        batch_size=4,
+        fitness_examples=8,
+        fitness_batch_size=4,
+        correct_eval_examples=4,
+        min_length=4,
+        max_length=4,
+        d_model=16,
+        backward_d_model=16,
+        forward_layers=1,
+        backward_layers=1,
+        heads=2,
+        backward_rule_type="attention_router",
+        shared_routing_map=True,
+        leak_placement="random_list",
+        device="cpu",
+    )
+    rule = initialize_fresh_backward_rule(
+        config,
+        vocabulary,
+        device=torch.device("cpu"),
+    )
+    fitness_batches = make_fitness_batches(
+        8,
+        min_length=4,
+        max_length=4,
+        batch_size=4,
+        generator=torch.Generator().manual_seed(31),
+        vocabulary=vocabulary,
+        leak_placement="random_list",
+    )
+    correct_batches = (
+        make_shortcut_batch(
+            4,
+            4,
+            leak_mode="correct",
+            leak_placement="random_list",
+            generator=torch.Generator().manual_seed(33),
+            vocabulary=vocabulary,
+        ),
+    )
+
+    first = probe_longer_horizon(
+        config,
+        center_rule=rule,
+        generation_seed=91,
+        horizon=2,
+        vocabulary=vocabulary,
+        fitness_batches=fitness_batches,
+        correct_batches=correct_batches,
+        device=torch.device("cpu"),
+    )
+    second = probe_longer_horizon(
+        config,
+        center_rule=rule,
+        generation_seed=91,
+        horizon=2,
+        vocabulary=vocabulary,
+        fitness_batches=fitness_batches,
+        correct_batches=correct_batches,
+        device=torch.device("cpu"),
+    )
+
+    assert first == second
+    assert first.next_horizon == 4
 
 
 def test_vectorized_routing_population_matches_serial_candidates() -> None:

@@ -94,6 +94,26 @@ def stack_candidate_rule_parameters(
     }
 
 
+def stack_rule_parameter_sets(
+    parameter_sets: Sequence[dict[str, Tensor]],
+    *,
+    device: torch.device,
+) -> dict[str, Tensor]:
+    """Stack complete router parameter dictionaries for functional training."""
+
+    if not parameter_sets:
+        raise ValueError("at least one router parameter set is required")
+    names = tuple(parameter_sets[0])
+    if any(tuple(parameters) != names for parameters in parameter_sets):
+        raise ValueError("router parameter sets must have identical keys")
+    return {
+        f"backward_rule.{name}": torch.stack(
+            tuple(parameters[name].to(device) for parameters in parameter_sets)
+        )
+        for name in names
+    }
+
+
 def _stack_forward_parameters(
     model: _RoutedForwardModel,
     population_size: int,
