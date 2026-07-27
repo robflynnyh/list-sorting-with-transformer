@@ -2309,8 +2309,17 @@ same seed, population, model, batches, and transition checkpoints. Every
 non-timing metric matched exactly, but internal generation time improved only
 from `88.81s` to `84.80s` (`4.5%`; total wall time `110.85s -> 106.02s`).
 That gain does not justify CPU-copy and multiprocessing complexity, so the
-process backend was dropped. The likely useful optimization is evaluating
+process backend was dropped. Increasing thread shards from two to four was
+also neutral-to-negative (`110.85s -> 113.63s` total wall time). The likely
+useful optimization is evaluating
 multiple perturbations in one batched functional model call rather than
 launching one complete candidate trajectory at a time. The
 centre/control/independent-acceptance trajectories can also be distributed
 across otherwise idle GPUs.
+
+Generation 72 is continuing from the corrected rejected-centre checkpoint at
+the smaller `sigma=0.0065625`. It keeps the 3,600-update transition objective,
+population 64, one-candidate full update, and four independent-only acceptance
+trajectories. Two candidate shards are used because the controlled benchmark
+found no benefit from four. Live run:
+[W&B](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/4967umob).
