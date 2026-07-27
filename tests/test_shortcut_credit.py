@@ -36,6 +36,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     apply_resume_horizon,
     elite_acceptance_seed,
     elite_centroid_update,
+    elite_proposal_improves_every_trajectory,
     elite_proposal_mean_improvement,
     function_delta_alignment_summary,
     heldout_candidate_summary,
@@ -552,6 +553,25 @@ def test_elite_proposal_mean_improvement_uses_matched_trajectories() -> None:
         elite_proposal_mean_improvement([], [])
     with pytest.raises(ValueError, match="counts must match"):
         elite_proposal_mean_improvement([1.0], [1.0, 2.0])
+
+
+def test_elite_proposal_must_improve_every_matched_trajectory() -> None:
+    assert elite_proposal_improves_every_trajectory(
+        [1.0, 2.0],
+        [1.1, 2.1],
+    )
+    assert not elite_proposal_improves_every_trajectory(
+        [1.0, 2.0],
+        [2.0, 1.9],
+    )
+    assert not elite_proposal_improves_every_trajectory(
+        [1.0, 2.0],
+        [1.0, 2.1],
+    )
+    with pytest.raises(ValueError, match="at least one"):
+        elite_proposal_improves_every_trajectory([], [])
+    with pytest.raises(ValueError, match="counts must match"):
+        elite_proposal_improves_every_trajectory([1.0], [1.1, 2.1])
 
 
 def test_elite_acceptance_seed_separates_extra_trajectories() -> None:

@@ -2900,3 +2900,33 @@ Elite-centroid runs instead report the settings that determine their proposal:
   averaging the selected perturbation directions;
 - `outer/update_rms`: the measured RMS parameter change of the resulting
   proposal.
+
+### Strict matched-trajectory acceptance
+
+The deterministic controller now accepts an elite-centroid proposal only when
+it strictly improves fitness on every independent matched acceptance
+trajectory. Previously it accepted when the mean improvement was positive,
+which allowed one large improvement to outweigh a regression on the other
+trajectory. The run that motivated this change repeatedly accepted such
+mixed-sign proposals and became unstable at horizons 640 and 1280.
+
+The adaptive elite-count comparison still selects the proposal with the
+highest mean fitness. The selected proposal is committed only when every
+per-trajectory delta is positive. W&B reports both
+`outer/proposal_mean_fitness_minus_center` and the stricter
+`outer/proposal_min_fitness_minus_center`.
+
+Acceptance trajectories are now evaluated concurrently across the configured
+candidate GPUs. Their forward-model initializations and training batches are
+still generated serially from the same deterministic seeds, and every centre
+and proposal within one trajectory still shares exactly the same
+initialization and batches. This changes only execution placement, not the
+acceptance data or calculation.
+
+A matched horizon-80 GPU smoke produced identical acceptance deltas
+(`+0.015876`, `+0.021669`) and selected elite 1 in sequential and parallel
+modes. Evaluating the two acceptance trajectories concurrently reduced the
+acceptance phase from 4.40 seconds to 2.94 seconds (1.50x). The smoke
+population had only eight candidates, so three-way population sharding was
+dominated by overhead; the full population-64 run remains large enough to
+benefit from the existing three-GPU population path.

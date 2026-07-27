@@ -1107,6 +1107,20 @@ def elite_proposal_mean_improvement(
     ) / len(center_fitnesses)
 
 
+def elite_proposal_improves_every_trajectory(
+    center_fitnesses: list[float] | tuple[float, ...],
+    proposal_fitnesses: list[float] | tuple[float, ...],
+) -> bool:
+    if not center_fitnesses:
+        raise ValueError("at least one acceptance trajectory is required")
+    if len(center_fitnesses) != len(proposal_fitnesses):
+        raise ValueError("center and proposal fitness counts must match")
+    return all(
+        proposal > center
+        for center, proposal in zip(center_fitnesses, proposal_fitnesses)
+    )
+
+
 def elite_acceptance_seed(
     generation_seed: int,
     trajectory_index: int,
@@ -1160,7 +1174,7 @@ def select_adaptive_elite_proposal(
     vocabulary: ShortcutPointerVocabulary,
     fitness_batches: tuple[ShortcutBatch, ...],
     correct_batches: tuple[ShortcutBatch, ...],
-    device: torch.device,
+    acceptance_devices: tuple[torch.device, ...],
 ) -> AdaptiveEliteResult:
     """Choose a nested elite proposal on matched independent trajectories."""
 
@@ -1189,32 +1203,27 @@ def select_adaptive_elite_proposal(
         proposals.append(parameters)
         indices_by_count[elite_count] = indices
     parameter_sets = (center_parameters, *proposals)
-    stacked_parameters = stack_rule_parameter_sets(
-        parameter_sets,
-        device=device,
-    )
     fitness_groups = [
         [] for _ in parameter_sets
     ]
-    for acceptance_seed in independent_elite_acceptance_seeds(
+    acceptance_seeds = independent_elite_acceptance_seeds(
         generation_seed,
         config.elite_acceptance_trajectories,
         start_index=config.candidate_ranking_trajectories,
-    ):
+    )
+    cpu = torch.device("cpu")
+    prepared_trajectories = []
+    for acceptance_seed in acceptance_seeds:
         acceptance_model = initialize_forward_model(
             config,
             vocabulary,
             initialization_seed=acceptance_seed + 1,
-            device=device,
+            device=cpu,
         )
         acceptance_base_state = {
             name: tensor.detach().clone()
             for name, tensor in acceptance_model.state_dict().items()
         }
-        acceptance_initial = evaluate_shortcut_batches(
-            acceptance_model,
-            fitness_batches,
-        )
         del acceptance_model
         acceptance_inner_batches = make_inner_batches(
             config,
@@ -1223,21 +1232,121 @@ def select_adaptive_elite_proposal(
             generator=torch.Generator().manual_seed(
                 acceptance_seed + 2
             ),
-            device=device,
+            device=cpu,
         )
-        population = train_vectorized_routing_population(
-            config=config,
-            base_state=acceptance_base_state,
-            center_rule=center_rule,
-            rule_parameters=stacked_parameters,
-            inner_batches=acceptance_inner_batches,
-            fitness_batches=fitness_batches,
-            correct_batches=correct_batches,
-            heldout_fitness_batches=None,
-            heldout_correct_batches=None,
-            device=device,
+        prepared_trajectories.append(
+            (acceptance_base_state, acceptance_inner_batches)
         )
-        for index, trajectory in enumerate(population.trajectories):
+
+    cpu_parameter_sets = tuple(
+        {
+            name: tensor.detach().to(cpu)
+            for name, tensor in parameters.items()
+        }
+        for parameters in parameter_sets
+    )
+    cpu_fitness_batches = tuple(batch.to(cpu) for batch in fitness_batches)
+    cpu_correct_batches = tuple(batch.to(cpu) for batch in correct_batches)
+    worker_jobs = [[] for _ in acceptance_devices]
+    for index, prepared in enumerate(prepared_trajectories):
+        worker_jobs[index % len(acceptance_devices)].append(
+            (index, prepared)
+        )
+
+    def evaluate_worker(
+        worker_device: torch.device,
+        jobs: list[
+            tuple[
+                int,
+                tuple[
+                    dict[str, Tensor],
+                    tuple[ShortcutBatch, ...],
+                ],
+            ]
+        ],
+    ) -> list[
+        tuple[
+            int,
+            ShortcutMetrics,
+            tuple[ForwardTrajectoryMetrics, ...],
+        ]
+    ]:
+        if worker_device.type == "cuda":
+            torch.cuda.set_device(worker_device)
+        worker_rule = AttentionRoutingRule(center_rule.config).to(
+            worker_device
+        )
+        stacked_parameters = stack_rule_parameter_sets(
+            cpu_parameter_sets,
+            device=worker_device,
+        )
+        worker_fitness_batches = tuple(
+            batch.to(worker_device) for batch in cpu_fitness_batches
+        )
+        worker_correct_batches = tuple(
+            batch.to(worker_device) for batch in cpu_correct_batches
+        )
+        results = []
+        for trajectory_index, (
+            acceptance_base_state,
+            acceptance_inner_batches,
+        ) in jobs:
+            acceptance_model = initialize_forward_model(
+                config,
+                vocabulary,
+                initialization_seed=None,
+                device=worker_device,
+            )
+            acceptance_model.load_state_dict(acceptance_base_state)
+            acceptance_initial = evaluate_shortcut_batches(
+                acceptance_model,
+                worker_fitness_batches,
+            )
+            del acceptance_model
+            population = train_vectorized_routing_population(
+                config=config,
+                base_state=acceptance_base_state,
+                center_rule=worker_rule,
+                rule_parameters=stacked_parameters,
+                inner_batches=acceptance_inner_batches,
+                fitness_batches=worker_fitness_batches,
+                correct_batches=worker_correct_batches,
+                heldout_fitness_batches=None,
+                heldout_correct_batches=None,
+                device=worker_device,
+            )
+            results.append(
+                (
+                    trajectory_index,
+                    acceptance_initial,
+                    population.trajectories,
+                )
+            )
+        return results
+
+    active_workers = [
+        (worker_device, jobs)
+        for worker_device, jobs in zip(acceptance_devices, worker_jobs)
+        if jobs
+    ]
+    if len(active_workers) == 1:
+        acceptance_results = evaluate_worker(*active_workers[0])
+    else:
+        with ThreadPoolExecutor(
+            max_workers=len(active_workers)
+        ) as executor:
+            futures = [
+                executor.submit(evaluate_worker, worker_device, jobs)
+                for worker_device, jobs in active_workers
+            ]
+            acceptance_results = [
+                result
+                for future in futures
+                for result in future.result()
+            ]
+    acceptance_results.sort(key=lambda result: result[0])
+    for _, acceptance_initial, trajectories in acceptance_results:
+        for index, trajectory in enumerate(trajectories):
             fitness_groups[index].append(
                 candidate_fitness(
                     config.fitness_objective,
@@ -1255,7 +1364,10 @@ def select_adaptive_elite_proposal(
         key=lambda index: (means[index + 1], -elite_counts[index]),
     )
     selected_count = elite_counts[selected_offset]
-    accepted = means[selected_offset + 1] > means[0]
+    accepted = elite_proposal_improves_every_trajectory(
+        fitness_groups[0],
+        fitness_groups[selected_offset + 1],
+    )
     return AdaptiveEliteResult(
         accepted=accepted,
         selected_count=selected_count,
@@ -2677,6 +2789,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             config.adaptive_elite_counts
         )
         adaptive_elite_fitnesses: dict[int, float] = {}
+        acceptance_seconds: float | None = None
         selected_elite_count: int | None = None
         if config.outer_update_rule == "paper_standardized":
             standardized = paper_eggroll_update(
@@ -2697,6 +2810,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 raise TypeError(
                     "adaptive elites require an attention router"
                 )
+            acceptance_started_at = time.monotonic()
             adaptive_result = select_adaptive_elite_proposal(
                 config,
                 center_rule=center_rule,
@@ -2709,8 +2823,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 vocabulary=vocabulary,
                 fitness_batches=fitness_batches,
                 correct_batches=correct_batches,
-                device=device,
+                acceptance_devices=candidate_devices,
             )
+            acceptance_seconds = time.monotonic() - acceptance_started_at
             selected_elite_count = adaptive_result.selected_count
             elite_indices = adaptive_result.selected_indices
             adaptive_elite_fitnesses = (
@@ -2880,11 +2995,10 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 proposal_parameters,
             )
             elite_update_accepted = (
-                elite_proposal_mean_improvement(
+                elite_proposal_improves_every_trajectory(
                     elite_acceptance_center_fitnesses,
                     elite_acceptance_proposal_fitnesses,
                 )
-                > 0
             )
             if not elite_update_accepted:
                 restore_center_parameters(center_rule, center_parameters)
@@ -2928,6 +3042,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 ),
             }
         )
+        if acceptance_seconds is not None:
+            summary["timing/acceptance_seconds"] = acceptance_seconds
         for ranking_index in range(ranking_fitness_tensor.shape[1]):
             summary[
                 f"fitness/ranking_trajectory_{ranking_index}_mean"
@@ -3160,6 +3276,15 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             ] = elite_proposal_mean_improvement(
                 elite_acceptance_center_fitnesses,
                 elite_acceptance_proposal_fitnesses,
+            )
+            summary[
+                "outer/proposal_min_fitness_minus_center"
+            ] = min(
+                proposal - center
+                for center, proposal in zip(
+                    elite_acceptance_center_fitnesses,
+                    elite_acceptance_proposal_fitnesses,
+                )
             )
             for acceptance_index, (
                 acceptance_center_fitness,
