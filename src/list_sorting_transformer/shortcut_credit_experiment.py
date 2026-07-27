@@ -72,6 +72,7 @@ class ShortcutCreditExperimentConfig:
     elite_acceptance_patience: int = 3
     elite_acceptance_sigma_growth: float = 2.0
     elite_acceptance_trajectories: int = 1
+    candidate_ranking_trajectories: int = 1
     d_model: int = 128
     backward_d_model: int = 128
     backward_rule_type: str = "gradient_transformer"
@@ -115,6 +116,7 @@ class ShortcutCreditExperimentConfig:
             self.elite_count,
             self.elite_acceptance_patience,
             self.elite_acceptance_trajectories,
+            self.candidate_ranking_trajectories,
         )
         if any(value < 1 for value in positive_integers):
             raise ValueError("integer configuration values must be positive")
@@ -208,6 +210,13 @@ class ForwardTrajectoryMetrics:
     heldout_clean: ShortcutMetrics | None = None
     heldout_correct: ShortcutMetrics | None = None
     checkpoint_clean: tuple[tuple[int, ShortcutMetrics], ...] = ()
+
+
+CandidateRankingInput = tuple[
+    dict[str, Tensor],
+    tuple[ShortcutBatch, ...],
+    ShortcutMetrics,
+]
 
 
 def parse_fitness_checkpoints(value: str | None) -> tuple[int, ...]:
@@ -381,7 +390,13 @@ def train_candidate(
     perturbation_sigma: float | None = None,
     heldout_fitness_batches: tuple[ShortcutBatch, ...] | None = None,
     heldout_correct_batches: tuple[ShortcutBatch, ...] | None = None,
-) -> tuple[float, ForwardTrajectoryMetrics, list[dict[str, float]]]:
+    additional_ranking_inputs: tuple[CandidateRankingInput, ...] = (),
+) -> tuple[
+    float,
+    ForwardTrajectoryMetrics,
+    list[dict[str, float]],
+    tuple[float, ...],
+]:
     backward_rule = initialize_backward_rule(
         center_rule.config,
         device=device,
@@ -409,16 +424,42 @@ def train_candidate(
         heldout_correct_batches=heldout_correct_batches,
         device=device,
     )
-    fitness = candidate_fitness(
+    primary_fitness = candidate_fitness(
         config.fitness_objective,
         initial_clean_metrics,
         trajectory.clean,
         checkpoint_clean=trajectory.checkpoint_clean,
     )
+    statistics = list(backward_rule.statistics)
+    ranking_fitnesses = [primary_fitness]
+    backward_rule.capture_statistics = False
+    for (
+        ranking_base_state,
+        ranking_inner_batches,
+        ranking_initial_clean,
+    ) in additional_ranking_inputs:
+        ranking_trajectory = train_forward_trajectory(
+            config,
+            base_state=ranking_base_state,
+            backward_rule=backward_rule,
+            inner_batches=ranking_inner_batches,
+            fitness_batches=fitness_batches,
+            correct_batches=correct_batches,
+            device=device,
+        )
+        ranking_fitnesses.append(
+            candidate_fitness(
+                config.fitness_objective,
+                ranking_initial_clean,
+                ranking_trajectory.clean,
+                checkpoint_clean=ranking_trajectory.checkpoint_clean,
+            )
+        )
     return (
-        fitness,
+        sum(ranking_fitnesses) / len(ranking_fitnesses),
         trajectory,
-        list(backward_rule.statistics),
+        statistics,
+        tuple(ranking_fitnesses),
     )
 
 
@@ -686,12 +727,14 @@ def train_candidate_shard(
     heldout_correct_batches: tuple[ShortcutBatch, ...],
     initial_clean_metrics: ShortcutMetrics,
     perturbation_sigma: float,
+    additional_ranking_inputs: tuple[CandidateRankingInput, ...] = (),
 ) -> list[
     tuple[
         int,
         float,
         ForwardTrajectoryMetrics,
         list[dict[str, float]],
+        tuple[float, ...],
     ]
 ]:
     """Evaluate one deterministic subset of candidates on one CUDA device."""
@@ -722,6 +765,21 @@ def train_candidate_shard(
     worker_heldout_correct_batches = tuple(
         batch.to(device) for batch in heldout_correct_batches
     )
+    worker_additional_ranking_inputs = tuple(
+        (
+            {
+                name: tensor.to(device)
+                for name, tensor in ranking_base_state.items()
+            },
+            tuple(batch.to(device) for batch in ranking_inner_batches),
+            ranking_initial_clean,
+        )
+        for (
+            ranking_base_state,
+            ranking_inner_batches,
+            ranking_initial_clean,
+        ) in additional_ranking_inputs
+    )
     direction_indices = {spec[1] for spec in candidate_specs}
     worker_directions = {
         index: move_eggroll_direction(directions[index], device)
@@ -730,7 +788,7 @@ def train_candidate_shard(
 
     results = []
     for candidate_index, direction_index, sign in candidate_specs:
-        fitness, trajectory, statistics = train_candidate(
+        fitness, trajectory, statistics, ranking_fitnesses = train_candidate(
             config,
             base_state=worker_base_state,
             center_rule=worker_center_rule,
@@ -749,9 +807,16 @@ def train_candidate_shard(
             perturbation_sigma=perturbation_sigma,
             heldout_fitness_batches=worker_heldout_fitness_batches,
             heldout_correct_batches=worker_heldout_correct_batches,
+            additional_ranking_inputs=worker_additional_ranking_inputs,
         )
         results.append(
-            (candidate_index, fitness, trajectory, statistics)
+            (
+                candidate_index,
+                fitness,
+                trajectory,
+                statistics,
+                ranking_fitnesses,
+            )
         )
     return results
 
@@ -859,15 +924,34 @@ def elite_acceptance_seed(
     return generation_seed + trajectory_index * 1_000_000_007
 
 
-def independent_elite_acceptance_seeds(
+def candidate_ranking_seeds(
     generation_seed: int,
     trajectory_count: int,
 ) -> tuple[int, ...]:
     if trajectory_count < 1:
+        raise ValueError("ranking trajectory count must be positive")
+    return (generation_seed,) + tuple(
+        elite_acceptance_seed(generation_seed, trajectory_index)
+        for trajectory_index in range(1, trajectory_count)
+    )
+
+
+def independent_elite_acceptance_seeds(
+    generation_seed: int,
+    trajectory_count: int,
+    *,
+    start_index: int = 1,
+) -> tuple[int, ...]:
+    if trajectory_count < 1:
         raise ValueError("acceptance trajectory count must be positive")
+    if start_index < 1:
+        raise ValueError("acceptance trajectory start index must be positive")
     return tuple(
         elite_acceptance_seed(generation_seed, trajectory_index)
-        for trajectory_index in range(1, trajectory_count + 1)
+        for trajectory_index in range(
+            start_index,
+            start_index + trajectory_count,
+        )
     )
 
 
@@ -1727,6 +1811,41 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             generator=inner_generator,
             device=device,
         )
+        additional_ranking_inputs_list = []
+        for ranking_seed in candidate_ranking_seeds(
+            generation_seed,
+            config.candidate_ranking_trajectories,
+        )[1:]:
+            ranking_model = initialize_forward_model(
+                config,
+                vocabulary,
+                initialization_seed=ranking_seed + 1,
+                device=device,
+            )
+            ranking_base_state = {
+                name: tensor.detach().clone()
+                for name, tensor in ranking_model.state_dict().items()
+            }
+            ranking_initial_clean = evaluate_shortcut_batches(
+                ranking_model,
+                fitness_batches,
+            )
+            del ranking_model
+            ranking_inner_batches = make_inner_batches(
+                config,
+                horizon=horizon,
+                vocabulary=vocabulary,
+                generator=torch.Generator().manual_seed(ranking_seed + 2),
+                device=device,
+            )
+            additional_ranking_inputs_list.append(
+                (
+                    ranking_base_state,
+                    ranking_inner_batches,
+                    ranking_initial_clean,
+                )
+            )
+        additional_ranking_inputs = tuple(additional_ranking_inputs_list)
         masked_inner_generator = torch.Generator().manual_seed(
             generation_seed + 2
         )
@@ -1763,11 +1882,17 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 float,
                 ForwardTrajectoryMetrics,
                 list[dict[str, float]],
+                tuple[float, ...],
             ]
         ] = []
         if len(candidate_devices) == 1:
             for candidate_index, direction_index, sign in candidate_specs:
-                fitness, trajectory, statistics = train_candidate(
+                (
+                    fitness,
+                    trajectory,
+                    statistics,
+                    ranking_fitnesses,
+                ) = train_candidate(
                     config,
                     base_state=base_state,
                     center_rule=center_rule,
@@ -1786,6 +1911,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     perturbation_sigma=generation_sigma,
                     heldout_fitness_batches=heldout_fitness_batches,
                     heldout_correct_batches=heldout_correct_batches,
+                    additional_ranking_inputs=additional_ranking_inputs,
                 )
                 candidate_outputs.append(
                     (
@@ -1793,6 +1919,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                         fitness,
                         trajectory,
                         statistics,
+                        ranking_fitnesses,
                     )
                 )
         else:
@@ -1820,6 +1947,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                         heldout_correct_batches=heldout_correct_batches,
                         initial_clean_metrics=initial_clean_metrics,
                         perturbation_sigma=generation_sigma,
+                        additional_ranking_inputs=(
+                            additional_ranking_inputs
+                        ),
                     )
                     for shard, worker_device in zip(
                         shards,
@@ -1838,11 +1968,17 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         heldout_correct_results = []
         candidate_trajectories = []
         candidate_statistics: list[list[dict[str, float]]] = []
+        ranking_fitness_groups = []
         captured_statistics: list[dict[str, float]] = []
-        for candidate_index, fitness, trajectory, statistics in (
-            candidate_outputs
-        ):
+        for (
+            candidate_index,
+            fitness,
+            trajectory,
+            statistics,
+            ranking_fitnesses,
+        ) in candidate_outputs:
             fitness_values.append(fitness)
+            ranking_fitness_groups.append(ranking_fitnesses)
             candidate_trajectories.append(trajectory)
             clean_results.append(trajectory.clean)
             correct_results.append(trajectory.correct)
@@ -1859,7 +1995,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             if candidate_index == 0 and statistics:
                 captured_statistics = statistics
 
-        center_fitness, center_trajectory, _ = train_candidate(
+        center_fitness, center_trajectory, _, _ = train_candidate(
             config,
             base_state=base_state,
             center_rule=center_rule,
@@ -1945,6 +2081,14 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         assert masked_training_heldout_clean is not None
         assert masked_training_heldout_correct is not None
         fitness_tensor = torch.tensor(fitness_values, device=device)
+        ranking_fitness_tensor = torch.tensor(
+            ranking_fitness_groups,
+            device=device,
+        )
+        torch.testing.assert_close(
+            ranking_fitness_tensor.mean(dim=1),
+            fitness_tensor,
+        )
         function_space_summary = (
             routing_population_function_summary(
                 center_rule,
@@ -2019,6 +2163,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             for acceptance_seed in independent_elite_acceptance_seeds(
                 generation_seed,
                 config.elite_acceptance_trajectories,
+                start_index=config.candidate_ranking_trajectories,
             ):
                 acceptance_model = initialize_forward_model(
                     config,
@@ -2122,6 +2267,29 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             clean_results,
             correct_results,
         )
+        ranking_best_index = int(fitness_tensor.argmax())
+        summary.update(
+            {
+                "fitness/ranking_trajectory_count": float(
+                    ranking_fitness_tensor.shape[1]
+                ),
+                "fitness/ranking_within_candidate_std_mean": float(
+                    ranking_fitness_tensor.std(
+                        dim=1,
+                        unbiased=False,
+                    ).mean()
+                ),
+                "best/ranking_fitness_std": float(
+                    ranking_fitness_tensor[ranking_best_index].std(
+                        unbiased=False
+                    )
+                ),
+            }
+        )
+        for ranking_index in range(ranking_fitness_tensor.shape[1]):
+            summary[
+                f"fitness/ranking_trajectory_{ranking_index}_mean"
+            ] = float(ranking_fitness_tensor[:, ranking_index].mean())
         summary.update(
             checkpoint_population_summary(candidate_trajectories)
         )
@@ -2504,6 +2672,15 @@ def build_parser() -> argparse.ArgumentParser:
             "number of independently seeded shortcut-training trajectories "
             "used to accept or reject an elite centroid; the population-"
             "ranking trajectory is excluded"
+        ),
+    )
+    parser.add_argument(
+        "--candidate-ranking-trajectories",
+        type=int,
+        default=1,
+        help=(
+            "number of shared model/data trajectories used to rank every "
+            "population candidate"
         ),
     )
     parser.add_argument("--d-model", type=int, default=128)

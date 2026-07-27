@@ -2323,3 +2323,55 @@ population 64, one-candidate full update, and four independent-only acceptance
 trajectories. Two candidate shards are used because the controlled benchmark
 found no benefit from four. Live run:
 [W&B](https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/4967umob).
+
+#### Generation 72 result and trajectory-robust ranking
+
+Generation 72 finished in `2,951s`. Candidate 55 improved the trajectory used
+to rank the population:
+
+| Rule | Worst checkpoint mode CE | Final weaker split |
+| --- | ---: | ---: |
+| Old centre | 0.4789 | 95.31% |
+| Candidate 55 | **0.4524** | 95.31% |
+
+This selected-trajectory improvement did not reproduce on any of the four
+independent acceptance trajectories. Their proposal-minus-centre fitness
+deltas were `-0.00440`, `-0.01123`, `-0.00791`, and `-0.00009`, with mean
+`-0.00591`. The corrected independent-only acceptance gate therefore rejected
+the update and reduced `sigma` from `0.0065625` to its configured minimum,
+`0.00328125`. The saved generation-73 checkpoint contains the unchanged
+accepted generation-70 backward rule.
+
+The repeated generation-71 and generation-72 pattern identifies the next
+ranking problem. A population can have high candidate-fitness correlation
+with a fresh endpoint audit (`0.992` and `0.978`) while its selected maximum
+still overfits the one model initialization and inner-data stream used for
+ranking. Correlation across candidates does not make the extreme candidate
+robust.
+
+Candidate ranking now supports multiple shared trajectories. Every candidate
+is evaluated on the same model initializations, inner batches, permanent
+512-example clean fitness set, and transition checkpoints; its ranking score
+is the mean across those trajectories. The independent acceptance trajectories
+use later, disjoint seeds and still do not vote during ranking. The intended
+compute-matched configuration is `16 candidates x 4 ranking trajectories`
+instead of `64 candidates x 1 trajectory`. It spends the same number of
+candidate trajectories while making selection depend on behavior that
+repeats across four training runs.
+
+The implementation logs each ranking trajectory's population mean, the
+within-candidate ranking standard deviation, and the selected candidate's
+ranking standard deviation. The full test suite and a two-GPU end-to-end smoke
+with two ranking plus two disjoint acceptance trajectories pass.
+
+The next experiment will use this machinery on short collapse windows rather
+than immediately repeating a complete 3,600-update generation. Each candidate
+will start from the same saved forward-model and Adam state immediately before
+an observed collapse, control only the failing updates, and be ranked over
+several independent collapse windows. A full trajectory from initialization
+will then test whether the locally evolved rule transfers.
+
+Tracked outputs:
+[`results/random_transition_h3600_g72_summary.json`](results/random_transition_h3600_g72_summary.json)
+and
+[`results/random_transition_h3600_g72_metrics.jsonl`](results/random_transition_h3600_g72_metrics.jsonl).

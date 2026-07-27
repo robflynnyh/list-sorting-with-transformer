@@ -29,6 +29,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     PlateauState,
     ShortcutCreditExperimentConfig,
     candidate_fitness,
+    candidate_ranking_seeds,
     candidate_summary,
     center_rule_summary,
     center_routing_summary,
@@ -481,15 +482,29 @@ def test_elite_proposal_mean_improvement_uses_matched_trajectories() -> None:
 
 def test_elite_acceptance_seed_separates_extra_trajectories() -> None:
     assert elite_acceptance_seed(123, 1) != elite_acceptance_seed(123, 2)
-    seeds = independent_elite_acceptance_seeds(123, 3)
-    assert seeds == (
+    ranking_seeds = candidate_ranking_seeds(123, 4)
+    assert ranking_seeds == (
+        123,
         elite_acceptance_seed(123, 1),
         elite_acceptance_seed(123, 2),
         elite_acceptance_seed(123, 3),
     )
-    assert 123 not in seeds
+    acceptance_seeds = independent_elite_acceptance_seeds(
+        123,
+        4,
+        start_index=4,
+    )
+    assert acceptance_seeds == (
+        elite_acceptance_seed(123, 4),
+        elite_acceptance_seed(123, 5),
+        elite_acceptance_seed(123, 6),
+        elite_acceptance_seed(123, 7),
+    )
+    assert set(ranking_seeds).isdisjoint(acceptance_seeds)
     with pytest.raises(ValueError, match="must be positive"):
         elite_acceptance_seed(123, 0)
+    with pytest.raises(ValueError, match="count must be positive"):
+        candidate_ranking_seeds(123, 0)
     with pytest.raises(ValueError, match="count must be positive"):
         independent_elite_acceptance_seeds(123, 0)
 

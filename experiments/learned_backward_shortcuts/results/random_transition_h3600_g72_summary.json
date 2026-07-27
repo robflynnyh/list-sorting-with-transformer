@@ -1,0 +1,26 @@
+{
+  "generation": 72,
+  "horizon": 3600,
+  "population_size": 64,
+  "sigma": 0.0065625,
+  "selected_candidate_index": 55,
+  "selected_trajectory": {
+    "center_worst_checkpoint_mode_loss": 0.478863000869751,
+    "proposal_worst_checkpoint_mode_loss": 0.4523853063583374,
+    "center_final_min_mode_accuracy": 0.953125,
+    "proposal_final_min_mode_accuracy": 0.953125,
+    "fitness_delta": 0.026477694511413574
+  },
+  "independent_acceptance_deltas": [
+    -0.0044047534465789795,
+    -0.011232428252696991,
+    -0.007912203669548035,
+    -0.00009382516145706177
+  ],
+  "independent_acceptance_mean_delta": -0.005910802632570267,
+  "decision": "rejected",
+  "next_sigma": 0.00328125,
+  "candidate_fixed_to_heldout_correlation": 0.9778246879577637,
+  "generation_seconds": 2951.4576599150896,
+  "wandb_run": "https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/4967umob"
+}
