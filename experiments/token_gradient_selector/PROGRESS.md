@@ -125,3 +125,27 @@ by default.
 
 Tracked output:
 [`results/random_oracle_optimization_summary.json`](results/random_oracle_optimization_summary.json).
+
+### First learned-selector launch: tied-group correction
+
+The first GRPO launch used group size 16 and horizon 10. Across its first four
+generations, candidate reward standard deviation was only
+`4.1e-5`--`5.7e-5`. Standardizing this numerically tiny spread produced
+full-scale advantages despite no meaningful candidate separation. The entropy
+bonus then moved both oracle-position and other-position selection
+probabilities upward. The run was stopped and rejected after generation 3.
+
+The training loop now treats groups with reward standard deviation below
+`1e-4` as ties:
+
+- policy advantages are zero;
+- the entropy bonus is not applied;
+- selector parameters are not updated;
+- three consecutive tied groups promote the forward-training horizon.
+
+This preserves the horizon-10 starting condition without training the policy
+on noise. A focused multi-GPU smoke confirms that tied groups leave policy
+gradient norm at zero and promote the horizon at the configured patience.
+
+Rejected W&B run:
+[`r9o0ejgo`](https://wandb.ai/wobrob101/list-sorting-token-gradient-selector/runs/r9o0ejgo).

@@ -134,3 +134,10 @@ def test_standardize_group_rewards() -> None:
         standardize_group_rewards(torch.ones(4)),
         torch.zeros(4),
     )
+    torch.testing.assert_close(
+        standardize_group_rewards(
+            torch.tensor([1.0, 1.00001, 0.99999]),
+            minimum_standard_deviation=1e-4,
+        ),
+        torch.zeros(3),
+    )

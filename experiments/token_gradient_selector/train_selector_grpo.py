@@ -276,6 +276,8 @@ def main() -> None:
     parser.add_argument("--plateau-patience", type=int, default=25)
     parser.add_argument("--plateau-min-delta", type=float, default=0.005)
     parser.add_argument("--plateau-ema-decay", type=float, default=0.9)
+    parser.add_argument("--minimum-reward-std", type=float, default=1e-4)
+    parser.add_argument("--tied-group-patience", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--fitness-examples", type=int, default=512)
     parser.add_argument("--min-length", type=int, default=8)
@@ -314,6 +316,7 @@ def main() -> None:
         args.max_horizon,
         args.horizon_multiplier,
         args.plateau_patience,
+        args.tied_group_patience,
         args.batch_size,
         args.fitness_examples,
         args.selector_d_model,
@@ -337,6 +340,8 @@ def main() -> None:
         raise ValueError("learning rates and gradient clip must be positive")
     if args.entropy_coefficient < 0:
         raise ValueError("entropy-coefficient must be nonnegative")
+    if args.minimum_reward_std < 0:
+        raise ValueError("minimum-reward-std must be nonnegative")
 
     torch.set_num_threads(1)
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
@@ -422,6 +427,7 @@ def main() -> None:
 
     horizon = args.horizon
     plateau = PlateauState()
+    consecutive_tied_groups = 0
     for generation in range(args.generations):
         generation_seed = args.seed * 1_000_003 + generation * 10_007
         base_model = initialize_forward_model(
@@ -474,7 +480,14 @@ def main() -> None:
             [result.reward for result in results],
             dtype=torch.float32,
         )
-        advantages = standardize_group_rewards(rewards)
+        reward_standard_deviation = float(
+            rewards.std(unbiased=False)
+        )
+        tied_group = reward_standard_deviation < args.minimum_reward_std
+        advantages = standardize_group_rewards(
+            rewards,
+            minimum_standard_deviation=args.minimum_reward_std,
+        )
 
         selector.train()
         selector_optimizer.zero_grad(set_to_none=True)
@@ -486,18 +499,26 @@ def main() -> None:
                 inner_batches,
                 trajectory.actions,
             )
-            member_loss = -(
-                advantage * log_probability
-                + args.entropy_coefficient * member_entropy
-            ) / args.group_size
-            member_loss.backward()
+            member_loss = -advantage * log_probability / args.group_size
+            if not tied_group:
+                member_loss = member_loss - (
+                    args.entropy_coefficient
+                    * member_entropy
+                    / args.group_size
+                )
+                member_loss.backward()
             policy_loss += float(member_loss.detach())
             entropy += float(member_entropy.detach()) / args.group_size
-        gradient_norm = torch.nn.utils.clip_grad_norm_(
-            selector.parameters(),
-            args.gradient_clip_norm,
-        )
-        selector_optimizer.step()
+        if tied_group:
+            gradient_norm = torch.zeros(())
+            consecutive_tied_groups += 1
+        else:
+            gradient_norm = torch.nn.utils.clip_grad_norm_(
+                selector.parameters(),
+                args.gradient_clip_norm,
+            )
+            selector_optimizer.step()
+            consecutive_tied_groups = 0
 
         best = max(results, key=lambda result: result.reward)
         probabilities = selector_probability_statistics(
@@ -509,12 +530,14 @@ def main() -> None:
             "generation": generation,
             "horizon": horizon,
             "reward/mean": float(rewards.mean()),
-            "reward/std": float(rewards.std(unbiased=False)),
+            "reward/std": reward_standard_deviation,
             "reward/min": float(rewards.min()),
             "reward/max": float(rewards.max()),
             "policy/loss": policy_loss,
             "policy/entropy": entropy,
             "policy/gradient_norm": float(gradient_norm),
+            "policy/update_applied": int(not tied_group),
+            "reward/tied_group": int(tied_group),
             "sample/selected_fraction": sum(
                 trajectory.selected_fraction for trajectory in trajectories
             )
@@ -534,12 +557,15 @@ def main() -> None:
             **metrics_summary("best/heldout", best.heldout_clean),
             "best/correct_accuracy": best.correct.accuracy,
         }
-        promoted = update_plateau(
-            plateau,
-            float(rewards.mean()),
-            decay=args.plateau_ema_decay,
-            patience=args.plateau_patience,
-            minimum_delta=args.plateau_min_delta,
+        promoted = (
+            consecutive_tied_groups >= args.tied_group_patience
+            or update_plateau(
+                plateau,
+                float(rewards.mean()),
+                decay=args.plateau_ema_decay,
+                patience=args.plateau_patience,
+                minimum_delta=args.plateau_min_delta,
+            )
         )
         if promoted and horizon < args.max_horizon:
             horizon = min(
@@ -547,6 +573,7 @@ def main() -> None:
                 horizon * args.horizon_multiplier,
             )
             plateau = PlateauState()
+            consecutive_tied_groups = 0
             row["next_horizon"] = horizon
 
         with metrics_path.open("a") as metrics_file:
@@ -564,6 +591,7 @@ def main() -> None:
                     "generation": generation,
                     "horizon": horizon,
                     "plateau": asdict(plateau),
+                    "consecutive_tied_groups": consecutive_tied_groups,
                     "selector_config": selector_config.as_dict(),
                     "selector": selector.state_dict(),
                     "selector_optimizer": selector_optimizer.state_dict(),

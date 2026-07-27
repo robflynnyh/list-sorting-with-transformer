@@ -249,12 +249,23 @@ def selector_probability_statistics(
     }
 
 
-def standardize_group_rewards(rewards: Tensor) -> Tensor:
+def standardize_group_rewards(
+    rewards: Tensor,
+    *,
+    minimum_standard_deviation: float = 0.0,
+) -> Tensor:
     """Compute group-relative advantages, or zero when all rewards tie."""
 
     if rewards.ndim != 1 or rewards.numel() < 2:
         raise ValueError("rewards must contain at least two group members")
+    if minimum_standard_deviation < 0:
+        raise ValueError(
+            "minimum_standard_deviation must be nonnegative"
+        )
     standard_deviation = rewards.std(unbiased=False)
-    if float(standard_deviation) < 1e-8:
+    if float(standard_deviation) < max(
+        1e-8,
+        minimum_standard_deviation,
+    ):
         return torch.zeros_like(rewards)
     return (rewards - rewards.mean()) / standard_deviation
