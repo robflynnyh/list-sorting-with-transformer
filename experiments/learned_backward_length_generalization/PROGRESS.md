@@ -132,3 +132,23 @@ The next controller configuration keeps the same total of 512 fixed length-50
 examples but reserves 256 for candidate ranking and 256 for proposal
 acceptance. Length 400 remains reporting-only. This change has been implemented
 but not relaunched.
+
+## Horizon-24 router MAML
+
+The suppression-only MAML method that succeeded on the random-position
+shortcut task has been transferred to this task. It keeps a queue of 24
+ordinary pointer-next batches at list lengths 2 through 20, differentiates a
+virtual Adam trajectory through all 24 batches using the persistent model's
+current Adam moments, and updates the router against a fixed 256-example
+length-50 set. It then discards the virtual trajectory, commits one real
+routed Adam update on the first queued batch, and shifts the queue by one.
+
+The task model remains the established two-layer, width-128 Transformer.
+Router credit is suppression-only in `[0, 1]`; signed reversal is excluded.
+Evaluation reports list lengths 2, 20, 50, and 400 and includes the existing
+ordinary-Adam run as a matched reference.
+
+A two-step GPU smoke exercised the full 24-step differentiable Adam path,
+length-50 fitness, length-400 evaluation, and checkpoint persistence. The
+checkpoint retained exactly 24 queued batches and reported
+`train/lookahead_steps=24`.

@@ -16,6 +16,7 @@ from torch import Tensor
 from torch.func import functional_call
 
 from .evaluate import resolve_device
+from .router_lookahead import router_lookahead_objective
 from .shortcut_credit import (
     AttentionRoutingRule,
     AttentionRoutingRuleConfig,
@@ -53,6 +54,7 @@ class MAMLLengthConfig:
     router_heads: int = 4
     router_meta_updates_per_step: int = 1
     router_fresh_short_batches: bool = False
+    lookahead_steps: int = 1
     router_credit_mode: str = "suppress_renorm"
     router_initial_gate: float = 1e-3
     router_minimum_gate: float = 1e-6
@@ -88,6 +90,7 @@ class MAMLLengthConfig:
             self.router_d_model,
             self.router_heads,
             self.router_meta_updates_per_step,
+            self.lookahead_steps,
             self.log_interval,
             self.eval_interval,
             self.checkpoint_interval,
@@ -483,6 +486,7 @@ def save_checkpoint(
     ordinary_optimizer: torch.optim.Optimizer,
     train_generator: torch.Generator,
     router_train_generator: torch.Generator,
+    lookahead_batches: tuple[ShortcutBatch, ...],
     step: int,
 ) -> None:
     torch.save(
@@ -497,6 +501,7 @@ def save_checkpoint(
             "router_train_generator_state": (
                 router_train_generator.get_state()
             ),
+            "lookahead_batches": lookahead_batches,
             "step": step,
         },
         path,
@@ -544,6 +549,7 @@ def run(config: MAMLLengthConfig) -> Path:
     router_train_generator = torch.Generator().manual_seed(
         config.seed + 3_000
     )
+    lookahead_batches: list[ShortcutBatch] = []
     start_step = 1
     if config.resume is not None:
         checkpoint = torch.load(config.resume, map_location=device)
@@ -561,6 +567,7 @@ def run(config: MAMLLengthConfig) -> Path:
             router_train_generator.set_state(
                 checkpoint["router_train_generator_state"]
             )
+        lookahead_batches = list(checkpoint.get("lookahead_batches", ()))
         start_step = int(checkpoint["step"]) + 1
 
     meta_batches = (
@@ -600,6 +607,29 @@ def run(config: MAMLLengthConfig) -> Path:
     ordinary_reference = load_ordinary_reference(
         config.ordinary_reference_metrics
     )
+    while (
+        router is not None
+        and len(lookahead_batches) < config.lookahead_steps
+    ):
+        length = int(
+            torch.randint(
+                config.min_length,
+                config.max_length + 1,
+                (),
+                generator=train_generator,
+            )
+        )
+        lookahead_batches.append(
+            make_clean_pointer_batch(
+                config.batch_size,
+                length,
+                generator=train_generator,
+                vocabulary=vocabulary,
+                device=device,
+            )
+        )
+    if router is not None and len(lookahead_batches) != config.lookahead_steps:
+        raise ValueError("resume lookahead does not match configured horizon")
     wandb_run = initialize_wandb(config)
     if wandb_run is not None:
         print(f"W&B: {wandb_run.url}", flush=True)
@@ -621,21 +651,25 @@ def run(config: MAMLLengthConfig) -> Path:
     started_at = time.monotonic()
     for step in range(start_step, config.steps + 1):
         model.train()
-        length = int(
-            torch.randint(
-                config.min_length,
-                config.max_length + 1,
-                (),
-                generator=train_generator,
+        if router is not None:
+            short_batch = lookahead_batches[0]
+            length = short_batch.length
+        else:
+            length = int(
+                torch.randint(
+                    config.min_length,
+                    config.max_length + 1,
+                    (),
+                    generator=train_generator,
+                )
             )
-        )
-        short_batch = make_clean_pointer_batch(
-            config.batch_size,
-            length,
-            generator=train_generator,
-            vocabulary=vocabulary,
-            device=device,
-        )
+            short_batch = make_clean_pointer_batch(
+                config.batch_size,
+                length,
+                generator=train_generator,
+                vocabulary=vocabulary,
+                device=device,
+            )
         report_step = (
             step % config.log_interval == 0
             or step % config.eval_interval == 0
@@ -688,12 +722,13 @@ def run(config: MAMLLengthConfig) -> Path:
             ordinary_optimizer.zero_grad(set_to_none=True)
             with second_order_attention_context(device):
                 objective = (
-                    one_step_router_maml_objective(
+                    router_lookahead_objective(
                         model,
                         router,
-                        meta_short_batch,
-                        meta_batch,
-                        inner_learning_rate=config.inner_learning_rate,
+                        tuple(lookahead_batches),
+                        (meta_batch,),
+                        ordinary_optimizer=ordinary_optimizer,
+                        gradient_clip=config.gradient_clip,
                     )
                     if router is not None
                     else one_step_maml_objective(
@@ -750,6 +785,25 @@ def run(config: MAMLLengthConfig) -> Path:
             config.gradient_clip,
         )
         ordinary_optimizer.step()
+        if router is not None:
+            lookahead_batches.pop(0)
+            next_length = int(
+                torch.randint(
+                    config.min_length,
+                    config.max_length + 1,
+                    (),
+                    generator=train_generator,
+                )
+            )
+            lookahead_batches.append(
+                make_clean_pointer_batch(
+                    config.batch_size,
+                    next_length,
+                    generator=train_generator,
+                    vocabulary=vocabulary,
+                    device=device,
+                )
+            )
 
         if report_step:
             elapsed = time.monotonic() - started_at
@@ -787,6 +841,10 @@ def run(config: MAMLLengthConfig) -> Path:
                         ),
                     }
                 )
+                if router is not None:
+                    summary["train/lookahead_mean_short_loss"] = float(
+                        objective.lookahead_mean_loss.detach()
+                    )
             if meta_loss_before is not None and objective is not None:
                 summary["train/meta_loss_before_virtual"] = (
                     meta_loss_before
@@ -804,6 +862,9 @@ def run(config: MAMLLengthConfig) -> Path:
                 )
                 summary["train/router_fresh_short_batches"] = float(
                     config.router_fresh_short_batches
+                )
+                summary["train/lookahead_steps"] = float(
+                    config.lookahead_steps
                 )
                 summary["gradient/meta_norm_mean"] = (
                     sum(meta_gradient_norms) / len(meta_gradient_norms)
@@ -843,6 +904,7 @@ def run(config: MAMLLengthConfig) -> Path:
                 ordinary_optimizer=ordinary_optimizer,
                 train_generator=train_generator,
                 router_train_generator=router_train_generator,
+                lookahead_batches=tuple(lookahead_batches),
                 step=step,
             )
             save_checkpoint(
@@ -854,6 +916,7 @@ def run(config: MAMLLengthConfig) -> Path:
                 ordinary_optimizer=ordinary_optimizer,
                 train_generator=train_generator,
                 router_train_generator=router_train_generator,
+                lookahead_batches=tuple(lookahead_batches),
                 step=step,
             )
 
