@@ -531,15 +531,49 @@ class BidirectionalRoutingBlock(nn.Module):
         )
         self.ffn_norm = nn.LayerNorm(d_model)
         self.ffn = BackwardSwiGLU(d_model, ffn_multiplier)
+        self.manual_attention = False
 
     def forward(self, hidden: Tensor) -> Tensor:
         normalized = self.attention_norm(hidden)
-        attended, _ = self.attention(
-            normalized,
-            normalized,
-            normalized,
-            need_weights=False,
-        )
+        if self.manual_attention:
+            query, key, value = F.linear(
+                normalized,
+                self.attention.in_proj_weight,
+            ).chunk(3, dim=-1)
+            batch_size, sequence_length, model_dim = query.shape
+            head_count = self.attention.num_heads
+            head_dim = model_dim // head_count
+
+            def split_heads(tensor: Tensor) -> Tensor:
+                return tensor.view(
+                    batch_size,
+                    sequence_length,
+                    head_count,
+                    head_dim,
+                ).transpose(1, 2)
+
+            query = split_heads(query)
+            key = split_heads(key)
+            value = split_heads(value)
+            weights = (
+                query @ key.transpose(-2, -1) / head_dim**0.5
+            ).softmax(dim=-1)
+            attended = (weights @ value).transpose(1, 2).reshape(
+                batch_size,
+                sequence_length,
+                model_dim,
+            )
+            attended = F.linear(
+                attended,
+                self.attention.out_proj.weight,
+            )
+        else:
+            attended, _ = self.attention(
+                normalized,
+                normalized,
+                normalized,
+                need_weights=False,
+            )
         hidden = hidden + attended
         return hidden + self.ffn(self.ffn_norm(hidden))
 

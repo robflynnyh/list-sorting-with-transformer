@@ -332,8 +332,11 @@ def train_vectorized_routing_population(
         device=device,
     )
     forward_model.load_state_dict(base_state)
+    for block in forward_model.blocks:
+        block.attention.manual_attention = True
     worker_rule = AttentionRoutingRule(center_rule.config).to(device)
     worker_rule.capture_statistics = False
+    worker_rule.context.manual_attention = True
     model = _RoutedForwardModel(forward_model, worker_rule).to(device)
     model.train()
     forward_parameters = (

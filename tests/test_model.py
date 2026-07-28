@@ -186,6 +186,43 @@ def test_signed_unit_credit_matches_ordinary_attention_gradients() -> None:
         )
 
 
+def test_manual_attention_matches_sdpa_for_vectorized_routing() -> None:
+    torch.manual_seed(43)
+    tensors = [
+        torch.randn(2, 2, 5, 4, requires_grad=True)
+        for _ in range(3)
+    ]
+    manual_tensors = [
+        tensor.detach().clone().requires_grad_()
+        for tensor in tensors
+    ]
+    multipliers = torch.rand(2, 2, 5, 5).mul(2).sub(1)
+    upstream = torch.randn_like(tensors[0])
+
+    sdpa, _ = signed_routed_scaled_dot_product_attention(
+        *tensors,
+        backward_multipliers=multipliers,
+        is_causal=True,
+    )
+    manual, _ = signed_routed_scaled_dot_product_attention(
+        *manual_tensors,
+        backward_multipliers=multipliers,
+        is_causal=True,
+        manual_attention=True,
+    )
+    sdpa.backward(upstream)
+    manual.backward(upstream)
+
+    torch.testing.assert_close(manual, sdpa, rtol=2e-5, atol=2e-6)
+    for sdpa_tensor, manual_tensor in zip(tensors, manual_tensors):
+        torch.testing.assert_close(
+            manual_tensor.grad,
+            sdpa_tensor.grad,
+            rtol=2e-5,
+            atol=2e-6,
+        )
+
+
 def test_value_rotary_mode_is_reported_for_rotary_layers() -> None:
     model = DecoderTransformer(small_config(rotate_values_with_rope=True))
     assert model.layer_position_modes == (

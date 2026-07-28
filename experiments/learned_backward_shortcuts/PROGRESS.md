@@ -3065,6 +3065,32 @@ single evolutionary trajectory.
 
 Based on this result, antithetic deduplication was promoted to the default.
 
+### Vectorized-controller runtime
+
+The default controller now uses a population-compatible manual attention path
+inside `torch.func.vmap`. It avoids PyTorch's per-candidate fallback for SDPA
+and `MultiheadAttention`, and reuses the attention weights already required by
+signed backward routing. Forward outputs and routed gradients are covered by
+equivalence tests against the original kernels.
+
+The three population shards now fit in one batch per GPU with vectorized chunk
+size 22. Reporting is split into two cadences: the centre trajectory still
+runs every generation for horizon control, while ordinary training,
+masked-only training, candidate held-out evaluation, and accepted-proposal
+diagnostics run every 10 generations by default.
+
+At population 64 and horizon 160, a matched full-control generation took
+`42.68s`, down from `48.84s` for the completed reference run. Population
+evaluation fell from `29.38s` to `23.00s`; selected candidate 4, elite count 2,
+the accepted update, and both acceptance-trajectory decisions were unchanged
+within floating-point tolerance. A generation without the sparse controls
+took `32.50s`, versus `43.56s` for its adjacent full-control generation.
+
+Sharding the five adaptive-acceptance parameter sets across all three GPUs was
+also benchmarked. Tiny per-GPU `vmap` batches increased acceptance from
+`8.29s` to `11.55s` even with a balanced one-job-per-GPU layout, so this change
+was rejected. Acceptance retains the faster trajectory-level assignment.
+
 ### Decoupled candidate search and commit scale
 
 The adaptive controller can now separate the two roles previously assigned to

@@ -11,6 +11,7 @@ from list_sorting_transformer.shortcut_credit import (
     AttentionRoutingRule,
     AttentionRoutingRuleConfig,
     BackwardRuleConfig,
+    BidirectionalRoutingBlock,
     LearnedBackwardRule,
     ShortcutDecoderTransformer,
     ShortcutMetrics,
@@ -101,6 +102,18 @@ def test_forward_training_precision_is_explicit() -> None:
         ShortcutCreditExperimentConfig(
             forward_training_precision="fp16"
         )
+
+
+def test_manual_bidirectional_routing_attention_matches_mha() -> None:
+    torch.manual_seed(47)
+    block = BidirectionalRoutingBlock(16, 4, 2.0)
+    hidden = torch.randn(3, 7, 16)
+
+    expected = block(hidden)
+    block.manual_attention = True
+    actual = block(hidden)
+
+    torch.testing.assert_close(actual, expected, rtol=2e-5, atol=2e-6)
 
 
 def test_fixed_horizon_supports_sparse_reporting() -> None:

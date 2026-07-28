@@ -58,10 +58,11 @@ exec "${PYTHON_BIN}" -u -m list_sorting_transformer.shortcut_credit_experiment \
   --heads 4 \
   --seed 7 \
   --checkpoint-interval 1 \
+  --control-report-interval 10 \
   --device cuda:0 \
   --candidate-devices "${GPU_DEVICES}" \
   --vectorized-population \
-  --vectorized-chunk-size 16 \
+  --vectorized-chunk-size 22 \
   --wandb \
   --wandb-project list-sorting-learned-backward \
   --wandb-entity wobrob101 \

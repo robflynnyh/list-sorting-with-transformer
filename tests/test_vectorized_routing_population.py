@@ -197,7 +197,7 @@ def test_adaptive_controller_replays_identically(tmp_path: Path) -> None:
         )
 
 
-def test_fixed_horizon_sparse_reporting_skips_only_reporting_metrics(
+def test_sparse_control_reporting_keeps_center_metrics(
     tmp_path: Path,
 ) -> None:
     output_dir = run(
@@ -209,7 +209,8 @@ def test_fixed_horizon_sparse_reporting_skips_only_reporting_metrics(
             horizon=1,
             max_horizon=1,
             horizon_promotion_mode="fixed",
-            report_interval=2,
+            report_interval=1,
+            control_report_interval=2,
             batch_size=2,
             fitness_examples=4,
             acceptance_fitness_examples=4,
@@ -243,12 +244,21 @@ def test_fixed_horizon_sparse_reporting_skips_only_reporting_metrics(
     ]
     assert [row["report/full_generation"] for row in rows] == [
         1.0,
+        1.0,
+        1.0,
+    ]
+    assert [row["report/full_control_generation"] for row in rows] == [
+        1.0,
         0.0,
         1.0,
     ]
     assert "length_6/center_accuracy" in rows[0]
     assert "length_6/center_accuracy" not in rows[1]
     assert "length_6/center_accuracy" in rows[2]
+    assert "curriculum/center_objective" in rows[1]
+    assert "ordinary_rule/clean_accuracy" in rows[0]
+    assert "ordinary_rule/clean_accuracy" not in rows[1]
+    assert "ordinary_rule/clean_accuracy" in rows[2]
     assert all(
         not any(
             term in key

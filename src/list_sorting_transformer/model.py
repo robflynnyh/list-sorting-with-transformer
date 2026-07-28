@@ -252,6 +252,7 @@ def routed_scaled_dot_product_attention(
     backward_gate: Tensor,
     attention_mask: Tensor | None = None,
     is_causal: bool = False,
+    manual_attention: bool = False,
 ) -> tuple[Tensor, Tensor]:
     """Run normal attention forward with a suppress-only backward routing map."""
 
@@ -262,21 +263,32 @@ def routed_scaled_dot_product_attention(
         key.shape[-2],
     ):
         raise ValueError("backward gate must match the attention map")
-    attended = F.scaled_dot_product_attention(
+    weights = _attention_weights(
         query,
         key,
-        value,
-        attn_mask=attention_mask,
-        dropout_p=0.0,
-        is_causal=is_causal,
-    )
-    routed_weights = _routed_attention_weights(
-        query,
-        key,
-        backward_gate=backward_gate,
         attention_mask=attention_mask,
         is_causal=is_causal,
     )
+    attended = (
+        weights @ value
+        if manual_attention
+        else F.scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=attention_mask,
+            dropout_p=0.0,
+            is_causal=is_causal,
+        )
+    )
+    routed_weights = weights * backward_gate.to(
+        device=weights.device,
+        dtype=weights.dtype,
+    )
+    routed_weights = routed_weights / routed_weights.sum(
+        dim=-1,
+        keepdim=True,
+    ).clamp_min(torch.finfo(routed_weights.dtype).tiny)
     routed_surrogate = routed_weights @ value
     routed = (
         attended.detach()
@@ -301,6 +313,7 @@ def signed_routed_scaled_dot_product_attention(
     backward_multipliers: Tensor,
     attention_mask: Tensor | None = None,
     is_causal: bool = False,
+    manual_attention: bool = False,
 ) -> tuple[Tensor, Tensor]:
     """Run exact attention forward with signed per-edge backward credit."""
 
@@ -311,19 +324,23 @@ def signed_routed_scaled_dot_product_attention(
         key.shape[-2],
     ):
         raise ValueError("backward multipliers must match the attention map")
-    attended = F.scaled_dot_product_attention(
-        query,
-        key,
-        value,
-        attn_mask=attention_mask,
-        dropout_p=0.0,
-        is_causal=is_causal,
-    )
     weights = _attention_weights(
         query,
         key,
         attention_mask=attention_mask,
         is_causal=is_causal,
+    )
+    attended = (
+        weights @ value
+        if manual_attention
+        else F.scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=attention_mask,
+            dropout_p=0.0,
+            is_causal=is_causal,
+        )
     )
     multipliers = backward_multipliers.to(
         device=weights.device,
@@ -562,6 +579,7 @@ class CausalSelfAttention(nn.Module):
         )
         self.top_k: int | None = None
         self.top_k_straight_through = False
+        self.manual_attention = False
 
     def configure_top_k(
         self,
@@ -750,6 +768,7 @@ class CausalSelfAttention(nn.Module):
                         backward_multipliers=backward_attention_gate,
                         attention_mask=combined_mask,
                         is_causal=combined_mask is None,
+                        manual_attention=self.manual_attention,
                     )
                 )
             else:
@@ -761,6 +780,7 @@ class CausalSelfAttention(nn.Module):
                         backward_gate=backward_attention_gate,
                         attention_mask=combined_mask,
                         is_causal=combined_mask is None,
+                        manual_attention=self.manual_attention,
                     )
                 )
         elif backward_source_multipliers is not None:
@@ -789,14 +809,28 @@ class CausalSelfAttention(nn.Module):
             )
         elif self.top_k is None:
             routed_attended = None
-            attended = F.scaled_dot_product_attention(
-                query,
-                key,
-                value,
-                attn_mask=combined_mask,
-                dropout_p=self.dropout if self.training else 0.0,
-                is_causal=cache is None and combined_mask is None,
-            )
+            if self.manual_attention:
+                weights = _attention_weights(
+                    query,
+                    key,
+                    attention_mask=combined_mask,
+                    is_causal=cache is None and combined_mask is None,
+                )
+                weights = F.dropout(
+                    weights,
+                    p=self.dropout,
+                    training=self.training,
+                )
+                attended = weights @ value
+            else:
+                attended = F.scaled_dot_product_attention(
+                    query,
+                    key,
+                    value,
+                    attn_mask=combined_mask,
+                    dropout_p=self.dropout if self.training else 0.0,
+                    is_causal=cache is None and combined_mask is None,
+                )
         else:
             routed_attended = None
             attended = self._top_k_attention(

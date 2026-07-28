@@ -64,6 +64,7 @@ class ShortcutCreditExperimentConfig:
     correct_eval_examples: int = 128
     heldout_examples: int = 128
     report_interval: int = 1
+    control_report_interval: int = 1
     task_variant: str = "shortcut"
     min_length: int = 8
     max_length: int = 32
@@ -117,7 +118,7 @@ class ShortcutCreditExperimentConfig:
     resume_horizon: int | None = None
     candidate_devices: str | None = None
     vectorized_population: bool = False
-    vectorized_chunk_size: int = 16
+    vectorized_chunk_size: int = 22
     successive_halving_rungs: str | None = None
     direction_sampler: str = "random"
     direction_candidate_multiplier: int = 4
@@ -138,6 +139,7 @@ class ShortcutCreditExperimentConfig:
             self.correct_eval_examples,
             self.heldout_examples,
             self.report_interval,
+            self.control_report_interval,
             self.min_length,
             self.max_length,
             self.d_model,
@@ -3292,6 +3294,10 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             generation % config.report_interval == 0
             or generation + 1 == config.generations
         )
+        control_report_generation = report_generation and (
+            generation % config.control_report_interval == 0
+            or generation + 1 == config.generations
+        )
         for worker_device in candidate_devices:
             if worker_device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats(worker_device)
@@ -3331,6 +3337,12 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 generator=heldout_generator,
                 device=device,
             )
+        candidate_heldout_fitness_batches = (
+            heldout_fitness_batches if control_report_generation else None
+        )
+        candidate_heldout_correct_batches = (
+            heldout_correct_batches if control_report_generation else None
+        )
         base_model = initialize_forward_model(
             config,
             vocabulary,
@@ -3401,7 +3413,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 device=device,
                 leak_mode="masked",
             )
-            if report_generation
+            if control_report_generation
             else None
         )
         direction_generator = torch.Generator().manual_seed(generation_seed + 3)
@@ -3483,8 +3495,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 inner_batches=inner_batches,
                 fitness_batches=fitness_batches,
                 correct_batches=correct_batches,
-                heldout_fitness_batches=heldout_fitness_batches,
-                heldout_correct_batches=heldout_correct_batches,
+                heldout_fitness_batches=candidate_heldout_fitness_batches,
+                heldout_correct_batches=candidate_heldout_correct_batches,
                 initial_clean_metrics=initial_clean_metrics,
                 perturbation_sigma=generation_sigma,
             )
@@ -3515,8 +3527,12 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                         inner_batches=inner_batches,
                         fitness_batches=fitness_batches,
                         correct_batches=correct_batches,
-                        heldout_fitness_batches=heldout_fitness_batches,
-                        heldout_correct_batches=heldout_correct_batches,
+                        heldout_fitness_batches=(
+                            candidate_heldout_fitness_batches
+                        ),
+                        heldout_correct_batches=(
+                            candidate_heldout_correct_batches
+                        ),
                         initial_clean_metrics=initial_clean_metrics,
                         perturbation_sigma=generation_sigma,
                         additional_ranking_inputs=(
@@ -3543,10 +3559,10 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                             fitness_batches=fitness_batches,
                             correct_batches=correct_batches,
                             heldout_fitness_batches=(
-                                heldout_fitness_batches
+                                candidate_heldout_fitness_batches
                             ),
                             heldout_correct_batches=(
-                                heldout_correct_batches
+                                candidate_heldout_correct_batches
                             ),
                             initial_clean_metrics=initial_clean_metrics,
                             perturbation_sigma=generation_sigma,
@@ -3586,8 +3602,12 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                         or candidate_index == 0
                     ),
                     perturbation_sigma=generation_sigma,
-                    heldout_fitness_batches=heldout_fitness_batches,
-                    heldout_correct_batches=heldout_correct_batches,
+                    heldout_fitness_batches=(
+                        candidate_heldout_fitness_batches
+                    ),
+                    heldout_correct_batches=(
+                        candidate_heldout_correct_batches
+                    ),
                     additional_ranking_inputs=additional_ranking_inputs,
                 )
                 candidate_outputs.append(
@@ -3620,8 +3640,12 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                         inner_batches=inner_batches,
                         fitness_batches=fitness_batches,
                         correct_batches=correct_batches,
-                        heldout_fitness_batches=heldout_fitness_batches,
-                        heldout_correct_batches=heldout_correct_batches,
+                        heldout_fitness_batches=(
+                            candidate_heldout_fitness_batches
+                        ),
+                        heldout_correct_batches=(
+                            candidate_heldout_correct_batches
+                        ),
                         initial_clean_metrics=initial_clean_metrics,
                         perturbation_sigma=generation_sigma,
                         additional_ranking_inputs=(
@@ -3660,7 +3684,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             candidate_trajectories.append(trajectory)
             clean_results.append(trajectory.clean)
             correct_results.append(trajectory.correct)
-            if report_generation:
+            if control_report_generation:
                 if (
                     trajectory.heldout_clean is None
                     or trajectory.heldout_correct is None
@@ -3700,33 +3724,36 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 heldout_fitness_batches=heldout_fitness_batches,
                 heldout_correct_batches=heldout_correct_batches,
             )
-            ordinary_trajectory = train_forward_trajectory(
-                config,
-                base_state=base_state,
-                backward_rule=None,
-                inner_batches=inner_batches,
-                fitness_batches=fitness_batches,
-                correct_batches=correct_batches,
-                heldout_fitness_batches=heldout_fitness_batches,
-                heldout_correct_batches=heldout_correct_batches,
-                device=device,
-            )
-            if config.task_variant == "pointer_next_length":
-                masked_training_trajectory = ordinary_trajectory
-            else:
-                if masked_inner_batches is None:
-                    raise RuntimeError("masked reporting batches are missing")
-                masked_training_trajectory = train_forward_trajectory(
+            if control_report_generation:
+                ordinary_trajectory = train_forward_trajectory(
                     config,
                     base_state=base_state,
                     backward_rule=None,
-                    inner_batches=masked_inner_batches,
+                    inner_batches=inner_batches,
                     fitness_batches=fitness_batches,
                     correct_batches=correct_batches,
                     heldout_fitness_batches=heldout_fitness_batches,
                     heldout_correct_batches=heldout_correct_batches,
                     device=device,
                 )
+                if config.task_variant == "pointer_next_length":
+                    masked_training_trajectory = ordinary_trajectory
+                else:
+                    if masked_inner_batches is None:
+                        raise RuntimeError(
+                            "masked reporting batches are missing"
+                        )
+                    masked_training_trajectory = train_forward_trajectory(
+                        config,
+                        base_state=base_state,
+                        backward_rule=None,
+                        inner_batches=masked_inner_batches,
+                        fitness_batches=fitness_batches,
+                        correct_batches=correct_batches,
+                        heldout_fitness_batches=heldout_fitness_batches,
+                        heldout_correct_batches=heldout_correct_batches,
+                        device=device,
+                    )
         fitness_tensor = torch.tensor(fitness_values, device=device)
         selection_fitness_tensor = fitness_tensor
         if halving_eligible_indices is not None:
@@ -3835,7 +3862,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 center_rule,
                 adaptive_result.selected_parameters,
             )
-            if report_generation:
+            if control_report_generation:
                 elite_proposal_trajectory = train_forward_trajectory(
                     config,
                     base_state=base_state,
@@ -4060,7 +4087,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
         summary.update(
             checkpoint_population_summary(candidate_trajectories)
         )
-        if report_generation:
+        if control_report_generation:
             if (
                 center_fitness is None
                 or center_trajectory is None
@@ -4292,6 +4319,12 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "population_size": config.population_size,
                 "report/full_generation": float(report_generation),
                 "report/interval": float(config.report_interval),
+                "report/full_control_generation": float(
+                    control_report_generation
+                ),
+                "report/control_interval": float(
+                    config.control_report_interval
+                ),
                 "search/sigma": generation_sigma,
                 "search/next_sigma": plateau_state.search_sigma,
                 "outer/commit_scale": float(
@@ -4748,6 +4781,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--control-report-interval",
+        type=int,
+        default=1,
+        help=(
+            "run ordinary, masked-training, candidate-heldout, and accepted-"
+            "proposal diagnostics every N reporting generations"
+        ),
+    )
+    parser.add_argument(
         "--task-variant",
         choices=("shortcut", "pointer_next_length"),
         default="shortcut",
@@ -4967,7 +5009,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--vectorized-chunk-size",
         type=int,
-        default=16,
+        default=22,
         help="number of candidate trajectories batched on each GPU",
     )
     parser.add_argument(
