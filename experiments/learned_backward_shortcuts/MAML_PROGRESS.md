@@ -29,3 +29,24 @@ Correct-leak accuracy alone is not success because the model can copy the
 shortcut. The router must improve both held-out masked-leak accuracy above 10%
 and held-out incorrect-leak accuracy materially above the 11.1% exclusion
 baseline, while retaining diverse value predictions.
+
+## Seed-7 outcome
+
+- Router MAML:
+  <https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/0w751sl2>
+- Ordinary Adam:
+  <https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/hz3v3yoo>
+
+Both runs completed 2,000 persistent task-model updates.
+
+| Method | Correct leak | Masked held-out | Incorrect held-out |
+| --- | ---: | ---: | ---: |
+| Ordinary Adam | 100.0% | 22.3% | 0.0% |
+| Router MAML | 100.0% | 21.9% | 0.0% |
+
+Router MAML therefore did not learn shortcut resistance. Its final mean
+backward multiplier was `0.955`, so it learned only mild suppression, and its
+meta-gradient norm fell to approximately `1.8e-5` after the task model had
+already fit the shortcut. The matched result supports a signal-starvation
+failure: once correct-leak training loss approaches zero, the hypothetical
+one-step update is too small for the clean fitness loss to teach the router.
