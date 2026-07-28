@@ -114,6 +114,7 @@ class ShortcutCreditExperimentConfig:
     candidate_devices: str | None = None
     vectorized_population: bool = False
     vectorized_chunk_size: int = 16
+    successive_halving_rungs: str | None = None
 
     def __post_init__(self) -> None:
         positive_integers = (
@@ -210,6 +211,9 @@ class ShortcutCreditExperimentConfig:
         adaptive_counts = parse_adaptive_elite_counts(
             self.adaptive_elite_counts
         )
+        halving_rungs = parse_successive_halving_rungs(
+            self.successive_halving_rungs
+        )
         if adaptive_counts and (
             self.outer_update_rule != "elite_centroid"
             or not self.elite_backtracking
@@ -223,6 +227,39 @@ class ShortcutCreditExperimentConfig:
             raise ValueError(
                 "adaptive elite counts must not exceed population size"
             )
+        if halving_rungs:
+            if not self.vectorized_population:
+                raise ValueError(
+                    "successive halving requires a vectorized population"
+                )
+            if self.horizon_promotion_mode != "fixed":
+                raise ValueError(
+                    "successive halving requires fixed horizon mode"
+                )
+            if halving_rungs[-1][0] != self.horizon:
+                raise ValueError(
+                    "final halving rung must equal the fixed horizon"
+                )
+            if halving_rungs[0][1] > self.population_size:
+                raise ValueError(
+                    "halving survivors must not exceed population size"
+                )
+            if adaptive_counts and halving_rungs[-1][1] < adaptive_counts[-1]:
+                raise ValueError(
+                    "final halving survivors must cover adaptive elite counts"
+                )
+            if self.candidate_ranking_trajectories != 1:
+                raise ValueError(
+                    "successive halving currently supports one ranking trajectory"
+                )
+            if self.outer_update_rule != "elite_centroid":
+                raise ValueError(
+                    "successive halving requires elite-centroid updates"
+                )
+            if self.fitness_checkpoints is not None:
+                raise ValueError(
+                    "successive halving does not support fitness checkpoints"
+                )
         if self.horizon_promotion_mode not in {
             "fixed",
             "plateau",
@@ -415,6 +452,38 @@ def parse_adaptive_elite_counts(
             "adaptive elite counts must be unique increasing positives"
         )
     return counts
+
+
+def parse_successive_halving_rungs(
+    value: str | None,
+) -> tuple[tuple[int, int], ...]:
+    if value is None:
+        return ()
+    try:
+        rungs = tuple(
+            tuple(int(part.strip()) for part in item.split(":"))
+            for item in value.split(",")
+        )
+    except ValueError as error:
+        raise ValueError(
+            "successive halving rungs must be horizon:survivors pairs"
+        ) from error
+    if (
+        not rungs
+        or any(len(rung) != 2 for rung in rungs)
+        or any(horizon < 1 or survivors < 1 for horizon, survivors in rungs)
+        or tuple(sorted(horizon for horizon, _ in rungs))
+        != tuple(horizon for horizon, _ in rungs)
+        or len({horizon for horizon, _ in rungs}) != len(rungs)
+        or any(
+            next_survivors > survivors
+            for (_, survivors), (_, next_survivors) in zip(rungs, rungs[1:])
+        )
+    ):
+        raise ValueError(
+            "halving horizons must increase and survivor counts must decrease"
+        )
+    return rungs
 
 
 def parse_fitness_checkpoints(value: str | None) -> tuple[int, ...]:
@@ -1051,6 +1120,128 @@ def shard_candidate_specs(
             if spec[1] % worker_count == worker_index
         )
         for worker_index in range(worker_count)
+    )
+
+
+def train_successive_halving_population(
+    config: ShortcutCreditExperimentConfig,
+    *,
+    candidate_specs: tuple[tuple[int, int, int], ...],
+    candidate_devices: tuple[torch.device, ...],
+    base_state: dict[str, Tensor],
+    center_rule: AttentionRoutingRule,
+    center_parameters: dict[str, Tensor],
+    directions: tuple[EggrollDirection, ...],
+    inner_batches: tuple[ShortcutBatch, ...],
+    fitness_batches: tuple[ShortcutBatch, ...],
+    correct_batches: tuple[ShortcutBatch, ...],
+    heldout_fitness_batches: tuple[ShortcutBatch, ...] | None,
+    heldout_correct_batches: tuple[ShortcutBatch, ...] | None,
+    initial_clean_metrics: ShortcutMetrics,
+    perturbation_sigma: float,
+) -> tuple[list[Any], tuple[int, ...], dict[str, float]]:
+    """Train and prune vectorized candidates without restarting survivors."""
+
+    from .vectorized_routing_population import (
+        VectorizedRoutingCandidateState,
+        train_vectorized_routing_halving_stage,
+    )
+
+    rungs = parse_successive_halving_rungs(
+        config.successive_halving_rungs
+    )
+    if not rungs:
+        raise ValueError("successive halving requires configured rungs")
+    active_specs = candidate_specs
+    candidate_states: dict[int, VectorizedRoutingCandidateState] | None = None
+    latest_outputs: dict[int, Any] = {}
+    previous_horizon = 0
+    summary: dict[str, float] = {}
+
+    for rung_index, (rung_horizon, survivor_count) in enumerate(rungs):
+        segment = inner_batches[previous_horizon:rung_horizon]
+        if not segment:
+            raise ValueError("successive halving rung has no training steps")
+        final_rung = rung_index + 1 == len(rungs)
+        shards = shard_candidate_specs(active_specs, len(candidate_devices))
+
+        def run_worker(
+            shard: tuple[tuple[int, int, int], ...],
+            worker_device: torch.device,
+        ) -> tuple[list[Any], dict[int, VectorizedRoutingCandidateState]]:
+            return train_vectorized_routing_halving_stage(
+                config=config,
+                candidate_specs=shard,
+                chunk_size=config.vectorized_chunk_size,
+                device=worker_device,
+                base_state=base_state,
+                center_rule_config=center_rule.config,
+                center_parameters=center_parameters,
+                directions=directions,
+                inner_batches=segment,
+                fitness_batches=fitness_batches,
+                correct_batches=correct_batches,
+                heldout_fitness_batches=(
+                    heldout_fitness_batches if final_rung else None
+                ),
+                heldout_correct_batches=(
+                    heldout_correct_batches if final_rung else None
+                ),
+                initial_clean_metrics=initial_clean_metrics,
+                perturbation_sigma=perturbation_sigma,
+                candidate_states=candidate_states,
+            )
+
+        active_workers = [
+            (shard, worker_device)
+            for shard, worker_device in zip(shards, candidate_devices)
+            if shard
+        ]
+        if len(active_workers) == 1:
+            worker_outputs = [run_worker(*active_workers[0])]
+        else:
+            with ThreadPoolExecutor(
+                max_workers=len(active_workers)
+            ) as executor:
+                worker_outputs = [
+                    future.result()
+                    for future in (
+                        executor.submit(run_worker, shard, worker_device)
+                        for shard, worker_device in active_workers
+                    )
+                ]
+        stage_outputs = []
+        stage_states = {}
+        for outputs, states in worker_outputs:
+            stage_outputs.extend(outputs)
+            stage_states.update(states)
+        stage_outputs.sort(key=lambda output: output[1], reverse=True)
+        if survivor_count > len(stage_outputs):
+            raise ValueError("halving rung retains too many candidates")
+        surviving_indices = {
+            output[0] for output in stage_outputs[:survivor_count]
+        }
+        latest_outputs.update(
+            {output[0]: output for output in stage_outputs}
+        )
+        candidate_states = {
+            index: stage_states[index]
+            for index in surviving_indices
+        }
+        active_specs = tuple(
+            spec for spec in active_specs if spec[0] in surviving_indices
+        )
+        prefix = f"halving/rung_{rung_index}"
+        summary[f"{prefix}/horizon"] = float(rung_horizon)
+        summary[f"{prefix}/candidates"] = float(len(stage_outputs))
+        summary[f"{prefix}/survivors"] = float(len(active_specs))
+        summary[f"{prefix}/best_fitness"] = float(stage_outputs[0][1])
+        previous_horizon = rung_horizon
+
+    return (
+        [latest_outputs[index] for index in sorted(latest_outputs)],
+        tuple(spec[0] for spec in active_specs),
+        summary,
     )
 
 
@@ -2796,8 +2987,35 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 tuple[float, ...],
             ]
         ] = []
+        halving_eligible_indices: tuple[int, ...] | None = None
+        halving_summary: dict[str, float] = {}
         population_started_at = time.monotonic()
-        if config.vectorized_population:
+        if config.successive_halving_rungs is not None:
+            if not isinstance(center_rule, AttentionRoutingRule):
+                raise TypeError(
+                    "successive halving requires an attention router"
+                )
+            (
+                candidate_outputs,
+                halving_eligible_indices,
+                halving_summary,
+            ) = train_successive_halving_population(
+                config,
+                candidate_specs=candidate_specs,
+                candidate_devices=candidate_devices,
+                base_state=base_state,
+                center_rule=center_rule,
+                center_parameters=center_parameters,
+                directions=directions,
+                inner_batches=inner_batches,
+                fitness_batches=fitness_batches,
+                correct_batches=correct_batches,
+                heldout_fitness_batches=heldout_fitness_batches,
+                heldout_correct_batches=heldout_correct_batches,
+                initial_clean_metrics=initial_clean_metrics,
+                perturbation_sigma=generation_sigma,
+            )
+        elif config.vectorized_population:
             from .vectorized_routing_population import (
                 train_vectorized_routing_candidate_chunks,
             )
@@ -2974,11 +3192,15 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     trajectory.heldout_clean is None
                     or trajectory.heldout_correct is None
                 ):
-                    raise RuntimeError(
-                        "candidate held-out metrics were not produced"
+                    if halving_eligible_indices is None:
+                        raise RuntimeError(
+                            "candidate held-out metrics were not produced"
+                        )
+                else:
+                    heldout_clean_results.append(trajectory.heldout_clean)
+                    heldout_correct_results.append(
+                        trajectory.heldout_correct
                     )
-                heldout_clean_results.append(trajectory.heldout_clean)
-                heldout_correct_results.append(trajectory.heldout_correct)
             candidate_statistics.append(statistics)
             if candidate_index == 0 and statistics:
                 captured_statistics = statistics
@@ -3033,6 +3255,18 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     device=device,
                 )
         fitness_tensor = torch.tensor(fitness_values, device=device)
+        selection_fitness_tensor = fitness_tensor
+        if halving_eligible_indices is not None:
+            eligible_mask = torch.zeros(
+                len(fitness_values),
+                dtype=torch.bool,
+                device=device,
+            )
+            eligible_mask[list(halving_eligible_indices)] = True
+            selection_fitness_tensor = fitness_tensor.masked_fill(
+                ~eligible_mask,
+                float("-inf"),
+            )
         ranking_fitness_tensor = torch.tensor(
             ranking_fitness_groups,
             device=device,
@@ -3051,7 +3285,10 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 token_ids=inner_batches[-1].input_ids,
                 sigma=generation_sigma,
             )
-            if isinstance(center_rule, AttentionRoutingRule)
+            if (
+                isinstance(center_rule, AttentionRoutingRule)
+                and halving_eligible_indices is None
+            )
             else {}
         )
         outer_learning_rate = linear_outer_learning_rate(config, generation)
@@ -3089,7 +3326,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 center_rule=center_rule,
                 center_parameters=center_parameters,
                 directions=directions,
-                fitnesses=fitness_tensor,
+                fitnesses=selection_fitness_tensor,
                 sigma=generation_sigma,
                 generation_seed=generation_seed,
                 horizon=horizon,
@@ -3154,7 +3391,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             elite_indices = elite_centroid_update(
                 center_rule,
                 directions,
-                fitness_tensor,
+                selection_fitness_tensor,
                 sigma=generation_sigma,
                 elite_count=config.elite_count,
                 interpolation=config.elite_interpolation,
@@ -3300,7 +3537,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             clean_results,
             correct_results,
         )
-        ranking_best_index = int(fitness_tensor.argmax())
+        ranking_best_index = int(selection_fitness_tensor.argmax())
         summary.update(
             {
                 "fitness/ranking_trajectory_count": float(
@@ -3386,14 +3623,15 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     masked_training_trajectory.checkpoint_clean
                 ),
             )
-            summary.update(
-                heldout_candidate_summary(
-                    fitness_tensor.cpu(),
-                    clean_results,
-                    heldout_clean_results,
-                    heldout_correct_results,
+            if halving_eligible_indices is None:
+                summary.update(
+                    heldout_candidate_summary(
+                        fitness_tensor.cpu(),
+                        clean_results,
+                        heldout_clean_results,
+                        heldout_correct_results,
+                    )
                 )
-            )
             summary.update(
                 center_rule_summary(
                     center_fitness,
@@ -3543,6 +3781,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 )
             )
         summary.update(function_space_summary)
+        summary.update(halving_summary)
         summary.update(center_update_summary(center_rule, center_parameters))
         summary.update(
             center_routing_summary(
@@ -4172,6 +4411,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=16,
         help="number of candidate trajectories batched on each GPU",
+    )
+    parser.add_argument(
+        "--successive-halving-rungs",
+        help=(
+            "opt-in horizon:survivors schedule, for example "
+            "80:16,160:8,320:8"
+        ),
     )
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument(

@@ -21,6 +21,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     initialize_forward_model,
     initialize_fresh_backward_rule,
     parse_adaptive_elite_counts,
+    parse_successive_halving_rungs,
     probe_longer_horizon,
     run,
 )
@@ -52,6 +53,68 @@ def test_adaptive_elite_counts_require_sorted_unique_positives() -> None:
     for invalid in ("", "2,1", "1,1", "0,1", "one"):
         with pytest.raises(ValueError):
             parse_adaptive_elite_counts(invalid)
+
+
+def test_successive_halving_rungs_are_opt_in_and_validated() -> None:
+    assert parse_successive_halving_rungs(
+        "80:16,160:8,320:8"
+    ) == ((80, 16), (160, 8), (320, 8))
+    for invalid in ("", "80", "80:16,40:8", "80:8,160:16"):
+        with pytest.raises(ValueError):
+            parse_successive_halving_rungs(invalid)
+
+    default = ShortcutCreditExperimentConfig()
+    assert default.successive_halving_rungs is None
+
+
+def test_successive_halving_controller_keeps_separate_artifacts(
+    tmp_path: Path,
+) -> None:
+    output_dir = run(
+        ShortcutCreditExperimentConfig(
+            run_name="halving-smoke",
+            output_dir=str(tmp_path),
+            generations=1,
+            population_size=4,
+            horizon=2,
+            max_horizon=2,
+            horizon_promotion_mode="fixed",
+            batch_size=4,
+            fitness_examples=4,
+            acceptance_fitness_examples=4,
+            fitness_batch_size=4,
+            correct_eval_examples=4,
+            heldout_examples=4,
+            report_interval=1,
+            task_variant="pointer_next_length",
+            min_length=2,
+            max_length=4,
+            fitness_length=6,
+            heldout_length=8,
+            d_model=16,
+            backward_d_model=16,
+            forward_layers=1,
+            backward_layers=1,
+            heads=2,
+            backward_rule_type="attention_router",
+            outer_update_rule="elite_centroid",
+            elite_backtracking=True,
+            adaptive_elite_counts="1,2",
+            elite_acceptance_trajectories=2,
+            vectorized_population=True,
+            vectorized_chunk_size=2,
+            successive_halving_rungs="1:2,2:2",
+            checkpoint_interval=1,
+            device="cpu",
+        )
+    )
+    metrics = json.loads((output_dir / "metrics.jsonl").read_text())
+
+    assert output_dir.name == "halving-smoke"
+    assert metrics["halving/rung_0/candidates"] == 4
+    assert metrics["halving/rung_0/survivors"] == 2
+    assert metrics["halving/rung_1/candidates"] == 2
+    assert metrics["halving/rung_1/survivors"] == 2
 
 
 def test_adaptive_controller_replays_identically(tmp_path: Path) -> None:
@@ -479,3 +542,49 @@ def test_vectorized_routing_population_matches_serial_candidates(
                 rtol=2e-5,
                 atol=2e-7,
             )
+
+    first_segment = train_vectorized_routing_population(
+        config=config,
+        base_state=base_state,
+        center_rule=center_rule,
+        rule_parameters=rule_parameters,
+        inner_batches=inner_batches[:1],
+        fitness_batches=fitness_batches,
+        correct_batches=correct_batches,
+        heldout_fitness_batches=None,
+        heldout_correct_batches=None,
+        device=torch.device("cpu"),
+    )
+    resumed = train_vectorized_routing_population(
+        config=config,
+        base_state=base_state,
+        center_rule=center_rule,
+        rule_parameters=rule_parameters,
+        inner_batches=inner_batches[1:],
+        fitness_batches=fitness_batches,
+        correct_batches=correct_batches,
+        heldout_fitness_batches=heldout_batches,
+        heldout_correct_batches=correct_batches,
+        device=torch.device("cpu"),
+        initial_state=first_segment,
+    )
+    assert resumed.step == 2
+    for name in vectorized.forward_parameters:
+        torch.testing.assert_close(
+            resumed.forward_parameters[name],
+            vectorized.forward_parameters[name],
+            rtol=0,
+            atol=0,
+        )
+        torch.testing.assert_close(
+            resumed.first_moments[name],
+            vectorized.first_moments[name],
+            rtol=0,
+            atol=0,
+        )
+        torch.testing.assert_close(
+            resumed.second_moments[name],
+            vectorized.second_moments[name],
+            rtol=0,
+            atol=0,
+        )

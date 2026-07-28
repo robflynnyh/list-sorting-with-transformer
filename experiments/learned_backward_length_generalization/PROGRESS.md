@@ -178,3 +178,26 @@ versus 87.5% for ordinary Adam, but it was below ordinary at steps 100, 300,
 an optimization failure: large raw meta gradients were clipped on nearly every
 step while the router converged toward indiscriminate suppression. Objective
 alignment remains unresolved.
+
+## Successive-halving controller
+
+Successive halving is an opt-in vectorized-population setting. The existing
+full-population controller remains the default, and no previous shortcut or
+length-generalization artifacts are overwritten.
+
+The first schedule is `80:16,160:8,320:8`:
+
+- all 64 candidates train through update 80;
+- the best 16 continue with their exact forward weights and Adam state through
+  update 160;
+- the best 8 continue through update 320.
+
+Candidate ranking uses the fixed 256-example length-50 ranking set at every
+rung. The final elite proposal is accepted only on the separate fixed
+256-example length-50 set and must improve on both independent acceptance
+trajectories. Length 400 remains reporting-only.
+
+Candidate training falls from 20,480 forward-model updates per generation to
+7,680. Acceptance still evaluates the centre and four adaptive elite proposals
+across two full trajectories, so the expected complete-generation speedup is
+closer to twofold than the 2.7-fold candidate-only reduction.

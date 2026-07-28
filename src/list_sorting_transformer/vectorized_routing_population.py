@@ -41,6 +41,17 @@ class VectorizedRoutingPopulation:
 
     forward_parameters: dict[str, Tensor]
     trajectories: tuple[ForwardTrajectoryMetrics, ...]
+    first_moments: dict[str, Tensor]
+    second_moments: dict[str, Tensor]
+    step: int
+
+
+@dataclass(frozen=True)
+class VectorizedRoutingCandidateState:
+    forward_parameters: dict[str, Tensor]
+    first_moments: dict[str, Tensor]
+    second_moments: dict[str, Tensor]
+    step: int
 
 
 VectorizedCandidateOutput = tuple[
@@ -49,6 +60,11 @@ VectorizedCandidateOutput = tuple[
     ForwardTrajectoryMetrics,
     list[dict[str, float]],
     tuple[float, ...],
+]
+
+SuccessiveHalvingStageOutput = tuple[
+    list[VectorizedCandidateOutput],
+    dict[int, VectorizedRoutingCandidateState],
 ]
 
 
@@ -291,6 +307,7 @@ def train_vectorized_routing_population(
     heldout_fitness_batches: tuple[ShortcutBatch, ...] | None,
     heldout_correct_batches: tuple[ShortcutBatch, ...] | None,
     device: torch.device,
+    initial_state: VectorizedRoutingPopulation | None = None,
 ) -> VectorizedRoutingPopulation:
     """Train independent forward models for a stack of frozen routers."""
 
@@ -319,29 +336,51 @@ def train_vectorized_routing_population(
     worker_rule.capture_statistics = False
     model = _RoutedForwardModel(forward_model, worker_rule).to(device)
     model.train()
-    forward_parameters = _stack_forward_parameters(
-        model,
-        population_size,
+    forward_parameters = (
+        _stack_forward_parameters(model, population_size)
+        if initial_state is None
+        else {
+            name: tensor.to(device)
+            for name, tensor in initial_state.forward_parameters.items()
+        }
     )
     buffers = {
         name: buffer.detach()
         for name, buffer in model.named_buffers()
     }
-    first_moments = {
-        name: torch.zeros_like(parameter)
-        for name, parameter in forward_parameters.items()
-    }
-    second_moments = {
-        name: torch.zeros_like(parameter)
-        for name, parameter in forward_parameters.items()
-    }
+    first_moments = (
+        {
+            name: torch.zeros_like(parameter)
+            for name, parameter in forward_parameters.items()
+        }
+        if initial_state is None
+        else {
+            name: tensor.to(device)
+            for name, tensor in initial_state.first_moments.items()
+        }
+    )
+    second_moments = (
+        {
+            name: torch.zeros_like(parameter)
+            for name, parameter in forward_parameters.items()
+        }
+        if initial_state is None
+        else {
+            name: tensor.to(device)
+            for name, tensor in initial_state.second_moments.items()
+        }
+    )
+    initial_step = 0 if initial_state is None else initial_state.step
     checkpoint_steps = parse_fitness_checkpoints(
         config.fitness_checkpoints
     )
     checkpoint_step_set = set(checkpoint_steps)
     checkpoint_metrics: dict[int, tuple[ShortcutMetrics, ...]] = {}
 
-    for step, cpu_batch in enumerate(inner_batches, start=1):
+    for step, cpu_batch in enumerate(
+        inner_batches,
+        start=initial_step + 1,
+    ):
         batch = cpu_batch.to(device)
 
         def candidate_loss(
@@ -466,6 +505,74 @@ def train_vectorized_routing_population(
     return VectorizedRoutingPopulation(
         forward_parameters=forward_parameters,
         trajectories=tuple(trajectories),
+        first_moments=first_moments,
+        second_moments=second_moments,
+        step=initial_step + len(inner_batches),
+    )
+
+
+def stack_candidate_states(
+    states: Sequence[VectorizedRoutingCandidateState],
+    *,
+    device: torch.device,
+) -> VectorizedRoutingPopulation:
+    if not states:
+        raise ValueError("at least one candidate state is required")
+    if len({state.step for state in states}) != 1:
+        raise ValueError("candidate states must have the same optimizer step")
+
+    def stack_group(attribute: str) -> dict[str, Tensor]:
+        groups = [getattr(state, attribute) for state in states]
+        names = tuple(groups[0])
+        if any(tuple(group) != names for group in groups):
+            raise ValueError("candidate state parameter names differ")
+        return {
+            name: torch.stack(
+                tuple(group[name].to(device) for group in groups)
+            )
+            for name in names
+        }
+
+    return VectorizedRoutingPopulation(
+        forward_parameters=stack_group("forward_parameters"),
+        trajectories=(),
+        first_moments=stack_group("first_moments"),
+        second_moments=stack_group("second_moments"),
+        step=states[0].step,
+    )
+
+
+def split_candidate_states(
+    population: VectorizedRoutingPopulation,
+) -> tuple[VectorizedRoutingCandidateState, ...]:
+    population_size = next(iter(population.forward_parameters.values())).shape[0]
+
+    def candidate_group(
+        tensors: dict[str, Tensor],
+        index: int,
+    ) -> dict[str, Tensor]:
+        return {
+            name: tensor[index].detach().cpu()
+            for name, tensor in tensors.items()
+        }
+
+    return tuple(
+        VectorizedRoutingCandidateState(
+            forward_parameters=candidate_group(
+                population.forward_parameters,
+                index,
+            ),
+            first_moments=candidate_group(
+                population.first_moments,
+                index,
+            ),
+            second_moments=candidate_group(
+                population.second_moments,
+                index,
+            ),
+            step=population.step,
+        )
+        for index in range(population_size)
     )
 
 
@@ -610,3 +717,108 @@ def train_vectorized_routing_candidate_chunks(
                 )
             )
     return results
+
+
+def train_vectorized_routing_halving_stage(
+    *,
+    config: ShortcutCreditExperimentConfig,
+    candidate_specs: tuple[tuple[int, int, int], ...],
+    chunk_size: int,
+    device: torch.device,
+    base_state: dict[str, Tensor],
+    center_rule_config: AttentionRoutingRuleConfig,
+    center_parameters: dict[str, Tensor],
+    directions: tuple[EggrollDirection, ...],
+    inner_batches: tuple[ShortcutBatch, ...],
+    fitness_batches: tuple[ShortcutBatch, ...],
+    correct_batches: tuple[ShortcutBatch, ...],
+    heldout_fitness_batches: tuple[ShortcutBatch, ...] | None,
+    heldout_correct_batches: tuple[ShortcutBatch, ...] | None,
+    initial_clean_metrics: ShortcutMetrics,
+    perturbation_sigma: float,
+    candidate_states: dict[int, VectorizedRoutingCandidateState] | None,
+) -> SuccessiveHalvingStageOutput:
+    """Advance one survivor set without restarting its optimizer state."""
+
+    if not candidate_specs:
+        return [], {}
+    if device.type == "cuda":
+        torch.cuda.set_device(device)
+    center_rule = AttentionRoutingRule(center_rule_config).to(device)
+    worker_base_state = {
+        name: tensor.to(device)
+        for name, tensor in base_state.items()
+    }
+    worker_inner_batches = tuple(batch.to(device) for batch in inner_batches)
+    worker_fitness_batches = tuple(
+        batch.to(device) for batch in fitness_batches
+    )
+    worker_correct_batches = tuple(
+        batch.to(device) for batch in correct_batches
+    )
+    worker_heldout_fitness = (
+        None
+        if heldout_fitness_batches is None
+        else tuple(batch.to(device) for batch in heldout_fitness_batches)
+    )
+    worker_heldout_correct = (
+        None
+        if heldout_correct_batches is None
+        else tuple(batch.to(device) for batch in heldout_correct_batches)
+    )
+
+    results: list[VectorizedCandidateOutput] = []
+    final_states: dict[int, VectorizedRoutingCandidateState] = {}
+    for start in range(0, len(candidate_specs), chunk_size):
+        chunk_specs = candidate_specs[start : start + chunk_size]
+        rule_parameters = stack_candidate_rule_parameters(
+            center_parameters,
+            directions,
+            chunk_specs,
+            sigma=perturbation_sigma,
+            device=device,
+        )
+        initial_state = (
+            None
+            if candidate_states is None
+            else stack_candidate_states(
+                tuple(
+                    candidate_states[candidate_index]
+                    for candidate_index, _, _ in chunk_specs
+                ),
+                device=device,
+            )
+        )
+        population = train_vectorized_routing_population(
+            config=config,
+            base_state=worker_base_state,
+            center_rule=center_rule,
+            rule_parameters=rule_parameters,
+            inner_batches=worker_inner_batches,
+            fitness_batches=worker_fitness_batches,
+            correct_batches=worker_correct_batches,
+            heldout_fitness_batches=worker_heldout_fitness,
+            heldout_correct_batches=worker_heldout_correct,
+            device=device,
+            initial_state=initial_state,
+        )
+        split_states = split_candidate_states(population)
+        for local_index, (candidate_index, _, _) in enumerate(chunk_specs):
+            trajectory = population.trajectories[local_index]
+            fitness = candidate_fitness(
+                config.fitness_objective,
+                initial_clean_metrics,
+                trajectory.clean,
+                checkpoint_clean=trajectory.checkpoint_clean,
+            )
+            results.append(
+                (
+                    candidate_index,
+                    fitness,
+                    trajectory,
+                    [],
+                    (fitness,),
+                )
+            )
+            final_states[candidate_index] = split_states[local_index]
+    return results, final_states
