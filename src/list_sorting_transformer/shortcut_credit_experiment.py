@@ -15,6 +15,7 @@ from typing import Any, Union
 import torch
 from torch import Tensor
 
+from .direction_sampling import sample_function_diverse_directions
 from .evaluate import resolve_device
 from .shortcut_credit import (
     AttentionRoutingRule,
@@ -115,6 +116,10 @@ class ShortcutCreditExperimentConfig:
     vectorized_population: bool = False
     vectorized_chunk_size: int = 16
     successive_halving_rungs: str | None = None
+    direction_sampler: str = "random"
+    direction_candidate_multiplier: int = 4
+    direction_probe_examples: int = 8
+    direction_signature_size: int = 1024
 
     def __post_init__(self) -> None:
         positive_integers = (
@@ -148,6 +153,9 @@ class ShortcutCreditExperimentConfig:
             self.horizon_max_generations,
             self.horizon_failed_extension_limit,
             self.vectorized_chunk_size,
+            self.direction_candidate_multiplier,
+            self.direction_probe_examples,
+            self.direction_signature_size,
         )
         if any(value < 1 for value in positive_integers):
             raise ValueError("integer configuration values must be positive")
@@ -165,6 +173,15 @@ class ShortcutCreditExperimentConfig:
             raise ValueError("unknown routing credit mode")
         if self.forward_training_precision not in {"fp32", "bf16"}:
             raise ValueError("unknown forward training precision")
+        if self.direction_sampler not in {"random", "function_diverse"}:
+            raise ValueError("unknown direction sampler")
+        if (
+            self.direction_sampler == "function_diverse"
+            and self.backward_rule_type != "attention_router"
+        ):
+            raise ValueError(
+                "function-diverse directions require an attention router"
+            )
         if (
             self.routing_credit_mode != "suppress_renorm"
             and self.backward_rule_type != "attention_router"
@@ -2960,13 +2977,41 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             else None
         )
         direction_generator = torch.Generator().manual_seed(generation_seed + 3)
-        directions = tuple(
-            sample_eggroll_direction(
+        direction_sampling_summary = {
+            "direction_sampling/method_function_diverse": 0.0,
+            "direction_sampling/pool_size": float(
+                config.population_size // 2
+            ),
+        }
+        if config.direction_sampler == "function_diverse":
+            if not isinstance(center_rule, AttentionRoutingRule):
+                raise TypeError(
+                    "function-diverse directions require an attention router"
+                )
+            sampling_result = sample_function_diverse_directions(
                 center_rule,
                 generator=direction_generator,
+                count=config.population_size // 2,
+                candidate_multiplier=config.direction_candidate_multiplier,
+                sigma=generation_sigma,
+                probe_token_ids=inner_batches[0].input_ids[
+                    : config.direction_probe_examples
+                ],
+                signature_size=config.direction_signature_size,
             )
-            for _ in range(config.population_size // 2)
-        )
+            directions = sampling_result.directions
+            direction_sampling_summary.update(sampling_result.metrics)
+            direction_sampling_summary[
+                "direction_sampling/method_function_diverse"
+            ] = 1.0
+        else:
+            directions = tuple(
+                sample_eggroll_direction(
+                    center_rule,
+                    generator=direction_generator,
+                )
+                for _ in range(config.population_size // 2)
+            )
         center_parameters = clone_center_parameters(center_rule)
 
         candidate_specs = tuple(
@@ -3782,6 +3827,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             )
         summary.update(function_space_summary)
         summary.update(halving_summary)
+        summary.update(direction_sampling_summary)
         summary.update(center_update_summary(center_rule, center_parameters))
         summary.update(
             center_routing_summary(
@@ -4418,6 +4464,26 @@ def build_parser() -> argparse.ArgumentParser:
             "opt-in horizon:survivors schedule, for example "
             "80:16,160:8,320:8"
         ),
+    )
+    parser.add_argument(
+        "--direction-sampler",
+        choices=("random", "function_diverse"),
+        default="random",
+    )
+    parser.add_argument(
+        "--direction-candidate-multiplier",
+        type=int,
+        default=4,
+    )
+    parser.add_argument(
+        "--direction-probe-examples",
+        type=int,
+        default=8,
+    )
+    parser.add_argument(
+        "--direction-signature-size",
+        type=int,
+        default=1024,
     )
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument(

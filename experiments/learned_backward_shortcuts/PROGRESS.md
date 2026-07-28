@@ -2978,3 +2978,24 @@ run can use three one-pass shards of approximately 22, 22, and 20 candidates
 with `--vectorized-chunk-size 22`. BF16 remains opt-in until a longer matched
 run confirms that its small numerical differences do not change search
 quality materially.
+
+### Function-diverse direction sampling
+
+Random rank-one EGGROLL directions can produce nearly identical changes in the
+attention router. Evaluating all of those candidates with full forward-model
+training spends most of the generation on redundant proposals.
+
+The opt-in `function_diverse` sampler generates a larger cheap direction pool,
+measures each direction's antithetic change to attention gates on a small
+training-batch probe, normalizes directions toward the median gate-change RMS,
+and greedily selects directions with low absolute cosine similarity in that
+function-space signature. Scalar normalization preserves the rank-one matrix
+structure. The fixed clean fitness set is not used during preselection.
+
+The original `random` sampler remains the default. The matched shortcut-task
+launcher is
+[`launch_function_diverse_controller.sh`](launch_function_diverse_controller.sh).
+It reuses the signed-credit horizon-160 population-64 controller, requests
+three GPUs through `with-gpu`, and changes only the direction sampler. The
+primary comparison is clean held-out accuracy by generation and accepted
+update count; wall time is reported only as a resource cost.
