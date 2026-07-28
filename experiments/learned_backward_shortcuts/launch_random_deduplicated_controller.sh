@@ -13,6 +13,7 @@ exec "${WITH_GPU}" any --num 3 -- env \
   ROUTING_CREDIT_MODE=signed \
   GPU_DEVICES=cuda:0,cuda:1,cuda:2 \
   bash "${RUNNER}" \
+    --deduplicate-antithetic-elites \
     --elite-rejection-sigma-decay 0.5 \
     --elite-acceptance-patience 3 \
     "$@"

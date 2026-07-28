@@ -85,6 +85,7 @@ class ShortcutCreditExperimentConfig:
     elite_acceptance_trajectories: int = 1
     candidate_ranking_trajectories: int = 1
     adaptive_elite_counts: str | None = None
+    deduplicate_antithetic_elites: bool = False
     adaptive_commit_scale: float | None = None
     adaptive_commit_scale_multiplier: float = 2.0
     horizon_promotion_mode: str = "plateau"
@@ -242,11 +243,14 @@ class ShortcutCreditExperimentConfig:
                 "adaptive elite selection requires vectorized elite-centroid "
                 "backtracking"
             )
-        unique_direction_count = self.population_size // 2
-        if adaptive_counts and adaptive_counts[-1] > unique_direction_count:
+        maximum_elite_count = (
+            self.population_size // 2
+            if self.deduplicate_antithetic_elites
+            else self.population_size
+        )
+        if adaptive_counts and adaptive_counts[-1] > maximum_elite_count:
             raise ValueError(
-                "adaptive elite counts must not exceed antithetic "
-                "direction count"
+                "adaptive elite counts exceed the selectable population"
             )
         if self.adaptive_commit_scale is not None:
             if not adaptive_counts:
@@ -325,10 +329,10 @@ class ShortcutCreditExperimentConfig:
         if (
             self.outer_update_rule == "elite_centroid"
             and not adaptive_counts
-            and self.elite_count > unique_direction_count
+            and self.elite_count > maximum_elite_count
         ):
             raise ValueError(
-                "elite_count must not exceed antithetic direction count"
+                "elite_count exceeds the selectable population"
             )
         if not 0 < self.elite_interpolation <= 1:
             raise ValueError("elite_interpolation must be in (0, 1]")
@@ -1462,6 +1466,19 @@ def top_unique_antithetic_indices(
     return 2 * elite_directions + preferred_sign_indices[elite_directions]
 
 
+def top_elite_indices(
+    fitnesses: Tensor,
+    elite_count: int,
+    *,
+    deduplicate_antithetic: bool,
+) -> Tensor:
+    if deduplicate_antithetic:
+        return top_unique_antithetic_indices(fitnesses, elite_count)
+    if fitnesses.ndim != 1 or not 1 <= elite_count <= fitnesses.numel():
+        raise ValueError("elite_count must select from the population")
+    return fitnesses.topk(elite_count).indices
+
+
 @torch.no_grad()
 def elite_centroid_update(
     module: BackwardRule,
@@ -1472,6 +1489,7 @@ def elite_centroid_update(
     elite_count: int,
     interpolation: float,
     commit_scale: float | None = None,
+    deduplicate_antithetic: bool = False,
 ) -> Tensor:
     """Move the centre toward the mean of the highest-fitness candidates."""
 
@@ -1484,9 +1502,10 @@ def elite_centroid_update(
         if commit_scale <= 0:
             raise ValueError("commit scale must be positive")
         step_scale = commit_scale
-    elite_indices = top_unique_antithetic_indices(
+    elite_indices = top_elite_indices(
         fitnesses,
         elite_count,
+        deduplicate_antithetic=deduplicate_antithetic,
     )
     for name, parameter in module.named_parameters():
         centroid_delta = torch.zeros_like(parameter)
@@ -1513,6 +1532,7 @@ def elite_centroid_parameters(
     elite_count: int,
     interpolation: float,
     commit_scale: float | None = None,
+    deduplicate_antithetic: bool = False,
 ) -> tuple[dict[str, Tensor], Tensor]:
     """Build one elite proposal without changing the supplied centre."""
 
@@ -1525,6 +1545,7 @@ def elite_centroid_parameters(
         elite_count=elite_count,
         interpolation=interpolation,
         commit_scale=commit_scale,
+        deduplicate_antithetic=deduplicate_antithetic,
     )
     if isinstance(module, AttentionRoutingRule):
         module.project_parameters_()
@@ -1696,6 +1717,9 @@ def select_adaptive_elite_proposal(
             sigma=sigma,
             elite_count=elite_count,
             interpolation=config.elite_interpolation,
+            deduplicate_antithetic=(
+                config.deduplicate_antithetic_elites
+            ),
         )
         proposals.append(parameters)
         indices_by_count[elite_count] = indices
@@ -1932,6 +1956,9 @@ def select_adaptive_commit_scale_proposal(
             elite_count=elite_count,
             interpolation=config.elite_interpolation,
             commit_scale=proposal_scale,
+            deduplicate_antithetic=(
+                config.deduplicate_antithetic_elites
+            ),
         )
         proposals.append(parameters)
         indices_by_count[elite_count] = indices
@@ -3860,6 +3887,9 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 sigma=generation_sigma,
                 elite_count=config.elite_count,
                 interpolation=config.elite_interpolation,
+                deduplicate_antithetic=(
+                    config.deduplicate_antithetic_elites
+                ),
             )
         if isinstance(center_rule, AttentionRoutingRule):
             center_rule.project_parameters_()
@@ -4795,6 +4825,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "comma-separated nested elite counts selected automatically on "
             "matched independent acceptance trajectories"
+        ),
+    )
+    parser.add_argument(
+        "--deduplicate-antithetic-elites",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "allow at most one sign from each antithetic direction in an "
+            "elite centroid; disabled by default to reproduce the stable "
+            "historical controller"
         ),
     )
     parser.add_argument(

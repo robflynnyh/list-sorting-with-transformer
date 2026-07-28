@@ -59,6 +59,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     save_checkpoint,
     shard_candidate_specs,
     strip_shortcut_only_metrics,
+    top_elite_indices,
     top_unique_antithetic_indices,
     train_forward_trajectory,
     trajectory_summary,
@@ -667,6 +668,7 @@ def test_elite_centroid_update_averages_selected_candidates() -> None:
         sigma=0.2,
         elite_count=2,
         interpolation=0.5,
+        deduplicate_antithetic=True,
     )
 
     assert elite_indices.tolist() == [0, 2]
@@ -704,6 +706,7 @@ def test_elite_centroid_parameters_can_decouple_commit_scale() -> None:
         elite_count=2,
         interpolation=0.9,
         commit_scale=0.05,
+        deduplicate_antithetic=True,
     )
     second_proposal, second_indices = elite_centroid_parameters(
         rule,
@@ -714,6 +717,7 @@ def test_elite_centroid_parameters_can_decouple_commit_scale() -> None:
         elite_count=2,
         interpolation=0.1,
         commit_scale=0.05,
+        deduplicate_antithetic=True,
     )
 
     assert elite_indices.tolist() == [0, 2]
@@ -769,6 +773,19 @@ def test_elite_selection_keeps_only_best_sign_per_direction() -> None:
 
     assert indices.tolist() == [1, 2, 5]
     assert len({index // 2 for index in indices.tolist()}) == 3
+
+
+def test_default_elite_selection_matches_historical_population_topk() -> None:
+    fitnesses = torch.tensor([4.0, 3.5, 3.0, 1.0])
+
+    indices = top_elite_indices(
+        fitnesses,
+        elite_count=2,
+        deduplicate_antithetic=False,
+    )
+
+    assert indices.tolist() == [0, 1]
+    assert not ShortcutCreditExperimentConfig().deduplicate_antithetic_elites
 
 
 def test_elite_selection_rejects_more_elites_than_directions() -> None:

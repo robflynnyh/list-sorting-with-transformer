@@ -3022,31 +3022,30 @@ opt-in ablation.
 
 ### Antithetic-pair-aware elite selection
 
-Elite selection now permits at most one sign from each antithetic direction.
-For every `+d/-d` pair, it retains the fitter sign, ranks those per-direction
-winners, and builds nested elite-1/2/4/8 proposals from distinct directions.
-Previously both signs could occupy elite slots and cancel in the centroid;
-this occurred in 6 of 70 generations of the successful signed random-P64 run.
+Antithetic-pair-aware selection is an opt-in ablation. For every `+d/-d` pair,
+it retains the fitter sign, ranks those per-direction winners, and builds
+nested elite-1/2/4/8 proposals from distinct directions. The canonical
+historical controller instead ranks the full population, so both signs can
+occupy elite slots and partially cancel in the centroid; this occurred in 6
+of its 70 generations.
 
 Candidate sampling, all 64 full trajectory evaluations, strict matched
 acceptance, sigma control, and the horizon curriculum are unchanged.
 The reproducible three-GPU launcher is
 [`launch_random_deduplicated_controller.sh`](launch_random_deduplicated_controller.sh).
 
-The initial deduplicated run showed that balanced sigma was itself a
-regression on this task. Generations 0--2 exactly reproduced the successful
-historical run, but the first rejection left sigma at `0.168` instead of
-`0.105`; performance diverged immediately afterward. It was stopped after
-generation 35, having never exceeded `34.4%` held-out minimum-mode accuracy.
+The initial deduplicated run was confounded by a different sigma controller.
+Generations 0--2 exactly reproduced the successful historical run, but the
+first rejection left sigma at `0.168` instead of `0.105`; performance diverged
+immediately afterward. It was stopped after generation 35, having never
+exceeded `34.4%` held-out minimum-mode accuracy.
 
-For the clean deduplication ablation, the dedicated launcher therefore
-explicitly restores the proven coarse-to-fine sigma policy: one rejection
-multiplies sigma by `0.5`, and three consecutive accepted updates multiply it
-by `2`. Although this policy reaches the configured floor, the historical run
-continued accepting small local updates there and exceeded `90%` accuracy.
-The shared balanced policy remains available for separate experiments; the
-new `annealed-sigma` run changes only antithetic elite deduplication relative
-to the successful signed random-P64 setup.
+The canonical controller and the dedicated deduplication launcher now both
+use the proven coarse-to-fine sigma policy: one rejection multiplies sigma by
+`0.5`, and three consecutive accepted updates multiply it by `2`. The
+canonical default uses ordinary population top-k, while the launcher adds only
+`--deduplicate-antithetic-elites`. This makes the next run a clean
+deduplication comparison against W&B run `abrcnn6i`.
 
 ### Decoupled candidate search and commit scale
 
@@ -3071,3 +3070,9 @@ selection plus confirmation took `19.07s`, and the complete generation took
 `60.31s`. The matched historical controller took `49.69s`, so measured runtime
 increased by 21.4%. The reproducible launcher is
 [`launch_commit_scale_search_controller.sh`](launch_commit_scale_search_controller.sh).
+
+The longer commit-scale run reached `95.3%` fresh held-out minimum-mode
+accuracy by generation 33, but was visibly less stable than the canonical
+controller and accepted fewer updates. It was stopped rather than promoted to
+the default. Commit-scale search remains an explicit ablation and is not part
+of the clean antithetic-deduplication comparison.

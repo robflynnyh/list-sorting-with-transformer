@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-RUN_NAME="${RUN_NAME:-attention-router-performance-curriculum-h160-p64-seed7}"
+RUN_NAME="${RUN_NAME:-attention-router-signed-credit-strict-default-h160-p64-seed7}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${ROOT}/artifacts/learned_backward_shortcuts}"
 GPU_DEVICES="${GPU_DEVICES:-cuda:0,cuda:1,cuda:2}"
-ROUTING_CREDIT_MODE="${ROUTING_CREDIT_MODE:-suppress_renorm}"
+ROUTING_CREDIT_MODE="${ROUTING_CREDIT_MODE:-signed}"
 PYTHON_BIN="${PYTHON_BIN:-/store/store4/software/bin/anaconda3/envs/flash_attn_pytorch2/bin/python}"
 
 cd "${ROOT}"
@@ -41,9 +41,9 @@ exec "${PYTHON_BIN}" -u -m list_sorting_transformer.shortcut_credit_experiment \
   --elite-interpolation 0.5 \
   --elite-backtracking \
   --adaptive-elite-counts 1,2,4,8 \
-  --elite-rejection-sigma-decay 0.8 \
+  --elite-rejection-sigma-decay 0.5 \
   --elite-min-sigma 0.00328125 \
-  --elite-acceptance-patience 1 \
+  --elite-acceptance-patience 3 \
   --elite-acceptance-sigma-growth 2 \
   --elite-acceptance-trajectories 2 \
   --candidate-ranking-trajectories 1 \
