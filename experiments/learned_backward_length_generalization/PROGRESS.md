@@ -152,3 +152,11 @@ A two-step GPU smoke exercised the full 24-step differentiable Adam path,
 length-50 fitness, length-400 evaluation, and checkpoint persistence. The
 checkpoint retained exactly 24 queued batches and reported
 `train/lookahead_steps=24`.
+
+The full 10,000-step run is tracked at
+<https://wandb.ai/wobrob101/list-sorting-maml/runs/y989nxya>. At the first
+evaluation (step 100), router MAML and the matched ordinary reference both
+reached 11.7% length-400 accuracy. The router had begun changing the backward
+rule, with 31.7% of eligible attention-gradient edges below a multiplier of
+0.99. Training was proceeding at approximately 1.07 persistent updates per
+second.
