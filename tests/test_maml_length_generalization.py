@@ -329,6 +329,7 @@ def test_router_maml_mode_persists_model_and_router_checkpoints(
             router_d_model=16,
             router_heads=1,
             router_meta_updates_per_step=2,
+            router_fresh_short_batches=True,
             log_interval=1,
             eval_interval=1,
             checkpoint_interval=1,
@@ -341,6 +342,7 @@ def test_router_maml_mode_persists_model_and_router_checkpoints(
     )
 
     assert checkpoint["router"] is not None
+    assert "router_train_generator_state" in checkpoint
     assert checkpoint["step"] == 1
     assert {
         int(state["step"])
@@ -352,4 +354,5 @@ def test_router_maml_mode_persists_model_and_router_checkpoints(
     } == {1}
     assert row["gradient/meta_parameter_count"] > 0
     assert row["train/router_meta_updates_per_step"] == 2
+    assert row["train/router_fresh_short_batches"] == 1
     assert "router/backward_multiplier_mean" in row

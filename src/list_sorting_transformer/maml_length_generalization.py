@@ -52,6 +52,7 @@ class MAMLLengthConfig:
     router_d_model: int = 128
     router_heads: int = 4
     router_meta_updates_per_step: int = 1
+    router_fresh_short_batches: bool = False
     router_credit_mode: str = "suppress_renorm"
     router_initial_gate: float = 1e-3
     router_minimum_gate: float = 1e-6
@@ -478,6 +479,7 @@ def save_checkpoint(
     meta_optimizer: torch.optim.Optimizer,
     ordinary_optimizer: torch.optim.Optimizer,
     train_generator: torch.Generator,
+    router_train_generator: torch.Generator,
     step: int,
 ) -> None:
     torch.save(
@@ -489,6 +491,9 @@ def save_checkpoint(
             "meta_optimizer": meta_optimizer.state_dict(),
             "ordinary_optimizer": ordinary_optimizer.state_dict(),
             "train_generator_state": train_generator.get_state(),
+            "router_train_generator_state": (
+                router_train_generator.get_state()
+            ),
             "step": step,
         },
         path,
@@ -533,6 +538,9 @@ def run(config: MAMLLengthConfig) -> Path:
         lr=config.ordinary_learning_rate,
     )
     train_generator = torch.Generator().manual_seed(config.seed + 1_000)
+    router_train_generator = torch.Generator().manual_seed(
+        config.seed + 3_000
+    )
     start_step = 1
     if config.resume is not None:
         checkpoint = torch.load(config.resume, map_location=device)
@@ -546,6 +554,10 @@ def run(config: MAMLLengthConfig) -> Path:
         meta_optimizer.load_state_dict(checkpoint["meta_optimizer"])
         ordinary_optimizer.load_state_dict(checkpoint["ordinary_optimizer"])
         train_generator.set_state(checkpoint["train_generator_state"])
+        if "router_train_generator_state" in checkpoint:
+            router_train_generator.set_state(
+                checkpoint["router_train_generator_state"]
+            )
         start_step = int(checkpoint["step"]) + 1
 
     meta_batches = (
@@ -632,6 +644,8 @@ def run(config: MAMLLengthConfig) -> Path:
             else 1
         )
         meta_batch = None
+        meta_short_batch = short_batch
+        meta_short_length = length
         meta_loss_before = None
         objective = None
         meta_gradient_norm = None
@@ -639,6 +653,22 @@ def run(config: MAMLLengthConfig) -> Path:
         for meta_update_index in range(
             meta_update_count if meta_batches else 0
         ):
+            if router is not None and config.router_fresh_short_batches:
+                meta_short_length = int(
+                    torch.randint(
+                        config.min_length,
+                        config.max_length + 1,
+                        (),
+                        generator=router_train_generator,
+                    )
+                )
+                meta_short_batch = make_clean_pointer_batch(
+                    config.batch_size,
+                    meta_short_length,
+                    generator=router_train_generator,
+                    vocabulary=vocabulary,
+                    device=device,
+                )
             meta_batch = meta_batches[
                 (
                     (step - 1) * meta_update_count
@@ -658,14 +688,14 @@ def run(config: MAMLLengthConfig) -> Path:
                     one_step_router_maml_objective(
                         model,
                         router,
-                        short_batch,
+                        meta_short_batch,
                         meta_batch,
                         inner_learning_rate=config.inner_learning_rate,
                     )
                     if router is not None
                     else one_step_maml_objective(
                         model,
-                        short_batch,
+                        meta_short_batch,
                         meta_batch,
                         inner_learning_rate=config.inner_learning_rate,
                     )
@@ -766,6 +796,12 @@ def run(config: MAMLLengthConfig) -> Path:
                 summary["train/router_meta_updates_per_step"] = float(
                     meta_update_count
                 )
+                summary["train/meta_short_length"] = float(
+                    meta_short_length
+                )
+                summary["train/router_fresh_short_batches"] = float(
+                    config.router_fresh_short_batches
+                )
                 summary["gradient/meta_norm_mean"] = (
                     sum(meta_gradient_norms) / len(meta_gradient_norms)
                 )
@@ -803,6 +839,7 @@ def run(config: MAMLLengthConfig) -> Path:
                 meta_optimizer=meta_optimizer,
                 ordinary_optimizer=ordinary_optimizer,
                 train_generator=train_generator,
+                router_train_generator=router_train_generator,
                 step=step,
             )
             save_checkpoint(
@@ -813,6 +850,7 @@ def run(config: MAMLLengthConfig) -> Path:
                 meta_optimizer=meta_optimizer,
                 ordinary_optimizer=ordinary_optimizer,
                 train_generator=train_generator,
+                router_train_generator=router_train_generator,
                 step=step,
             )
 

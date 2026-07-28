@@ -179,3 +179,18 @@ The next ablation performs four router-only meta-updates while the task model
 is fixed, followed by one persistent task-model update. All four hypothetical
 models are discarded. This gives the router four optimization opportunities
 per task-model update without changing the persistent-update semantics.
+
+The first 4:1 attempt reused one short batch for all four router updates. It
+collapsed to 3.9% length-400 accuracy by step 4500 and was stopped. The revised
+ablation uses four independent router-training batches, then a fifth independent
+batch for the persistent task-model update. Separate deterministic generators
+keep the persistent task-model batch stream matched to the ordinary baseline.
+The persistent task-model learning rate is also reduced from `3e-4` to `1e-4`;
+a new ordinary baseline at `1e-4` provides the matched comparison.
+
+The matched `1e-4` ordinary run completed at 80.5% length-50 accuracy and
+13.3% length-400 accuracy:
+<https://wandb.ai/wobrob101/list-sorting-maml/runs/a70966wq>. The revised 4:1
+fresh-batch implementation passes the full 334-test suite and a
+production-shape GPU smoke at approximately 5.8 persistent model updates per
+second.
