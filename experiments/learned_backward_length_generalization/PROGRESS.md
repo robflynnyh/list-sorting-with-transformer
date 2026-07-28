@@ -170,8 +170,11 @@ before clipping to 1.0, so the model did not receive updates of that magnitude,
 but the persistent clipping made updates behave mostly as normalized
 directions.
 
-The failure was not merely an excessive router learning rate. At step 200 the
-router improved length-50 accuracy to 90.6%, versus 87.5% for ordinary Adam,
-while length-400 accuracy was already worse at 12.5% versus 14.1%. The
-length-50 meta objective therefore did not reliably select for the desired
-length-400 behavior.
+The run does not establish that length-50 fitness is misaligned with
+length-400 generalization because it never produced a sustained length-50
+advantage. At step 200 the router briefly reached 90.6% length-50 accuracy
+versus 87.5% for ordinary Adam, but it was below ordinary at steps 100, 300,
+400, and 600 and only slightly above at step 500. The supported diagnosis is
+an optimization failure: large raw meta gradients were clipped on nearly every
+step while the router converged toward indiscriminate suppression. Objective
+alignment remains unresolved.
