@@ -3029,6 +3029,21 @@ Previously both signs could occupy elite slots and cancel in the centroid;
 this occurred in 6 of 70 generations of the successful signed random-P64 run.
 
 Candidate sampling, all 64 full trajectory evaluations, strict matched
-acceptance, balanced sigma control, and the horizon curriculum are unchanged.
+acceptance, sigma control, and the horizon curriculum are unchanged.
 The reproducible three-GPU launcher is
 [`launch_random_deduplicated_controller.sh`](launch_random_deduplicated_controller.sh).
+
+The initial deduplicated run showed that balanced sigma was itself a
+regression on this task. Generations 0--2 exactly reproduced the successful
+historical run, but the first rejection left sigma at `0.168` instead of
+`0.105`; performance diverged immediately afterward. It was stopped after
+generation 35, having never exceeded `34.4%` held-out minimum-mode accuracy.
+
+For the clean deduplication ablation, the dedicated launcher therefore
+explicitly restores the proven coarse-to-fine sigma policy: one rejection
+multiplies sigma by `0.5`, and three consecutive accepted updates multiply it
+by `2`. Although this policy reaches the configured floor, the historical run
+continued accepting small local updates there and exceeded `90%` accuracy.
+The shared balanced policy remains available for separate experiments; the
+new `annealed-sigma` run changes only antithetic elite deduplication relative
+to the successful signed random-P64 setup.
