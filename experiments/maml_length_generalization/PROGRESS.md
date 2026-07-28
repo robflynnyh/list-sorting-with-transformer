@@ -143,3 +143,18 @@ the long-task loss produces a finite nonzero router gradient through the
 hypothetical model update, and both persistent states are checkpointed. A
 two-step production-shape GPU smoke ran at approximately 11-15 iterations per
 second. The full repository suite passes with 333 tests.
+
+### Active router-MAML run
+
+- W&B:
+  <https://wandb.ai/wobrob101/list-sorting-maml/runs/ln82yczj>
+- Service: `list-sorting-router-maml.service`
+- `with-gpu` ticket: `80574c9d`
+- Output:
+  `artifacts/maml_length_generalization/pointer-next-router-maml-meta40-60-70x2-80-90-100-heldout400-seed7`
+
+At step 200, short-task accuracy was 100%, length-50 accuracy was 84.4%, and
+length-400 accuracy was 12.5%. The matched ordinary reference was at 87.5% and
+14.1%, respectively. The router's mean backward multiplier was 0.928 and its
+meta-gradient norm remained nonzero. The live rate was approximately 14.7
+iterations per second.
