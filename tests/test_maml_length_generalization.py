@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
+from pathlib import Path
 
 import torch
 
 from list_sorting_transformer.maml_length_generalization import (
     MAMLLengthConfig,
+    make_meta_batches,
     make_model,
     one_step_maml_objective,
+    parse_meta_lengths,
+    run,
 )
 from list_sorting_transformer.shortcut_credit import make_clean_pointer_batch
 from list_sorting_transformer.tokens import PointerNextVocabulary
@@ -18,7 +23,7 @@ def test_one_step_maml_keeps_virtual_weights_temporary() -> None:
         steps=1,
         batch_size=4,
         max_length=4,
-        meta_length=6,
+        meta_lengths="6",
         meta_examples=4,
         meta_batch_size=4,
         heldout_length=8,
@@ -64,7 +69,7 @@ def test_maml_meta_gradient_includes_the_virtual_short_step() -> None:
         steps=1,
         batch_size=4,
         max_length=4,
-        meta_length=6,
+        meta_lengths="6",
         meta_examples=4,
         meta_batch_size=4,
         heldout_length=8,
@@ -114,3 +119,73 @@ def test_maml_meta_gradient_includes_the_virtual_short_step() -> None:
         for maml, direct in zip(maml_gradients, direct_gradients)
     )
     assert difference > 1e-8
+
+
+def test_meta_batches_preserve_repeated_length_weighting() -> None:
+    config = MAMLLengthConfig(
+        steps=1,
+        batch_size=4,
+        max_length=4,
+        meta_lengths="6,7,7,8",
+        meta_examples=4,
+        meta_batch_size=2,
+        heldout_length=10,
+        eval_examples=4,
+        eval_batch_size=4,
+        d_model=16,
+        layers=1,
+        heads=1,
+    )
+    batches = make_meta_batches(
+        config,
+        vocabulary=PointerNextVocabulary("numbers", 10),
+        device=torch.device("cpu"),
+    )
+
+    assert parse_meta_lengths(config.meta_lengths) == (6, 7, 7, 8)
+    assert [batch.length for batch in batches] == [
+        6,
+        7,
+        7,
+        8,
+        6,
+        7,
+        7,
+        8,
+    ]
+
+
+def test_ordinary_mode_reports_length_50_and_heldout(
+    tmp_path: Path,
+) -> None:
+    output_dir = run(
+        MAMLLengthConfig(
+            run_name="ordinary-smoke",
+            output_dir=str(tmp_path),
+            method="ordinary",
+            steps=1,
+            batch_size=4,
+            max_length=4,
+            meta_lengths="6",
+            meta_examples=4,
+            meta_batch_size=4,
+            heldout_length=8,
+            eval_examples=4,
+            eval_batch_size=4,
+            d_model=16,
+            layers=1,
+            heads=1,
+            log_interval=1,
+            eval_interval=1,
+            checkpoint_interval=1,
+            device="cpu",
+        )
+    )
+    rows = [
+        json.loads(line)
+        for line in (output_dir / "metrics.jsonl").read_text().splitlines()
+    ]
+
+    assert "eval/length_50/accuracy" in rows[-1]
+    assert "eval/length_8/accuracy" in rows[-1]
+    assert not any(key.startswith("train/meta_") for key in rows[-1])

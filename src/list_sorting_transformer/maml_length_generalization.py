@@ -28,13 +28,14 @@ from .tokens import PointerNextVocabulary
 
 @dataclass(frozen=True)
 class MAMLLengthConfig:
-    run_name: str = "pointer-next-maml-length20-meta50-heldout400-seed7"
+    run_name: str = "pointer-next-maml-meta40-100-heldout400-seed7"
     output_dir: str = "artifacts/maml_length_generalization"
+    method: str = "maml"
     steps: int = 10_000
     batch_size: int = 64
     min_length: int = 2
     max_length: int = 20
-    meta_length: int = 50
+    meta_lengths: str = "40,60,70,70,80,90,100"
     meta_examples: int = 256
     meta_batch_size: int = 64
     heldout_length: int = 400
@@ -55,6 +56,7 @@ class MAMLLengthConfig:
     wandb: bool = False
     wandb_project: str = "list-sorting-maml"
     wandb_entity: str | None = None
+    wandb_group: str | None = None
     resume: str | None = None
 
     def __post_init__(self) -> None:
@@ -63,7 +65,6 @@ class MAMLLengthConfig:
             self.batch_size,
             self.min_length,
             self.max_length,
-            self.meta_length,
             self.meta_examples,
             self.meta_batch_size,
             self.heldout_length,
@@ -80,10 +81,13 @@ class MAMLLengthConfig:
             raise ValueError("integer configuration values must be positive")
         if not 2 <= self.min_length <= self.max_length:
             raise ValueError("invalid training length range")
-        if self.meta_length <= self.max_length:
-            raise ValueError("meta length must exceed the training range")
-        if self.heldout_length <= self.meta_length:
-            raise ValueError("held-out length must exceed the meta length")
+        if self.method not in {"maml", "ordinary"}:
+            raise ValueError("method must be maml or ordinary")
+        meta_lengths = parse_meta_lengths(self.meta_lengths)
+        if meta_lengths[0] <= self.max_length:
+            raise ValueError("meta lengths must exceed the training range")
+        if self.heldout_length <= meta_lengths[-1]:
+            raise ValueError("held-out length must exceed all meta lengths")
         if self.meta_examples % self.meta_batch_size:
             raise ValueError(
                 "meta_examples must be divisible by meta_batch_size"
@@ -97,6 +101,22 @@ class MAMLLengthConfig:
             self.gradient_clip,
         ) <= 0:
             raise ValueError("learning rates and gradient clip must be positive")
+
+
+def parse_meta_lengths(value: str) -> tuple[int, ...]:
+    try:
+        lengths = tuple(int(item.strip()) for item in value.split(","))
+    except ValueError as error:
+        raise ValueError("meta lengths must be integers") from error
+    if (
+        not lengths
+        or any(length < 2 for length in lengths)
+        or tuple(sorted(lengths)) != lengths
+    ):
+        raise ValueError(
+            "meta lengths must be nondecreasing integers of at least two"
+        )
+    return lengths
 
 
 @dataclass(frozen=True)
@@ -130,6 +150,36 @@ def make_fixed_batches(
         )
         remaining -= current_size
     return tuple(batches)
+
+
+def make_meta_batches(
+    config: MAMLLengthConfig,
+    *,
+    vocabulary: PointerNextVocabulary,
+    device: torch.device,
+) -> tuple[ShortcutBatch, ...]:
+    """Create fixed per-length sets and interleave their minibatches."""
+
+    generator = torch.Generator().manual_seed(config.seed + 10_000)
+    groups = tuple(
+        make_fixed_batches(
+            config.meta_examples,
+            batch_size=config.meta_batch_size,
+            length=length,
+            vocabulary=vocabulary,
+            generator=generator,
+            device=device,
+        )
+        for length in parse_meta_lengths(config.meta_lengths)
+    )
+    batches_per_length = len(groups[0])
+    if any(len(group) != batches_per_length for group in groups):
+        raise RuntimeError("meta lengths produced unequal batch counts")
+    return tuple(
+        groups[length_index][batch_index]
+        for batch_index in range(batches_per_length)
+        for length_index in range(len(groups))
+    )
 
 
 def make_model(
@@ -249,6 +299,7 @@ def initialize_wandb(config: MAMLLengthConfig) -> Any | None:
     return wandb.init(
         project=config.wandb_project,
         entity=config.wandb_entity,
+        group=config.wandb_group,
         name=config.run_name,
         config=asdict(config),
     )
@@ -310,13 +361,26 @@ def run(config: MAMLLengthConfig) -> Path:
         train_generator.set_state(checkpoint["train_generator_state"])
         start_step = int(checkpoint["step"]) + 1
 
-    meta_batches = make_fixed_batches(
-        config.meta_examples,
-        batch_size=config.meta_batch_size,
-        length=config.meta_length,
-        vocabulary=vocabulary,
-        generator=torch.Generator().manual_seed(config.seed + 10_000),
-        device=device,
+    meta_batches = (
+        make_meta_batches(
+            config,
+            vocabulary=vocabulary,
+            device=device,
+        )
+        if config.method == "maml"
+        else ()
+    )
+    meta_lengths = parse_meta_lengths(config.meta_lengths)
+    evaluation_lengths = tuple(
+        sorted(
+            {
+                config.min_length,
+                config.max_length,
+                *meta_lengths,
+                50,
+                config.heldout_length,
+            }
+        )
     )
     evaluation_batches = {
         length: make_fixed_batches(
@@ -329,12 +393,7 @@ def run(config: MAMLLengthConfig) -> Path:
             ),
             device=device,
         )
-        for length in (
-            config.min_length,
-            config.max_length,
-            config.meta_length,
-            config.heldout_length,
-        )
+        for length in evaluation_lengths
     }
     wandb_run = initialize_wandb(config)
     if wandb_run is not None:
@@ -371,32 +430,39 @@ def run(config: MAMLLengthConfig) -> Path:
             vocabulary=vocabulary,
             device=device,
         )
-        meta_batch = meta_batches[(step - 1) % len(meta_batches)]
+        meta_batch = (
+            meta_batches[(step - 1) % len(meta_batches)]
+            if meta_batches
+            else None
+        )
         report_step = (
             step % config.log_interval == 0
             or step % config.eval_interval == 0
             or step == config.steps
         )
         meta_loss_before = None
-        if report_step:
+        if report_step and meta_batch is not None:
             with torch.no_grad():
                 meta_loss_before = float(batch_loss(model, meta_batch))
 
-        meta_optimizer.zero_grad(set_to_none=True)
-        ordinary_optimizer.zero_grad(set_to_none=True)
-        with second_order_attention_context(device):
-            objective = one_step_maml_objective(
-                model,
-                short_batch,
-                meta_batch,
-                inner_learning_rate=config.inner_learning_rate,
+        objective = None
+        meta_gradient_norm = None
+        if meta_batch is not None:
+            meta_optimizer.zero_grad(set_to_none=True)
+            ordinary_optimizer.zero_grad(set_to_none=True)
+            with second_order_attention_context(device):
+                objective = one_step_maml_objective(
+                    model,
+                    short_batch,
+                    meta_batch,
+                    inner_learning_rate=config.inner_learning_rate,
+                )
+                objective.meta_loss.backward()
+            meta_gradient_norm = torch.nn.utils.clip_grad_norm_(
+                parameters,
+                config.gradient_clip,
             )
-            objective.meta_loss.backward()
-        meta_gradient_norm = torch.nn.utils.clip_grad_norm_(
-            parameters,
-            config.gradient_clip,
-        )
-        meta_optimizer.step()
+            meta_optimizer.step()
 
         ordinary_optimizer.zero_grad(set_to_none=True)
         ordinary_logits = model(short_batch.input_ids)[:, -1]
@@ -422,25 +488,33 @@ def run(config: MAMLLengthConfig) -> Path:
             summary = {
                 "step": float(step),
                 "train/length": float(length),
-                "train/virtual_short_loss": float(
-                    objective.short_loss.detach()
-                ),
-                "train/meta_length50_loss_after_virtual": float(
-                    objective.meta_loss.detach()
-                ),
-                "train/meta_length50_accuracy_after_virtual": float(
-                    objective.meta_accuracy.detach()
-                ),
                 "train/ordinary_short_loss": float(ordinary_loss.detach()),
                 "train/ordinary_short_accuracy": float(
                     ordinary_accuracy.detach()
                 ),
-                "gradient/meta_norm": float(meta_gradient_norm),
                 "gradient/ordinary_norm": float(ordinary_gradient_norm),
                 "timing/steps_per_second": step / max(elapsed, 1e-9),
             }
-            if meta_loss_before is not None:
-                summary["train/meta_length50_loss_before_virtual"] = (
+            if objective is not None:
+                if meta_batch is None or meta_gradient_norm is None:
+                    raise RuntimeError("MAML reporting state is incomplete")
+                summary.update(
+                    {
+                        "train/meta_batch_length": float(meta_batch.length),
+                        "train/virtual_short_loss": float(
+                            objective.short_loss.detach()
+                        ),
+                        "train/meta_loss_after_virtual": float(
+                            objective.meta_loss.detach()
+                        ),
+                        "train/meta_accuracy_after_virtual": float(
+                            objective.meta_accuracy.detach()
+                        ),
+                        "gradient/meta_norm": float(meta_gradient_norm),
+                    }
+                )
+            if meta_loss_before is not None and objective is not None:
+                summary["train/meta_loss_before_virtual"] = (
                     meta_loss_before
                 )
                 summary["train/virtual_step_meta_loss_change"] = (
@@ -455,9 +529,9 @@ def run(config: MAMLLengthConfig) -> Path:
                     )
                 )
                 print(
+                    f"method={config.method} "
                     f"step={step} "
                     f"short_loss={float(ordinary_loss.detach()):.4f} "
-                    f"meta_loss={float(objective.meta_loss.detach()):.4f} "
                     f"length400_acc="
                     f"{summary[f'eval/length_{config.heldout_length}/accuracy']:.4f}",
                     flush=True,

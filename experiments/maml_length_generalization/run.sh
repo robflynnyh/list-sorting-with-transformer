@@ -2,9 +2,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-RUN_NAME="${RUN_NAME:-pointer-next-maml-length20-meta50-heldout400-seed7}"
+METHOD="${METHOD:-maml}"
+META_LENGTHS="${META_LENGTHS:-40,60,70,70,80,90,100}"
+RUN_NAME="${RUN_NAME:-pointer-next-${METHOD}-meta40-100-heldout400-seed7}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${ROOT}/artifacts/maml_length_generalization}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
+WANDB_GROUP="${WANDB_GROUP:-meta40-100-vs-ordinary-seed7}"
 
 cd "${ROOT}"
 export PYTHONPATH="${ROOT}/src:${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
@@ -13,11 +16,12 @@ export WANDB__SERVICE_WAIT="${WANDB__SERVICE_WAIT:-300}"
 exec "${PYTHON_BIN}" -m list_sorting_transformer.maml_length_generalization \
   --run-name "${RUN_NAME}" \
   --output-dir "${OUTPUT_ROOT}" \
+  --method "${METHOD}" \
   --steps 10000 \
   --batch-size 64 \
   --min-length 2 \
   --max-length 20 \
-  --meta-length 50 \
+  --meta-lengths "${META_LENGTHS}" \
   --meta-examples 256 \
   --meta-batch-size 64 \
   --heldout-length 400 \
@@ -38,4 +42,5 @@ exec "${PYTHON_BIN}" -m list_sorting_transformer.maml_length_generalization \
   --wandb \
   --wandb-project list-sorting-maml \
   --wandb-entity wobrob101 \
+  --wandb-group "${WANDB_GROUP}" \
   "$@"
