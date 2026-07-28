@@ -78,3 +78,11 @@ The signed run is tracked at
 100 it reached 27.0% masked, 24.6% incorrect, and 52.0% correct-hint held-out
 accuracy, slightly below suppression at the same step. It had not yet used
 negative multipliers: the reversed-edge fraction was zero.
+
+The signed ablation was stopped at step 900 after it became clearly worse. At
+that matched checkpoint, signed credit reached 20.3% masked and 0% incorrect-
+hint accuracy, compared with 98.8% and 91.4% for suppression-only credit. The
+signed router reversed roughly 4-7% of routed gradients from step 300 onward,
+while its held-out loss increased from 5.79 at step 300 to 7.51 at step 900.
+This provides no evidence that gradient reversal helps this task; the
+suppression-only rule remains the working setup.
