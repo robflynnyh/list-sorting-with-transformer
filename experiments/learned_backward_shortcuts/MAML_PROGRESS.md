@@ -72,3 +72,9 @@ and 100% correct-hint held-out accuracy by step 500:
 <https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/74p2kcpy>.
 A matched signed-credit run will test whether allowing attention-gradient
 multipliers in `[-1, 1]` improves on suppression in `[0, 1]`.
+
+The signed run is tracked at
+<https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/mwrdb7b6>. At step
+100 it reached 27.0% masked, 24.6% incorrect, and 52.0% correct-hint held-out
+accuracy, slightly below suppression at the same step. It had not yet used
+negative multipliers: the reversed-edge fraction was zero.
