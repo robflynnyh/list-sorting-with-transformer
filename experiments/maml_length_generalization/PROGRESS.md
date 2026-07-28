@@ -195,10 +195,13 @@ fresh-batch implementation passes the full 334-test suite and a
 production-shape GPU smoke at approximately 5.8 persistent model updates per
 second.
 
-The revised run is active at
+The revised run is recorded at
 <https://wandb.ai/wobrob101/list-sorting-maml/runs/0iubfeu8> through
 `list-sorting-signed-router-maml-fresh4-lr1e-4.service` and `with-gpu` ticket
 `a149ba87`. At step 500 it was at 13.3% length-50 and 11.7% length-400
 accuracy, compared with 84.4% and 12.5% for matched ordinary Adam. The router
-meta-gradient remained strong, so the run is continuing to test for delayed
-recovery.
+became unstable around steps 600-700: mean meta-gradient norms exceeded one,
+the signed multipliers approached full reversal, and short-task accuracy later
+fell to roughly 10-20%. The run was stopped at step 1200. Fresh batches removed
+the exact-batch reuse flaw but did not make four unrestricted signed router
+updates stable.
