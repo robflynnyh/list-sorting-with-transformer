@@ -142,6 +142,7 @@ def test_adaptive_controller_replays_identically(tmp_path: Path) -> None:
         outer_update_rule="elite_centroid",
         elite_backtracking=True,
         adaptive_elite_counts="1,2",
+        adaptive_commit_scale=0.05,
         elite_acceptance_trajectories=1,
         vectorized_population=True,
         vectorized_chunk_size=4,
@@ -172,6 +173,10 @@ def test_adaptive_controller_replays_identically(tmp_path: Path) -> None:
         "outer/update_accepted",
         "outer/adaptive_elite_1_acceptance_fitness",
         "outer/adaptive_elite_2_acceptance_fitness",
+        "outer/commit_scale",
+        "outer/next_commit_scale",
+        "outer/commit_search_0_scale",
+        "outer/commit_search_5_selection_fitness",
     ):
         assert first_metrics[key] == second_metrics[key]
 

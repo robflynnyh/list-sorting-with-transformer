@@ -85,6 +85,8 @@ class ShortcutCreditExperimentConfig:
     elite_acceptance_trajectories: int = 1
     candidate_ranking_trajectories: int = 1
     adaptive_elite_counts: str | None = None
+    adaptive_commit_scale: float | None = None
+    adaptive_commit_scale_multiplier: float = 2.0
     horizon_promotion_mode: str = "plateau"
     horizon_rejection_patience: int = 5
     horizon_probe_min_improvement: float = 0.0
@@ -246,6 +248,19 @@ class ShortcutCreditExperimentConfig:
                 "adaptive elite counts must not exceed antithetic "
                 "direction count"
             )
+        if self.adaptive_commit_scale is not None:
+            if not adaptive_counts:
+                raise ValueError(
+                    "adaptive commit-scale search requires adaptive elites"
+                )
+            if self.adaptive_commit_scale <= 0:
+                raise ValueError(
+                    "adaptive commit scale must be positive"
+                )
+            if self.adaptive_commit_scale_multiplier <= 1:
+                raise ValueError(
+                    "adaptive commit-scale multiplier must exceed 1"
+                )
         if halving_rungs:
             if not self.vectorized_population:
                 raise ValueError(
@@ -396,6 +411,7 @@ class PlateauState:
     best_ema_fitness: float = float("-inf")
     stale_generations: int = 0
     search_sigma: float | None = None
+    commit_scale: float | None = None
     consecutive_accepted_updates: int = 0
     consecutive_rejected_updates: int = 0
     horizon_scores: list[float] = field(default_factory=list)
@@ -424,6 +440,12 @@ class AdaptiveEliteResult:
     center_fitnesses: tuple[float, ...]
     selected_fitnesses: tuple[float, ...]
     mean_fitness_by_count: dict[int, float]
+    selected_commit_scale: float | None = None
+    selection_center_fitness: float | None = None
+    selection_selected_fitness: float | None = None
+    selection_fitness_by_proposal: tuple[
+        tuple[int, float, float], ...
+    ] = ()
 
 
 @dataclass(frozen=True)
@@ -473,6 +495,17 @@ def parse_adaptive_elite_counts(
             "adaptive elite counts must be unique increasing positives"
         )
     return counts
+
+
+def adaptive_commit_scale_grid(
+    center: float,
+    multiplier: float,
+) -> tuple[float, float, float]:
+    if center <= 0:
+        raise ValueError("commit-scale center must be positive")
+    if multiplier <= 1:
+        raise ValueError("commit-scale multiplier must exceed 1")
+    return (center / multiplier, center, center * multiplier)
 
 
 def parse_successive_halving_rungs(
@@ -1391,6 +1424,7 @@ def outer_update_hyperparameter_summary(
     *,
     sigma: float,
     paper_learning_rate: float,
+    commit_scale: float | None = None,
 ) -> dict[str, float]:
     if config.outer_update_rule == "paper_standardized":
         return {
@@ -1399,7 +1433,11 @@ def outer_update_hyperparameter_summary(
     return {
         "outer/elite_count": float(config.elite_count),
         "outer/elite_interpolation": config.elite_interpolation,
-        "outer/elite_step_scale": sigma * config.elite_interpolation,
+        "outer/elite_step_scale": (
+            sigma * config.elite_interpolation
+            if commit_scale is None
+            else commit_scale
+        ),
     }
 
 
@@ -1433,6 +1471,7 @@ def elite_centroid_update(
     sigma: float,
     elite_count: int,
     interpolation: float,
+    commit_scale: float | None = None,
 ) -> Tensor:
     """Move the centre toward the mean of the highest-fitness candidates."""
 
@@ -1440,6 +1479,11 @@ def elite_centroid_update(
         raise ValueError("fitnesses must contain one positive/negative pair")
     if not 0 < interpolation <= 1:
         raise ValueError("interpolation must be in (0, 1]")
+    step_scale = sigma * interpolation
+    if commit_scale is not None:
+        if commit_scale <= 0:
+            raise ValueError("commit scale must be positive")
+        step_scale = commit_scale
     elite_indices = top_unique_antithetic_indices(
         fitnesses,
         elite_count,
@@ -1450,10 +1494,10 @@ def elite_centroid_update(
             direction = directions[candidate_index // 2]
             sign = 1 if candidate_index % 2 == 0 else -1
             centroid_delta.add_(
-                sign * sigma * direction.tensors[name]
+                sign * direction.tensors[name]
             )
         parameter.add_(
-            interpolation * centroid_delta / elite_count
+            step_scale * centroid_delta / elite_count
         )
     return elite_indices
 
@@ -1468,6 +1512,7 @@ def elite_centroid_parameters(
     sigma: float,
     elite_count: int,
     interpolation: float,
+    commit_scale: float | None = None,
 ) -> tuple[dict[str, Tensor], Tensor]:
     """Build one elite proposal without changing the supplied centre."""
 
@@ -1479,6 +1524,7 @@ def elite_centroid_parameters(
         sigma=sigma,
         elite_count=elite_count,
         interpolation=interpolation,
+        commit_scale=commit_scale,
     )
     if isinstance(module, AttentionRoutingRule):
         module.project_parameters_()
@@ -1608,8 +1654,26 @@ def select_adaptive_elite_proposal(
     acceptance_fitness_batches: tuple[ShortcutBatch, ...],
     correct_batches: tuple[ShortcutBatch, ...],
     acceptance_devices: tuple[torch.device, ...],
+    commit_scale: float | None = None,
 ) -> AdaptiveEliteResult:
     """Choose a nested elite proposal on matched independent trajectories."""
+
+    if commit_scale is not None:
+        return select_adaptive_commit_scale_proposal(
+            config,
+            center_rule=center_rule,
+            center_parameters=center_parameters,
+            directions=directions,
+            fitnesses=fitnesses,
+            sigma=sigma,
+            commit_scale=commit_scale,
+            generation_seed=generation_seed,
+            horizon=horizon,
+            vocabulary=vocabulary,
+            acceptance_fitness_batches=acceptance_fitness_batches,
+            correct_batches=correct_batches,
+            acceptance_devices=acceptance_devices,
+        )
 
     from .vectorized_routing_population import (
         stack_rule_parameter_sets,
@@ -1816,6 +1880,312 @@ def select_adaptive_elite_proposal(
             elite_count: means[index + 1]
             for index, elite_count in enumerate(elite_counts)
         },
+    )
+
+
+def select_adaptive_commit_scale_proposal(
+    config: ShortcutCreditExperimentConfig,
+    *,
+    center_rule: AttentionRoutingRule,
+    center_parameters: dict[str, Tensor],
+    directions: tuple[EggrollDirection, ...],
+    fitnesses: Tensor,
+    sigma: float,
+    commit_scale: float,
+    generation_seed: int,
+    horizon: int,
+    vocabulary: PointerNextVocabulary,
+    acceptance_fitness_batches: tuple[ShortcutBatch, ...],
+    correct_batches: tuple[ShortcutBatch, ...],
+    acceptance_devices: tuple[torch.device, ...],
+) -> AdaptiveEliteResult:
+    """Select a centroid step size, then confirm it on fresh trajectories."""
+
+    from .vectorized_routing_population import (
+        stack_rule_parameter_sets,
+        train_vectorized_routing_population,
+    )
+
+    elite_counts = parse_adaptive_elite_counts(
+        config.adaptive_elite_counts
+    )
+    if not elite_counts:
+        raise ValueError("commit-scale search requires adaptive elite counts")
+    commit_scales = adaptive_commit_scale_grid(
+        commit_scale,
+        config.adaptive_commit_scale_multiplier,
+    )
+    proposal_specs = tuple(
+        (elite_count, proposal_scale)
+        for elite_count in elite_counts
+        for proposal_scale in commit_scales
+    )
+    proposals = []
+    indices_by_count = {}
+    for elite_count, proposal_scale in proposal_specs:
+        parameters, indices = elite_centroid_parameters(
+            center_rule,
+            center_parameters,
+            directions,
+            fitnesses,
+            sigma=sigma,
+            elite_count=elite_count,
+            interpolation=config.elite_interpolation,
+            commit_scale=proposal_scale,
+        )
+        proposals.append(parameters)
+        indices_by_count[elite_count] = indices
+    parameter_sets = (center_parameters, *proposals)
+
+    cpu = torch.device("cpu")
+    cpu_parameter_sets = tuple(
+        {
+            name: tensor.detach().to(cpu)
+            for name, tensor in parameters.items()
+        }
+        for parameters in parameter_sets
+    )
+    cpu_fitness_batches = tuple(
+        batch.to(cpu) for batch in acceptance_fitness_batches
+    )
+    cpu_correct_batches = tuple(batch.to(cpu) for batch in correct_batches)
+
+    def prepare_trajectory(seed: int) -> tuple[
+        dict[str, Tensor],
+        tuple[ShortcutBatch, ...],
+    ]:
+        model = initialize_forward_model(
+            config,
+            vocabulary,
+            initialization_seed=seed + 1,
+            device=cpu,
+        )
+        base_state = {
+            name: tensor.detach().clone()
+            for name, tensor in model.state_dict().items()
+        }
+        del model
+        inner_batches = make_inner_batches(
+            config,
+            horizon=horizon,
+            vocabulary=vocabulary,
+            generator=torch.Generator().manual_seed(seed + 2),
+            device=cpu,
+        )
+        return base_state, inner_batches
+
+    Job = tuple[
+        int,
+        tuple[int, ...],
+        dict[str, Tensor],
+        tuple[ShortcutBatch, ...],
+    ]
+
+    def evaluate_worker(
+        worker_device: torch.device,
+        jobs: list[Job],
+    ) -> list[tuple[int, int, float]]:
+        if worker_device.type == "cuda":
+            torch.cuda.set_device(worker_device)
+        worker_rule = AttentionRoutingRule(center_rule.config).to(
+            worker_device
+        )
+        worker_fitness_batches = tuple(
+            batch.to(worker_device) for batch in cpu_fitness_batches
+        )
+        worker_correct_batches = tuple(
+            batch.to(worker_device) for batch in cpu_correct_batches
+        )
+        results = []
+        for trajectory_index, parameter_indices, base_state, inner_batches in jobs:
+            selected_parameters = tuple(
+                cpu_parameter_sets[index] for index in parameter_indices
+            )
+            stacked_parameters = stack_rule_parameter_sets(
+                selected_parameters,
+                device=worker_device,
+            )
+            model = initialize_forward_model(
+                config,
+                vocabulary,
+                initialization_seed=None,
+                device=worker_device,
+            )
+            model.load_state_dict(base_state)
+            initial = evaluate_shortcut_batches(
+                model,
+                worker_fitness_batches,
+            )
+            del model
+            population = train_vectorized_routing_population(
+                config=config,
+                base_state=base_state,
+                center_rule=worker_rule,
+                rule_parameters=stacked_parameters,
+                inner_batches=inner_batches,
+                fitness_batches=worker_fitness_batches,
+                correct_batches=worker_correct_batches,
+                heldout_fitness_batches=None,
+                heldout_correct_batches=None,
+                device=worker_device,
+            )
+            for parameter_index, trajectory in zip(
+                parameter_indices,
+                population.trajectories,
+            ):
+                results.append(
+                    (
+                        trajectory_index,
+                        parameter_index,
+                        candidate_fitness(
+                            config.fitness_objective,
+                            initial,
+                            trajectory.clean,
+                            checkpoint_clean=trajectory.checkpoint_clean,
+                        ),
+                    )
+                )
+        return results
+
+    def run_jobs(
+        jobs_by_device: list[list[Job]],
+    ) -> list[tuple[int, int, float]]:
+        active_workers = [
+            (worker_device, jobs)
+            for worker_device, jobs in zip(
+                acceptance_devices,
+                jobs_by_device,
+            )
+            if jobs
+        ]
+        if len(active_workers) == 1:
+            results = evaluate_worker(*active_workers[0])
+        else:
+            with ThreadPoolExecutor(
+                max_workers=len(active_workers)
+            ) as executor:
+                futures = [
+                    executor.submit(evaluate_worker, worker_device, jobs)
+                    for worker_device, jobs in active_workers
+                ]
+                results = [
+                    result
+                    for future in futures
+                    for result in future.result()
+                ]
+        results.sort(key=lambda item: (item[0], item[1]))
+        return results
+
+    selection_seed = elite_acceptance_seed(
+        generation_seed,
+        config.candidate_ranking_trajectories,
+    )
+    selection_base_state, selection_inner_batches = prepare_trajectory(
+        selection_seed
+    )
+    selection_indices_by_device = [
+        [] for _ in acceptance_devices
+    ]
+    for parameter_index in range(len(parameter_sets)):
+        selection_indices_by_device[
+            parameter_index % len(acceptance_devices)
+        ].append(parameter_index)
+    selection_jobs = [
+        [
+            (
+                0,
+                tuple(parameter_indices),
+                selection_base_state,
+                selection_inner_batches,
+            )
+        ]
+        if parameter_indices
+        else []
+        for parameter_indices in selection_indices_by_device
+    ]
+    selection_results = run_jobs(selection_jobs)
+    selection_fitnesses = {
+        parameter_index: fitness
+        for _, parameter_index, fitness in selection_results
+    }
+    if len(selection_fitnesses) != len(parameter_sets):
+        raise RuntimeError("commit-scale selection did not evaluate all proposals")
+
+    selected_offset = max(
+        range(len(proposal_specs)),
+        key=lambda index: (
+            selection_fitnesses[index + 1],
+            -abs(proposal_specs[index][1] - commit_scale),
+            -proposal_specs[index][0],
+        ),
+    )
+    selected_count, selected_scale = proposal_specs[selected_offset]
+    selected_parameter_index = selected_offset + 1
+
+    confirmation_seeds = independent_elite_acceptance_seeds(
+        generation_seed,
+        config.elite_acceptance_trajectories,
+        start_index=config.candidate_ranking_trajectories + 1,
+    )
+    confirmation_jobs = [[] for _ in acceptance_devices]
+    for trajectory_index, confirmation_seed in enumerate(confirmation_seeds):
+        base_state, inner_batches = prepare_trajectory(confirmation_seed)
+        confirmation_jobs[
+            trajectory_index % len(acceptance_devices)
+        ].append(
+            (
+                trajectory_index,
+                (0, selected_parameter_index),
+                base_state,
+                inner_batches,
+            )
+        )
+    confirmation_results = run_jobs(confirmation_jobs)
+    center_fitnesses = []
+    selected_fitnesses = []
+    by_trajectory = {}
+    for trajectory_index, parameter_index, fitness in confirmation_results:
+        by_trajectory.setdefault(trajectory_index, {})[parameter_index] = fitness
+    for trajectory_index in range(len(confirmation_seeds)):
+        trajectory_fitnesses = by_trajectory[trajectory_index]
+        center_fitnesses.append(trajectory_fitnesses[0])
+        selected_fitnesses.append(
+            trajectory_fitnesses[selected_parameter_index]
+        )
+
+    return AdaptiveEliteResult(
+        accepted=elite_proposal_improves_every_trajectory(
+            center_fitnesses,
+            selected_fitnesses,
+        ),
+        selected_count=selected_count,
+        selected_indices=indices_by_count[selected_count],
+        selected_parameters=proposals[selected_offset],
+        center_fitnesses=tuple(center_fitnesses),
+        selected_fitnesses=tuple(selected_fitnesses),
+        mean_fitness_by_count={
+            elite_count: max(
+                selection_fitnesses[index + 1]
+                for index, (count, _) in enumerate(proposal_specs)
+                if count == elite_count
+            )
+            for elite_count in elite_counts
+        },
+        selected_commit_scale=selected_scale,
+        selection_center_fitness=selection_fitnesses[0],
+        selection_selected_fitness=selection_fitnesses[
+            selected_parameter_index
+        ],
+        selection_fitness_by_proposal=tuple(
+            (
+                elite_count,
+                proposal_scale,
+                selection_fitnesses[index + 1],
+            )
+            for index, (elite_count, proposal_scale) in enumerate(
+                proposal_specs
+            )
+        ),
     )
 
 
@@ -2816,6 +3186,11 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             raise ValueError("resume checkpoint architecture differs from config")
     if plateau_state.search_sigma is None:
         plateau_state.search_sigma = config.sigma
+    if (
+        config.adaptive_commit_scale is not None
+        and plateau_state.commit_scale is None
+    ):
+        plateau_state.commit_scale = config.adaptive_commit_scale
 
     if config.task_variant == "pointer_next_length":
         assert config.fitness_length is not None
@@ -3370,8 +3745,14 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             config.adaptive_elite_counts
         )
         adaptive_elite_fitnesses: dict[int, float] = {}
+        adaptive_commit_fitnesses: tuple[
+            tuple[int, float, float], ...
+        ] = ()
+        adaptive_selection_center_fitness: float | None = None
+        adaptive_selection_selected_fitness: float | None = None
         acceptance_seconds: float | None = None
         selected_elite_count: int | None = None
+        selected_commit_scale: float | None = None
         if config.outer_update_rule == "paper_standardized":
             standardized = paper_eggroll_update(
                 center_rule,
@@ -3405,12 +3786,23 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 acceptance_fitness_batches=acceptance_fitness_batches,
                 correct_batches=correct_batches,
                 acceptance_devices=candidate_devices,
+                commit_scale=plateau_state.commit_scale,
             )
             acceptance_seconds = time.monotonic() - acceptance_started_at
             selected_elite_count = adaptive_result.selected_count
+            selected_commit_scale = adaptive_result.selected_commit_scale
             elite_indices = adaptive_result.selected_indices
             adaptive_elite_fitnesses = (
                 adaptive_result.mean_fitness_by_count
+            )
+            adaptive_commit_fitnesses = (
+                adaptive_result.selection_fitness_by_proposal
+            )
+            adaptive_selection_center_fitness = (
+                adaptive_result.selection_center_fitness
+            )
+            adaptive_selection_selected_fitness = (
+                adaptive_result.selection_selected_fitness
             )
             restore_center_parameters(
                 center_rule,
@@ -3451,6 +3843,8 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     center_rule,
                     center_parameters,
                 )
+            elif selected_commit_scale is not None:
+                plateau_state.commit_scale = selected_commit_scale
             center_rule.project_parameters_()
             update_elite_search_state(
                 plateau_state,
@@ -3870,6 +4264,20 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 "report/interval": float(config.report_interval),
                 "search/sigma": generation_sigma,
                 "search/next_sigma": plateau_state.search_sigma,
+                "outer/commit_scale": float(
+                    selected_commit_scale
+                    if selected_commit_scale is not None
+                    else (
+                        plateau_state.commit_scale
+                        if plateau_state.commit_scale is not None
+                        else generation_sigma * config.elite_interpolation
+                    )
+                ),
+                "outer/next_commit_scale": float(
+                    plateau_state.commit_scale
+                    if plateau_state.commit_scale is not None
+                    else generation_sigma * config.elite_interpolation
+                ),
                 "search/consecutive_accepted_updates": float(
                     plateau_state.consecutive_accepted_updates
                 ),
@@ -3916,6 +4324,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 config,
                 sigma=generation_sigma,
                 paper_learning_rate=outer_learning_rate,
+                commit_scale=selected_commit_scale,
             )
         )
         cuda_peak_allocated = [
@@ -3935,6 +4344,29 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             summary[
                 f"outer/adaptive_elite_{elite_count}_acceptance_fitness"
             ] = mean_fitness
+        for index, (
+            elite_count,
+            commit_scale,
+            selection_fitness,
+        ) in enumerate(adaptive_commit_fitnesses):
+            prefix = f"outer/commit_search_{index}"
+            summary[f"{prefix}_elite_count"] = float(elite_count)
+            summary[f"{prefix}_scale"] = commit_scale
+            summary[f"{prefix}_selection_fitness"] = selection_fitness
+        if (
+            adaptive_selection_center_fitness is not None
+            and adaptive_selection_selected_fitness is not None
+        ):
+            summary["outer/commit_selection_center_fitness"] = (
+                adaptive_selection_center_fitness
+            )
+            summary["outer/commit_selection_winner_fitness"] = (
+                adaptive_selection_selected_fitness
+            )
+            summary["outer/commit_selection_winner_delta"] = (
+                adaptive_selection_selected_fitness
+                - adaptive_selection_center_fitness
+            )
         if (
             elite_proposal_fitness is not None
             and elite_proposal_trajectory is not None
@@ -4202,6 +4634,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 )
                 plateau_state = PlateauState(
                     search_sigma=search_sigma,
+                    commit_scale=plateau_state.commit_scale,
                     consecutive_accepted_updates=(
                         consecutive_accepted_updates
                     ),
@@ -4363,6 +4796,19 @@ def build_parser() -> argparse.ArgumentParser:
             "comma-separated nested elite counts selected automatically on "
             "matched independent acceptance trajectories"
         ),
+    )
+    parser.add_argument(
+        "--adaptive-commit-scale",
+        type=float,
+        help=(
+            "initial absolute elite-centroid step scale; when set, search "
+            "half/current/double scales independently of candidate sigma"
+        ),
+    )
+    parser.add_argument(
+        "--adaptive-commit-scale-multiplier",
+        type=float,
+        default=2.0,
     )
     parser.add_argument(
         "--horizon-promotion-mode",

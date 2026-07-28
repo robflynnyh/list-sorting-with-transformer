@@ -3047,3 +3047,27 @@ continued accepting small local updates there and exceeded `90%` accuracy.
 The shared balanced policy remains available for separate experiments; the
 new `annealed-sigma` run changes only antithetic elite deduplication relative
 to the successful signed random-P64 setup.
+
+### Decoupled candidate search and commit scale
+
+The adaptive controller can now separate the two roles previously assigned to
+`sigma`. Candidate rules are still sampled at `search_sigma`, but the accepted
+centroid move uses an independently selected absolute `commit_scale`. For each
+generation, the controller tests elite counts 1/2/4/8 at half, current, and
+double the persisted commit scale.
+
+The 12 proposals plus the centre are evaluated on one independent matched
+trajectory, sharded by proposal across three GPUs. Only the winning proposal
+is then compared with the centre on two fresh matched trajectories. It is
+committed only if it improves both; an accepted scale becomes the centre of
+the next generation's three-point grid, while rejection leaves the commit
+scale unchanged. The fixed 512-example clean fitness set remains unchanged
+and held-out examples remain reporting-only.
+
+A full population-64, horizon-160 benchmark completed successfully. It
+selected elite-4 at commit scale `0.0525`, and improved over the centre on both
+confirmation trajectories. Population evaluation took `29.45s`, proposal
+selection plus confirmation took `19.07s`, and the complete generation took
+`60.31s`. The matched historical controller took `49.69s`, so measured runtime
+increased by 21.4%. The reproducible launcher is
+[`launch_commit_scale_search_controller.sh`](launch_commit_scale_search_controller.sh).

@@ -29,6 +29,7 @@ from list_sorting_transformer.shortcut_credit import (
 from list_sorting_transformer.shortcut_credit_experiment import (
     PlateauState,
     ShortcutCreditExperimentConfig,
+    adaptive_commit_scale_grid,
     candidate_fitness,
     candidate_ranking_seeds,
     candidate_summary,
@@ -37,6 +38,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     apply_resume_horizon,
     elite_acceptance_seed,
     elite_centroid_update,
+    elite_centroid_parameters,
     elite_proposal_improves_every_trajectory,
     elite_proposal_mean_improvement,
     function_delta_alignment_summary,
@@ -675,6 +677,88 @@ def test_elite_centroid_update_averages_selected_candidates() -> None:
         torch.testing.assert_close(
             parameter,
             center[name] + expected_delta,
+        )
+
+
+def test_elite_centroid_parameters_can_decouple_commit_scale() -> None:
+    rule = small_routing_rule()
+    center = clone_center_parameters(rule)
+    directions = (
+        sample_eggroll_direction(
+            rule,
+            generator=torch.Generator().manual_seed(91),
+        ),
+        sample_eggroll_direction(
+            rule,
+            generator=torch.Generator().manual_seed(92),
+        ),
+    )
+    fitnesses = torch.tensor([4.0, 3.5, 3.0, 1.0])
+
+    proposal, elite_indices = elite_centroid_parameters(
+        rule,
+        center,
+        directions,
+        fitnesses,
+        sigma=0.8,
+        elite_count=2,
+        interpolation=0.9,
+        commit_scale=0.05,
+    )
+    second_proposal, second_indices = elite_centroid_parameters(
+        rule,
+        center,
+        directions,
+        fitnesses,
+        sigma=0.1,
+        elite_count=2,
+        interpolation=0.1,
+        commit_scale=0.05,
+    )
+
+    assert elite_indices.tolist() == [0, 2]
+    assert second_indices.tolist() == [0, 2]
+    for name, parameter in rule.named_parameters():
+        torch.testing.assert_close(
+            proposal[name],
+            second_proposal[name],
+            rtol=0,
+            atol=0,
+        )
+        torch.testing.assert_close(parameter, center[name], rtol=0, atol=0)
+
+
+def test_adaptive_commit_scale_grid_is_centered_geometrically() -> None:
+    assert adaptive_commit_scale_grid(0.0525, 2.0) == pytest.approx(
+        (0.02625, 0.0525, 0.105)
+    )
+    with pytest.raises(ValueError, match="center must be positive"):
+        adaptive_commit_scale_grid(0.0, 2.0)
+    with pytest.raises(ValueError, match="multiplier must exceed 1"):
+        adaptive_commit_scale_grid(0.05, 1.0)
+
+
+def test_adaptive_commit_scale_requires_adaptive_elites() -> None:
+    with pytest.raises(ValueError, match="requires adaptive elites"):
+        ShortcutCreditExperimentConfig(adaptive_commit_scale=0.05)
+    with pytest.raises(ValueError, match="must be positive"):
+        ShortcutCreditExperimentConfig(
+            outer_update_rule="elite_centroid",
+            elite_backtracking=True,
+            vectorized_population=True,
+            backward_rule_type="attention_router",
+            adaptive_elite_counts="1,2",
+            adaptive_commit_scale=0.0,
+        )
+    with pytest.raises(ValueError, match="multiplier must exceed 1"):
+        ShortcutCreditExperimentConfig(
+            outer_update_rule="elite_centroid",
+            elite_backtracking=True,
+            vectorized_population=True,
+            backward_rule_type="attention_router",
+            adaptive_elite_counts="1,2",
+            adaptive_commit_scale=0.05,
+            adaptive_commit_scale_multiplier=1.0,
         )
 
 
