@@ -244,7 +244,7 @@ def make_router(
             route_output_projection=False,
             shared_routing_map=True,
             condition_on_forward_state=False,
-            leak_token=None,
+            leak_token=getattr(vocabulary, "leak_token", None),
         )
     ).to(device)
     router.requires_grad_(True)
