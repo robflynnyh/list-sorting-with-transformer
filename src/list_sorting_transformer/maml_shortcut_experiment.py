@@ -94,10 +94,8 @@ class MAMLShortcutConfig:
             raise ValueError("invalid length range")
         if self.method not in {"ordinary", "router_maml"}:
             raise ValueError("method must be ordinary or router_maml")
-        if self.router_credit_mode != "suppress_renorm":
-            raise ValueError(
-                "the shortcut diagnostic initially requires suppress-only routing"
-            )
+        if self.router_credit_mode not in {"suppress_renorm", "signed"}:
+            raise ValueError("unknown router credit mode")
         if self.d_model % self.heads:
             raise ValueError("d_model must be divisible by heads")
         if self.router_d_model % self.router_heads:

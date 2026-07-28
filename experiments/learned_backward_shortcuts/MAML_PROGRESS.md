@@ -66,3 +66,9 @@ update with a receding eight-step lookahead. At each persistent step:
 
 The virtual trajectory uses the same learning rate, Adam equations, and
 differentiable global gradient clipping as the persistent optimizer.
+
+The suppression-only horizon-24 run reached 99.2% masked, 91.4% incorrect,
+and 100% correct-hint held-out accuracy by step 500:
+<https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/74p2kcpy>.
+A matched signed-credit run will test whether allowing attention-gradient
+multipliers in `[-1, 1]` improves on suppression in `[0, 1]`.

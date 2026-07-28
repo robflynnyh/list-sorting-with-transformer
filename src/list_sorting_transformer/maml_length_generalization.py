@@ -427,6 +427,9 @@ def router_summary(
         "router/suppressed_fraction": float(
             valid_gates.lt(0.99).float().mean()
         ),
+        "router/reversed_fraction": float(
+            valid_gates.lt(0).float().mean()
+        ),
     }
 
 

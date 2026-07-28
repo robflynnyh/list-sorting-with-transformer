@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import torch
 
 from list_sorting_transformer.maml_shortcut_experiment import (
@@ -77,8 +78,11 @@ def test_fixed_fitness_pairs_are_balanced_and_deterministic() -> None:
             )
 
 
-def test_shortcut_router_receives_meta_gradient() -> None:
-    config = small_config()
+@pytest.mark.parametrize("router_credit_mode", ["suppress_renorm", "signed"])
+def test_shortcut_router_receives_meta_gradient(
+    router_credit_mode: str,
+) -> None:
+    config = small_config(router_credit_mode=router_credit_mode)
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
     model = make_model(config, vocabulary, device=torch.device("cpu"))
     router = make_router(config, vocabulary, device=torch.device("cpu"))
