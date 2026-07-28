@@ -8,11 +8,13 @@ import torch
 
 from list_sorting_transformer.maml_length_generalization import (
     MAMLLengthConfig,
+    load_ordinary_reference,
     make_meta_batches,
     make_model,
     one_step_maml_objective,
     parse_meta_lengths,
     run,
+    select_meta_parameters,
 )
 from list_sorting_transformer.shortcut_credit import make_clean_pointer_batch
 from list_sorting_transformer.tokens import PointerNextVocabulary
@@ -153,6 +155,54 @@ def test_meta_batches_preserve_repeated_length_weighting() -> None:
         7,
         8,
     ]
+
+
+def test_qkv_meta_scope_selects_only_attention_qkv_weights() -> None:
+    config = MAMLLengthConfig(
+        d_model=16,
+        layers=2,
+        heads=1,
+    )
+    model = make_model(
+        config,
+        PointerNextVocabulary("numbers", 10),
+        device=torch.device("cpu"),
+    )
+
+    names, parameters = select_meta_parameters(model, "qkv")
+
+    assert names == (
+        "blocks.0.attention.qkv.weight",
+        "blocks.1.attention.qkv.weight",
+    )
+    assert sum(parameter.numel() for parameter in parameters) == 2 * 3 * 16 * 16
+
+
+def test_ordinary_reference_exposes_length_50_and_400(
+    tmp_path: Path,
+) -> None:
+    metrics_path = tmp_path / "ordinary.jsonl"
+    metrics_path.write_text(
+        json.dumps(
+            {
+                "step": 100,
+                "eval/length_50/accuracy": 0.9,
+                "eval/length_50/loss": 0.2,
+                "eval/length_400/accuracy": 0.15,
+                "eval/length_400/loss": 4.0,
+            }
+        )
+        + "\n"
+    )
+
+    assert load_ordinary_reference(str(metrics_path)) == {
+        100: {
+            "ordinary_reference/length_50/accuracy": 0.9,
+            "ordinary_reference/length_50/loss": 0.2,
+            "ordinary_reference/length_400/accuracy": 0.15,
+            "ordinary_reference/length_400/loss": 4.0,
+        }
+    }
 
 
 def test_ordinary_mode_reports_length_50_and_heldout(

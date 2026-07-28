@@ -31,6 +31,7 @@ class MAMLLengthConfig:
     run_name: str = "pointer-next-maml-meta40-100-heldout400-seed7"
     output_dir: str = "artifacts/maml_length_generalization"
     method: str = "maml"
+    meta_update_scope: str = "all"
     steps: int = 10_000
     batch_size: int = 64
     min_length: int = 2
@@ -57,6 +58,7 @@ class MAMLLengthConfig:
     wandb_project: str = "list-sorting-maml"
     wandb_entity: str | None = None
     wandb_group: str | None = None
+    ordinary_reference_metrics: str | None = None
     resume: str | None = None
 
     def __post_init__(self) -> None:
@@ -83,6 +85,8 @@ class MAMLLengthConfig:
             raise ValueError("invalid training length range")
         if self.method not in {"maml", "ordinary"}:
             raise ValueError("method must be maml or ordinary")
+        if self.meta_update_scope not in {"all", "qkv"}:
+            raise ValueError("meta update scope must be all or qkv")
         meta_lengths = parse_meta_lengths(self.meta_lengths)
         if meta_lengths[0] <= self.max_length:
             raise ValueError("meta lengths must exceed the training range")
@@ -201,6 +205,28 @@ def make_model(
     ).to(device)
 
 
+def select_meta_parameters(
+    model: ShortcutDecoderTransformer,
+    scope: str,
+) -> tuple[tuple[str, ...], tuple[Tensor, ...]]:
+    if scope == "all":
+        selected = tuple(model.named_parameters())
+    elif scope == "qkv":
+        selected = tuple(
+            (name, parameter)
+            for name, parameter in model.named_parameters()
+            if name.endswith(".attention.qkv.weight")
+        )
+    else:
+        raise ValueError("meta update scope must be all or qkv")
+    if not selected:
+        raise ValueError("meta update scope selected no parameters")
+    return (
+        tuple(name for name, _ in selected),
+        tuple(parameter for _, parameter in selected),
+    )
+
+
 def second_order_attention_context(device: torch.device) -> Any:
     if device.type != "cuda":
         return nullcontext()
@@ -305,6 +331,28 @@ def initialize_wandb(config: MAMLLengthConfig) -> Any | None:
     )
 
 
+def load_ordinary_reference(
+    path: str | None,
+) -> dict[int, dict[str, float]]:
+    if path is None:
+        return {}
+    reference: dict[int, dict[str, float]] = {}
+    for line in Path(path).read_text().splitlines():
+        row = json.loads(line)
+        step = int(row["step"])
+        metrics = {}
+        for length in (50, 400):
+            for metric in ("accuracy", "loss"):
+                source = f"eval/length_{length}/{metric}"
+                if source in row:
+                    metrics[
+                        f"ordinary_reference/length_{length}/{metric}"
+                    ] = float(row[source])
+        if metrics:
+            reference[step] = metrics
+    return reference
+
+
 def save_checkpoint(
     path: Path,
     *,
@@ -341,8 +389,12 @@ def run(config: MAMLLengthConfig) -> Path:
     vocabulary = PointerNextVocabulary("numbers", 10)
     model = make_model(config, vocabulary, device=device)
     parameters = tuple(model.parameters())
+    _, meta_parameters = select_meta_parameters(
+        model,
+        config.meta_update_scope,
+    )
     meta_optimizer = torch.optim.Adam(
-        parameters,
+        meta_parameters,
         lr=config.meta_learning_rate,
     )
     ordinary_optimizer = torch.optim.Adam(
@@ -395,6 +447,9 @@ def run(config: MAMLLengthConfig) -> Path:
         )
         for length in evaluation_lengths
     }
+    ordinary_reference = load_ordinary_reference(
+        config.ordinary_reference_metrics
+    )
     wandb_run = initialize_wandb(config)
     if wandb_run is not None:
         print(f"W&B: {wandb_run.url}", flush=True)
@@ -407,6 +462,7 @@ def run(config: MAMLLengthConfig) -> Path:
             evaluation_batch_size=config.eval_batch_size,
         )
     )
+    initial_summary.update(ordinary_reference.get(0, {}))
     with metrics_path.open("a") as metrics_file:
         metrics_file.write(json.dumps(initial_summary) + "\n")
     if wandb_run is not None:
@@ -457,9 +513,17 @@ def run(config: MAMLLengthConfig) -> Path:
                     meta_batch,
                     inner_learning_rate=config.inner_learning_rate,
                 )
-                objective.meta_loss.backward()
+                meta_gradients = torch.autograd.grad(
+                    objective.meta_loss,
+                    meta_parameters,
+                )
+                for parameter, gradient in zip(
+                    meta_parameters,
+                    meta_gradients,
+                ):
+                    parameter.grad = gradient
             meta_gradient_norm = torch.nn.utils.clip_grad_norm_(
-                parameters,
+                meta_parameters,
                 config.gradient_clip,
             )
             meta_optimizer.step()
@@ -511,6 +575,12 @@ def run(config: MAMLLengthConfig) -> Path:
                             objective.meta_accuracy.detach()
                         ),
                         "gradient/meta_norm": float(meta_gradient_norm),
+                        "gradient/meta_parameter_count": float(
+                            sum(
+                                parameter.numel()
+                                for parameter in meta_parameters
+                            )
+                        ),
                     }
                 )
             if meta_loss_before is not None and objective is not None:
@@ -528,6 +598,7 @@ def run(config: MAMLLengthConfig) -> Path:
                         evaluation_batch_size=config.eval_batch_size,
                     )
                 )
+                summary.update(ordinary_reference.get(step, {}))
                 print(
                     f"method={config.method} "
                     f"step={step} "

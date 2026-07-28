@@ -75,3 +75,29 @@ validation are complete. CPU tests cover repeated-length weighting and the
 ordinary reporting path. Production-shape GPU smokes cover the mixed cycle and
 the maximum meta length of 100; the latter measured approximately 16.8
 iterations per second. The full repository suite passes with 329 tests.
+
+### Outcome
+
+- Mixed MAML W&B:
+  <https://wandb.ai/wobrob101/list-sorting-maml/runs/d8fce2ih>
+- Ordinary W&B:
+  <https://wandb.ai/wobrob101/list-sorting-maml/runs/xdjcxpsa>
+
+Mixed MAML reached 53.9% length-400 accuracy at step 200, then collapsed to
+3.9% at step 300 and remained near 4.7% through step 7000, when it was stopped.
+The matched ordinary run completed 10,000 steps, finishing at 90.6% on length
+50 and 15.6% on length 400. Its best length-400 result was 16.4% at step 500.
+
+## QKV-only meta update
+
+The next ablation restricts the persistent outer MAML update to
+`blocks.*.attention.qkv.weight`. The virtual short update still differentiates
+through every model parameter, and the ordinary Adam step still updates the
+whole model. The completed ordinary metrics are loaded into the MAML run as
+`ordinary_reference/length_50/*` and
+`ordinary_reference/length_400/*`, making both curves visible in one W&B run.
+
+Unit tests confirm that the QKV scope selects only the two fused QKV matrices.
+CPU and production-shape length-100 GPU smokes pass; the latter selected 98,304
+meta-updated parameters and ran at approximately 17.3 iterations per second.
+The full repository suite passes with 331 tests.
