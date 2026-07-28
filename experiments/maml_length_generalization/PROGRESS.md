@@ -101,3 +101,16 @@ Unit tests confirm that the QKV scope selects only the two fused QKV matrices.
 CPU and production-shape length-100 GPU smokes pass; the latter selected 98,304
 meta-updated parameters and ran at approximately 17.3 iterations per second.
 The full repository suite passes with 331 tests.
+
+### Active QKV run
+
+- W&B:
+  <https://wandb.ai/wobrob101/list-sorting-maml/runs/hh138504>
+- Service: `list-sorting-maml-qkv.service`
+- Output:
+  `artifacts/maml_length_generalization/pointer-next-maml-qkv-meta40-60-70x2-80-90-100-heldout400-seed7`
+
+The run reached 53.1% length-400 accuracy at step 200. It then settled near
+30% through step 900, while the matched ordinary reference remained near
+14-16%. Both length-50 and length-400 ordinary reference curves are present in
+this W&B run.
