@@ -160,3 +160,18 @@ reached 11.7% length-400 accuracy. The router had begun changing the backward
 rule, with 31.7% of eligible attention-gradient edges below a multiplier of
 0.99. Training was proceeding at approximately 1.07 persistent updates per
 second.
+
+The run was stopped after step 620 because the router collapsed toward broad
+suppression without improving length generalization. At step 600 it suppressed
+97.8% of eligible attention-gradient edges and reached 13.3% length-400
+accuracy, below the ordinary reference's 14.8%. Raw router meta-gradient norms
+oscillated between roughly 17 and 55 near the end. These norms were measured
+before clipping to 1.0, so the model did not receive updates of that magnitude,
+but the persistent clipping made updates behave mostly as normalized
+directions.
+
+The failure was not merely an excessive router learning rate. At step 200 the
+router improved length-50 accuracy to 90.6%, versus 87.5% for ordinary Adam,
+while length-400 accuracy was already worse at 12.5% versus 14.1%. The
+length-50 meta objective therefore did not reliably select for the desired
+length-400 behavior.
