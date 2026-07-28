@@ -2999,3 +2999,15 @@ It reuses the signed-credit horizon-160 population-64 controller, requests
 three GPUs through `with-gpu`, and changes only the direction sampler. The
 primary comparison is clean held-out accuracy by generation and accepted
 update count; wall time is reported only as a resource cost.
+
+The first function-diverse run was stopped after generation 28 because this
+launcher still inherited the superseded asymmetric sigma settings: one
+rejection halved sigma, while recovery required three consecutive accepted
+updates. Sigma reached its minimum at generation 10 and remained there.
+
+The shared shortcut controller launcher now uses the previously agreed
+log-balanced settings: each accepted update doubles sigma and each rejection
+multiplies it by `0.8`. Their equilibrium acceptance rate is approximately
+24%, and any isolated accepted update can move sigma away from its minimum.
+The corrected function-diverse run uses a new `balanced-sigma` run name so the
+superseded artifacts and W&B history remain intact.

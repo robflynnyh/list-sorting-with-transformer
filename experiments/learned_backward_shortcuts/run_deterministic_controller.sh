@@ -41,9 +41,9 @@ exec "${PYTHON_BIN}" -u -m list_sorting_transformer.shortcut_credit_experiment \
   --elite-interpolation 0.5 \
   --elite-backtracking \
   --adaptive-elite-counts 1,2,4,8 \
-  --elite-rejection-sigma-decay 0.5 \
+  --elite-rejection-sigma-decay 0.8 \
   --elite-min-sigma 0.00328125 \
-  --elite-acceptance-patience 3 \
+  --elite-acceptance-patience 1 \
   --elite-acceptance-sigma-growth 2 \
   --elite-acceptance-trajectories 2 \
   --candidate-ranking-trajectories 1 \
