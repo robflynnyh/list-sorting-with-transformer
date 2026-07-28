@@ -153,8 +153,19 @@ second. The full repository suite passes with 333 tests.
 - Output:
   `artifacts/maml_length_generalization/pointer-next-router-maml-meta40-60-70x2-80-90-100-heldout400-seed7`
 
-At step 200, short-task accuracy was 100%, length-50 accuracy was 84.4%, and
-length-400 accuracy was 12.5%. The matched ordinary reference was at 87.5% and
-14.1%, respectively. The router's mean backward multiplier was 0.928 and its
-meta-gradient norm remained nonzero. The live rate was approximately 14.7
-iterations per second.
+The run completed all 10,000 steps. It finished at 82.0% length-50 accuracy and
+12.5% length-400 accuracy, below the matched ordinary results of 90.6% and
+15.6%. The router remained active, with a final mean backward multiplier of
+0.897 and a nonzero meta-gradient, but suppressing gradient credit alone did
+not improve length generalization.
+
+### Signed-credit ablation
+
+The suppression-only router can reduce an attention edge's backward multiplier
+from one toward zero, but cannot oppose a harmful gradient. The matched signed
+ablation expands this range to `[-1, 1]`, allowing the router to preserve,
+suppress, or reverse attention-score credit without changing the forward pass.
+All data, model, optimizer, seed, and evaluation settings remain unchanged.
+Focused tests and a production-shape GPU smoke confirm that signed router
+meta-gradients flow through the hypothetical update. The full repository suite
+passes with 334 tests.

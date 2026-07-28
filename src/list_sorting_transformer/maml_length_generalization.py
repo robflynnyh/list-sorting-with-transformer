@@ -51,6 +51,7 @@ class MAMLLengthConfig:
     router_learning_rate: float = 3e-4
     router_d_model: int = 128
     router_heads: int = 4
+    router_credit_mode: str = "suppress_renorm"
     router_initial_gate: float = 1e-3
     router_minimum_gate: float = 1e-6
     d_model: int = 128
@@ -109,6 +110,10 @@ class MAMLLengthConfig:
             raise ValueError("d_model must be divisible by heads")
         if self.router_d_model % self.router_heads:
             raise ValueError("router_d_model must be divisible by router_heads")
+        if self.router_credit_mode not in {"suppress_renorm", "signed"}:
+            raise ValueError(
+                "router credit mode must be suppress_renorm or signed"
+            )
         if min(
             self.inner_learning_rate,
             self.meta_learning_rate,
@@ -232,7 +237,7 @@ def make_router(
             forward_d_model=config.d_model,
             n_heads=config.router_heads,
             forward_layers=config.layers,
-            routing_credit_mode="suppress_renorm",
+            routing_credit_mode=config.router_credit_mode,
             route_output_projection=False,
             shared_routing_map=True,
             condition_on_forward_state=False,

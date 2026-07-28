@@ -325,7 +325,7 @@ def signed_routed_scaled_dot_product_attention(
         attention_mask=attention_mask,
         is_causal=is_causal,
     )
-    multipliers = backward_multipliers.detach().to(
+    multipliers = backward_multipliers.to(
         device=weights.device,
         dtype=weights.dtype,
     )

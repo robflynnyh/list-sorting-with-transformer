@@ -4,6 +4,7 @@ import json
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
 import torch
 
 from list_sorting_transformer.maml_length_generalization import (
@@ -180,9 +181,13 @@ def test_qkv_meta_scope_selects_only_attention_qkv_weights() -> None:
     assert sum(parameter.numel() for parameter in parameters) == 2 * 3 * 16 * 16
 
 
-def test_router_meta_gradient_flows_through_virtual_model_step() -> None:
+@pytest.mark.parametrize("router_credit_mode", ["suppress_renorm", "signed"])
+def test_router_meta_gradient_flows_through_virtual_model_step(
+    router_credit_mode: str,
+) -> None:
     config = MAMLLengthConfig(
         method="router_maml",
+        router_credit_mode=router_credit_mode,
         steps=1,
         batch_size=4,
         max_length=4,
