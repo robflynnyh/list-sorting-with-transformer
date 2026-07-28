@@ -57,6 +57,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     save_checkpoint,
     shard_candidate_specs,
     strip_shortcut_only_metrics,
+    top_unique_antithetic_indices,
     train_forward_trajectory,
     trajectory_summary,
     update_elite_search_state,
@@ -655,7 +656,7 @@ def test_elite_centroid_update_averages_selected_candidates() -> None:
             generator=torch.Generator().manual_seed(92),
         ),
     )
-    fitnesses = torch.tensor([4.0, 0.0, 3.0, 1.0])
+    fitnesses = torch.tensor([4.0, 3.5, 3.0, 1.0])
 
     elite_indices = elite_centroid_update(
         rule,
@@ -674,6 +675,26 @@ def test_elite_centroid_update_averages_selected_candidates() -> None:
         torch.testing.assert_close(
             parameter,
             center[name] + expected_delta,
+        )
+
+
+def test_elite_selection_keeps_only_best_sign_per_direction() -> None:
+    fitnesses = torch.tensor([3.5, 4.0, 3.0, 1.0, 2.0, 2.5])
+
+    indices = top_unique_antithetic_indices(fitnesses, elite_count=3)
+
+    assert indices.tolist() == [1, 2, 5]
+    assert len({index // 2 for index in indices.tolist()}) == 3
+
+
+def test_elite_selection_rejects_more_elites_than_directions() -> None:
+    with pytest.raises(
+        ValueError,
+        match="unique antithetic directions",
+    ):
+        top_unique_antithetic_indices(
+            torch.tensor([4.0, 3.0, 2.0, 1.0]),
+            elite_count=3,
         )
 
 

@@ -3011,3 +3011,24 @@ multiplies it by `0.8`. Their equilibrium acceptance rate is approximately
 24%, and any isolated accepted update can move sigma away from its minimum.
 The corrected function-diverse run uses a new `balanced-sigma` run name so the
 superseded artifacts and W&B history remain intact.
+
+That corrected run showed that sigma was not the cause of the poor result. It
+was stopped after generation 34 with a best fresh held-out minimum-mode
+accuracy of `28.5%` and a final accuracy of `17.6%`. The historical random-P64
+run had already reached `64.5%` by generation 9, `78.5%` by generation 21,
+and `93.0%` by generation 27 at the same horizons. Function-space diversity
+therefore selected a worse proposal distribution and remains only as a failed
+opt-in ablation.
+
+### Antithetic-pair-aware elite selection
+
+Elite selection now permits at most one sign from each antithetic direction.
+For every `+d/-d` pair, it retains the fitter sign, ranks those per-direction
+winners, and builds nested elite-1/2/4/8 proposals from distinct directions.
+Previously both signs could occupy elite slots and cancel in the centroid;
+this occurred in 6 of 70 generations of the successful signed random-P64 run.
+
+Candidate sampling, all 64 full trajectory evaluations, strict matched
+acceptance, balanced sigma control, and the horizon curriculum are unchanged.
+The reproducible three-GPU launcher is
+[`launch_random_deduplicated_controller.sh`](launch_random_deduplicated_controller.sh).

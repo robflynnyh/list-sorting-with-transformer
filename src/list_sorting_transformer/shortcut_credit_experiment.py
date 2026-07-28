@@ -240,9 +240,11 @@ class ShortcutCreditExperimentConfig:
                 "adaptive elite selection requires vectorized elite-centroid "
                 "backtracking"
             )
-        if adaptive_counts and adaptive_counts[-1] > self.population_size:
+        unique_direction_count = self.population_size // 2
+        if adaptive_counts and adaptive_counts[-1] > unique_direction_count:
             raise ValueError(
-                "adaptive elite counts must not exceed population size"
+                "adaptive elite counts must not exceed antithetic "
+                "direction count"
             )
         if halving_rungs:
             if not self.vectorized_population:
@@ -308,9 +310,11 @@ class ShortcutCreditExperimentConfig:
         if (
             self.outer_update_rule == "elite_centroid"
             and not adaptive_counts
-            and self.elite_count > self.population_size
+            and self.elite_count > unique_direction_count
         ):
-            raise ValueError("elite_count must not exceed population_size")
+            raise ValueError(
+                "elite_count must not exceed antithetic direction count"
+            )
         if not 0 < self.elite_interpolation <= 1:
             raise ValueError("elite_interpolation must be in (0, 1]")
         if not 0 < self.elite_rejection_sigma_decay < 1:
@@ -1399,6 +1403,27 @@ def outer_update_hyperparameter_summary(
     }
 
 
+def top_unique_antithetic_indices(
+    fitnesses: Tensor,
+    elite_count: int,
+) -> Tensor:
+    """Keep only the fitter sign from each antithetic direction."""
+
+    if fitnesses.ndim != 1 or fitnesses.numel() % 2:
+        raise ValueError(
+            "fitnesses must contain positive/negative antithetic pairs"
+        )
+    direction_count = fitnesses.numel() // 2
+    if not 1 <= elite_count <= direction_count:
+        raise ValueError(
+            "elite_count must select unique antithetic directions"
+        )
+    pair_fitnesses = fitnesses.view(direction_count, 2)
+    preferred_fitnesses, preferred_sign_indices = pair_fitnesses.max(dim=1)
+    elite_directions = preferred_fitnesses.topk(elite_count).indices
+    return 2 * elite_directions + preferred_sign_indices[elite_directions]
+
+
 @torch.no_grad()
 def elite_centroid_update(
     module: BackwardRule,
@@ -1413,11 +1438,12 @@ def elite_centroid_update(
 
     if fitnesses.ndim != 1 or fitnesses.numel() != 2 * len(directions):
         raise ValueError("fitnesses must contain one positive/negative pair")
-    if not 1 <= elite_count <= fitnesses.numel():
-        raise ValueError("elite_count must select from the population")
     if not 0 < interpolation <= 1:
         raise ValueError("interpolation must be in (0, 1]")
-    elite_indices = fitnesses.topk(elite_count).indices
+    elite_indices = top_unique_antithetic_indices(
+        fitnesses,
+        elite_count,
+    )
     for name, parameter in module.named_parameters():
         centroid_delta = torch.zeros_like(parameter)
         for candidate_index in elite_indices.tolist():
