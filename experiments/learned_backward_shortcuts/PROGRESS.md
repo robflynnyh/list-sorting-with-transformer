@@ -3053,6 +3053,18 @@ gain `1.67749`, and use step scale `0.105`. The top two candidates in this
 generation already came from distinct antithetic directions, so the
 deduplication flag had no effect yet.
 
+The run completed at generation 83 after 20 generations at horizon 1280,
+stopping normally on `max_horizon_plateau`. Against `abrcnn6i` on the 70
+matched generations, deduplication changed nothing at horizon 160, then
+improved mean fresh held-out minimum-mode accuracy by 8.9 percentage points at
+horizon 320, 12.2 points at horizon 640, and 10.0 points over the six matched
+horizon-1280 generations. Across its full horizon-1280 segment, the
+deduplicated controller averaged 90.6%, had a 93.0% median, reached 97.3%, and
+averaged 94.1% over its final five generations. It therefore outperformed the
+canonical population-top-k controller in this matched seed, although another
+seed would be needed to separate a robust method improvement from a favorable
+single evolutionary trajectory.
+
 ### Decoupled candidate search and commit scale
 
 The adaptive controller can now separate the two roles previously assigned to
