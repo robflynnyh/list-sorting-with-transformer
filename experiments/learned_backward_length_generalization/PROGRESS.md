@@ -199,5 +199,18 @@ trajectories. Length 400 remains reporting-only.
 
 Candidate training falls from 20,480 forward-model updates per generation to
 7,680. Acceptance still evaluates the centre and four adaptive elite proposals
-across two full trajectories, so the expected complete-generation speedup is
-closer to twofold than the 2.7-fold candidate-only reduction.
+across two full trajectories.
+
+The production run is tracked at
+<https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/x67kp718>.
+It was stopped after two generations because the theoretical compute reduction
+did not improve wall-clock time. The full reporting generation took 67.2
+seconds, including 41.9 seconds for population training. The sparse generation
+took 44.8 seconds, including 33.2 seconds for population training, compared
+with approximately 38.9 seconds for the previous sparse full-population run.
+
+The cause is vectorized utilization: P64 fills large vmap batches efficiently,
+whereas the P16 and P8 survivor rungs leave each of three GPUs processing only
+a few candidates. Successive halving remains available as an opt-in setting
+and reduces nominal task-model updates, but this schedule is not a wall-clock
+speedup on the current implementation.
