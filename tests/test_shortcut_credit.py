@@ -44,6 +44,8 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     independent_elite_acceptance_seeds,
     initialize_fresh_backward_rule,
     load_checkpoint,
+    make_experiment_vocabulary,
+    make_fixed_fitness_batch_sets,
     make_inner_batches,
     outer_update_hyperparameter_summary,
     parse_candidate_devices,
@@ -297,6 +299,73 @@ def test_pointer_length_task_requires_strictly_longer_evaluations() -> None:
             fitness_length=20,
             heldout_length=400,
         )
+
+
+def test_pointer_length_fitness_data_has_fixed_disjoint_slices() -> None:
+    config = ShortcutCreditExperimentConfig(
+        task_variant="pointer_next_length",
+        min_length=2,
+        max_length=20,
+        fitness_examples=8,
+        acceptance_fitness_examples=8,
+        fitness_batch_size=4,
+        fitness_length=50,
+        heldout_length=400,
+        fitness_objective="mean_clean_ce",
+    )
+    vocabulary = make_experiment_vocabulary(config)
+
+    first_ranking, first_acceptance = make_fixed_fitness_batch_sets(
+        config,
+        vocabulary=vocabulary,
+        device=torch.device("cpu"),
+    )
+    second_ranking, second_acceptance = make_fixed_fitness_batch_sets(
+        config,
+        vocabulary=vocabulary,
+        device=torch.device("cpu"),
+    )
+
+    ranking_ids = torch.cat([batch.input_ids for batch in first_ranking])
+    acceptance_ids = torch.cat(
+        [batch.input_ids for batch in first_acceptance]
+    )
+    assert ranking_ids.shape[0] == config.fitness_examples
+    assert acceptance_ids.shape[0] == config.acceptance_fitness_examples
+    assert {
+        tuple(row.tolist()) for row in ranking_ids
+    }.isdisjoint(
+        {tuple(row.tolist()) for row in acceptance_ids}
+    )
+    torch.testing.assert_close(
+        ranking_ids,
+        torch.cat([batch.input_ids for batch in second_ranking]),
+    )
+    torch.testing.assert_close(
+        acceptance_ids,
+        torch.cat([batch.input_ids for batch in second_acceptance]),
+    )
+
+
+def test_zero_acceptance_examples_reuses_ranking_fitness_data() -> None:
+    config = ShortcutCreditExperimentConfig(
+        task_variant="pointer_next_length",
+        min_length=2,
+        max_length=20,
+        fitness_examples=8,
+        acceptance_fitness_examples=0,
+        fitness_batch_size=4,
+        fitness_length=50,
+        heldout_length=400,
+        fitness_objective="mean_clean_ce",
+    )
+    ranking, acceptance = make_fixed_fitness_batch_sets(
+        config,
+        vocabulary=make_experiment_vocabulary(config),
+        device=torch.device("cpu"),
+    )
+
+    assert acceptance is ranking
 
 
 def test_clean_router_statistics_do_not_require_a_leak_token() -> None:

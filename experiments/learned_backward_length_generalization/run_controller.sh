@@ -20,7 +20,8 @@ exec "${PYTHON_BIN}" -m list_sorting_transformer.shortcut_credit_experiment \
   --max-horizon 320 \
   --horizon-promotion-mode fixed \
   --batch-size 64 \
-  --fitness-examples 512 \
+  --fitness-examples 256 \
+  --acceptance-fitness-examples 256 \
   --fitness-batch-size 64 \
   --correct-eval-examples 128 \
   --heldout-examples 128 \

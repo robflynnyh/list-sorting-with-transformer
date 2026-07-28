@@ -13,8 +13,11 @@ sequences?
   hint, mask, or synthetic query tokens.
 - Training list lengths are sampled uniformly from 2 through 20 on every
   optimizer update. These become token-sequence lengths 6 through 42.
-- Candidate fitness is improvement in mean cross-entropy on one fixed
-  512-example set at list length 50, or 102 input tokens.
+- Candidate fitness is improvement in mean cross-entropy on a fixed
+  256-example ranking set at list length 50, or 102 input tokens.
+- Elite proposals are accepted on a separate fixed 256-example set at length
+  50. The ranking and acceptance sets are generated once from consecutive
+  slices of the same seeded stream and remain fixed across generations.
 - Held-out reporting uses one fixed 128-example set at list length 400, or 802
   input tokens. Held-out examples do not affect candidate ranking, proposal
   acceptance, centre updates, sigma, or horizon promotion.
@@ -25,8 +28,8 @@ sequences?
 - Population candidates share the same initialization and forward-training
   batches within each trajectory.
 - Elite proposals are accepted only when they beat the existing centre on both
-  independently initialized acceptance trajectories. Both use the same fixed
-  length-50 fitness set.
+  independently initialized acceptance trajectories. Both trajectories use
+  the acceptance set, never the candidate-ranking set.
 - Ordinary Adam from the same initialization and batches is rerun as a
   reporting-only control.
 
@@ -108,7 +111,7 @@ acceptance trajectories intact. The measured weighted runtime is approximately
 the asymmetric sigma rule had already reached its minimum: every rejection
 halved sigma, but recovery required three consecutive accepted proposals.
 
-## Active balanced-sigma run
+## Stopped balanced-sigma run
 
 - W&B:
   <https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/xgcg2kik>
@@ -117,7 +120,15 @@ halved sigma, but recovery required three consecutive accepted proposals.
 - Service:
   `list-sorting-length-generalization-h320-2l-p64-10k-seed7-v4.service`
 
-The live controller behaved as configured: generation 0 was accepted at the
-maximum sigma `0.21`, which remained capped at `0.21`; generation 1 was
-rejected and reduced sigma to `0.168` rather than halving it. The full and
-sparse generations took 54.7 and 39.4 seconds respectively.
+The controller was stopped after generation 742 without useful cumulative
+learning. It accepted 366 of 743 proposals (49.3%), while sigma remained
+healthy and usually stayed between 0.15 and 0.21. Mean length-400 accuracy
+relative to ordinary Adam was -0.77 percentage points, and the final 20 full
+reports averaged -1.17 points. Candidate length-50 fitness still correlated
+with the length-400 objective at roughly 0.35 to 0.39, suggesting that the
+ranking signal existed but proposal selection did not retain it reliably.
+
+The next controller configuration keeps the same total of 512 fixed length-50
+examples but reserves 256 for candidate ranking and 256 for proposal
+acceptance. Length 400 remains reporting-only. This change has been implemented
+but not relaunched.

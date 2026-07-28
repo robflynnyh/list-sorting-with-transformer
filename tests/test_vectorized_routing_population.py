@@ -144,6 +144,7 @@ def test_fixed_horizon_sparse_reporting_skips_only_reporting_metrics(
             report_interval=2,
             batch_size=2,
             fitness_examples=4,
+            acceptance_fitness_examples=4,
             fitness_batch_size=2,
             correct_eval_examples=2,
             heldout_examples=2,

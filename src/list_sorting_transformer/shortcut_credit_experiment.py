@@ -58,6 +58,7 @@ class ShortcutCreditExperimentConfig:
     plateau_ema_decay: float = 0.95
     batch_size: int = 64
     fitness_examples: int = 512
+    acceptance_fitness_examples: int = 0
     fitness_batch_size: int = 64
     correct_eval_examples: int = 128
     heldout_examples: int = 128
@@ -272,6 +273,10 @@ class ShortcutCreditExperimentConfig:
             raise ValueError("unknown leak placement")
         if self.fitness_examples % 2:
             raise ValueError("fitness_examples must be even")
+        if self.acceptance_fitness_examples < 0:
+            raise ValueError(
+                "acceptance_fitness_examples must be nonnegative"
+            )
         if not 2 <= self.min_length <= self.max_length:
             raise ValueError("invalid task length range")
         if self.task_variant == "pointer_next_length":
@@ -523,6 +528,41 @@ def make_fixed_length_batches(
         )
         remaining -= current
     return tuple(batches)
+
+
+def make_fixed_fitness_batch_sets(
+    config: ShortcutCreditExperimentConfig,
+    *,
+    vocabulary: PointerNextVocabulary,
+    device: torch.device,
+) -> tuple[tuple[ShortcutBatch, ...], tuple[ShortcutBatch, ...]]:
+    """Build fixed, sequential ranking and acceptance slices."""
+
+    if config.task_variant != "pointer_next_length":
+        raise ValueError("fixed fitness slices require pointer-next length task")
+    if config.fitness_length is None:
+        raise ValueError("fixed fitness slices require a fitness length")
+
+    generator = torch.Generator().manual_seed(config.seed + 10_000)
+    ranking_batches = make_fixed_length_batches(
+        config.fitness_examples,
+        length=config.fitness_length,
+        config=config,
+        vocabulary=vocabulary,
+        generator=generator,
+        device=device,
+    )
+    if config.acceptance_fitness_examples == 0:
+        return ranking_batches, ranking_batches
+    acceptance_batches = make_fixed_length_batches(
+        config.acceptance_fitness_examples,
+        length=config.fitness_length,
+        config=config,
+        vocabulary=vocabulary,
+        generator=generator,
+        device=device,
+    )
+    return ranking_batches, acceptance_batches
 
 
 def make_experiment_vocabulary(
@@ -1331,7 +1371,7 @@ def select_adaptive_elite_proposal(
     generation_seed: int,
     horizon: int,
     vocabulary: PointerNextVocabulary,
-    fitness_batches: tuple[ShortcutBatch, ...],
+    acceptance_fitness_batches: tuple[ShortcutBatch, ...],
     correct_batches: tuple[ShortcutBatch, ...],
     acceptance_devices: tuple[torch.device, ...],
 ) -> AdaptiveEliteResult:
@@ -1404,7 +1444,9 @@ def select_adaptive_elite_proposal(
         }
         for parameters in parameter_sets
     )
-    cpu_fitness_batches = tuple(batch.to(cpu) for batch in fitness_batches)
+    cpu_fitness_batches = tuple(
+        batch.to(cpu) for batch in acceptance_fitness_batches
+    )
     cpu_correct_batches = tuple(batch.to(cpu) for batch in correct_batches)
     worker_jobs = [[] for _ in acceptance_devices]
     for index, prepared in enumerate(prepared_trajectories):
@@ -2541,19 +2583,23 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
     if plateau_state.search_sigma is None:
         plateau_state.search_sigma = config.sigma
 
-    fitness_generator = torch.Generator().manual_seed(config.seed + 10_000)
     if config.task_variant == "pointer_next_length":
         assert config.fitness_length is not None
         assert config.heldout_length is not None
-        fitness_batches = make_fixed_length_batches(
-            config.fitness_examples,
-            length=config.fitness_length,
-            config=config,
-            vocabulary=vocabulary,
-            generator=fitness_generator,
-            device=device,
+        fitness_batches, acceptance_fitness_batches = (
+            make_fixed_fitness_batch_sets(
+                config,
+                vocabulary=vocabulary,
+                device=device,
+            )
+        )
+        fitness_generator = torch.Generator().manual_seed(
+            config.seed + 12_500
         )
     else:
+        fitness_generator = torch.Generator().manual_seed(
+            config.seed + 10_000
+        )
         if not isinstance(vocabulary, ShortcutPointerVocabulary):
             raise TypeError("shortcut task requires shortcut vocabulary")
         fitness_batches = make_fitness_batches(
@@ -2566,6 +2612,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             leak_placement=config.leak_placement,
             device=device,
         )
+        acceptance_fitness_batches = fitness_batches
     correct_batches = make_mode_batches(
         config.correct_eval_examples,
         leak_mode=(
@@ -3047,7 +3094,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 generation_seed=generation_seed,
                 horizon=horizon,
                 vocabulary=vocabulary,
-                fitness_batches=fitness_batches,
+                acceptance_fitness_batches=acceptance_fitness_batches,
                 correct_batches=correct_batches,
                 acceptance_devices=candidate_devices,
             )
@@ -3161,7 +3208,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                 }
                 acceptance_initial = evaluate_shortcut_batches(
                     acceptance_model,
-                    fitness_batches,
+                    acceptance_fitness_batches,
                 )
                 del acceptance_model
                 acceptance_inner_batches = make_inner_batches(
@@ -3183,7 +3230,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     base_state=acceptance_base_state,
                     backward_rule=center_rule,
                     inner_batches=acceptance_inner_batches,
-                    fitness_batches=fitness_batches,
+                    fitness_batches=acceptance_fitness_batches,
                     correct_batches=correct_batches,
                     device=device,
                 )
@@ -3196,7 +3243,7 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
                     base_state=acceptance_base_state,
                     backward_rule=center_rule,
                     inner_batches=acceptance_inner_batches,
-                    fitness_batches=fitness_batches,
+                    fitness_batches=acceptance_fitness_batches,
                     correct_batches=correct_batches,
                     device=device,
                 )
@@ -3905,6 +3952,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plateau-ema-decay", type=float, default=0.95)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--fitness-examples", type=int, default=512)
+    parser.add_argument(
+        "--acceptance-fitness-examples",
+        type=int,
+        default=0,
+        help=(
+            "fixed examples reserved for proposal acceptance; zero reuses "
+            "the candidate-ranking fitness set"
+        ),
+    )
     parser.add_argument("--fitness-batch-size", type=int, default=64)
     parser.add_argument("--correct-eval-examples", type=int, default=128)
     parser.add_argument("--heldout-examples", type=int, default=128)
