@@ -273,7 +273,7 @@ def routed_scaled_dot_product_attention(
     routed_weights = _routed_attention_weights(
         query,
         key,
-        backward_gate=backward_gate.detach(),
+        backward_gate=backward_gate,
         attention_mask=attention_mask,
         is_causal=is_causal,
     )

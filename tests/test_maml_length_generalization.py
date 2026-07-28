@@ -11,7 +11,9 @@ from list_sorting_transformer.maml_length_generalization import (
     load_ordinary_reference,
     make_meta_batches,
     make_model,
+    make_router,
     one_step_maml_objective,
+    one_step_router_maml_objective,
     parse_meta_lengths,
     run,
     select_meta_parameters,
@@ -178,6 +180,64 @@ def test_qkv_meta_scope_selects_only_attention_qkv_weights() -> None:
     assert sum(parameter.numel() for parameter in parameters) == 2 * 3 * 16 * 16
 
 
+def test_router_meta_gradient_flows_through_virtual_model_step() -> None:
+    config = MAMLLengthConfig(
+        method="router_maml",
+        steps=1,
+        batch_size=4,
+        max_length=4,
+        meta_lengths="6",
+        meta_examples=4,
+        meta_batch_size=4,
+        heldout_length=8,
+        eval_examples=4,
+        eval_batch_size=4,
+        d_model=16,
+        layers=1,
+        heads=1,
+        router_d_model=16,
+        router_heads=1,
+        router_initial_gate=0.1,
+    )
+    vocabulary = PointerNextVocabulary("numbers", 10)
+    model = make_model(config, vocabulary, device=torch.device("cpu"))
+    router = make_router(config, vocabulary, device=torch.device("cpu"))
+    generator = torch.Generator().manual_seed(31)
+    short_batch = make_clean_pointer_batch(
+        4,
+        4,
+        generator=generator,
+        vocabulary=vocabulary,
+    )
+    meta_batch = make_clean_pointer_batch(
+        4,
+        6,
+        generator=generator,
+        vocabulary=vocabulary,
+    )
+
+    ordinary_logits = model(short_batch.input_ids)
+    routed_logits = model.forward_with_backward_rule(
+        short_batch.input_ids,
+        router,
+    )
+    torch.testing.assert_close(routed_logits, ordinary_logits)
+    objective = one_step_router_maml_objective(
+        model,
+        router,
+        short_batch,
+        meta_batch,
+        inner_learning_rate=1e-2,
+    )
+    gradients = torch.autograd.grad(
+        objective.meta_loss,
+        tuple(router.parameters()),
+    )
+
+    assert all(torch.isfinite(gradient).all() for gradient in gradients)
+    assert sum(float(gradient.square().sum()) for gradient in gradients) > 0
+
+
 def test_ordinary_reference_exposes_length_50_and_400(
     tmp_path: Path,
 ) -> None:
@@ -239,3 +299,42 @@ def test_ordinary_mode_reports_length_50_and_heldout(
     assert "eval/length_50/accuracy" in rows[-1]
     assert "eval/length_8/accuracy" in rows[-1]
     assert not any(key.startswith("train/meta_") for key in rows[-1])
+
+
+def test_router_maml_mode_persists_model_and_router_checkpoints(
+    tmp_path: Path,
+) -> None:
+    output_dir = run(
+        MAMLLengthConfig(
+            run_name="router-maml-smoke",
+            output_dir=str(tmp_path),
+            method="router_maml",
+            steps=1,
+            batch_size=4,
+            max_length=4,
+            meta_lengths="6",
+            meta_examples=4,
+            meta_batch_size=4,
+            heldout_length=8,
+            eval_examples=4,
+            eval_batch_size=4,
+            d_model=16,
+            layers=1,
+            heads=1,
+            router_d_model=16,
+            router_heads=1,
+            log_interval=1,
+            eval_interval=1,
+            checkpoint_interval=1,
+            device="cpu",
+        )
+    )
+    checkpoint = torch.load(output_dir / "latest.pt", map_location="cpu")
+    row = json.loads(
+        (output_dir / "metrics.jsonl").read_text().splitlines()[-1]
+    )
+
+    assert checkpoint["router"] is not None
+    assert checkpoint["step"] == 1
+    assert row["gradient/meta_parameter_count"] > 0
+    assert "router/backward_multiplier_mean" in row

@@ -2,8 +2,11 @@
 
 ## Method
 
-This experiment trains one ordinary pointer-next Transformer. There is no
-learned backward network.
+This experiment compares one-step meta-learning methods on an ordinary
+pointer-next Transformer. The original MAML methods meta-update either all
+forward parameters or only the QKV parameters. The router-MAML method instead
+meta-learns a separate suppression-only attention-gradient router while the
+forward model receives persistent ordinary updates.
 
 Each iteration:
 
@@ -102,7 +105,7 @@ CPU and production-shape length-100 GPU smokes pass; the latter selected 98,304
 meta-updated parameters and ran at approximately 17.3 iterations per second.
 The full repository suite passes with 331 tests.
 
-### Active QKV run
+### Completed QKV run
 
 - W&B:
   <https://wandb.ai/wobrob101/list-sorting-maml/runs/hh138504>
@@ -110,7 +113,33 @@ The full repository suite passes with 331 tests.
 - Output:
   `artifacts/maml_length_generalization/pointer-next-maml-qkv-meta40-60-70x2-80-90-100-heldout400-seed7`
 
-The run reached 53.1% length-400 accuracy at step 200. It then settled near
-30% through step 900, while the matched ordinary reference remained near
-14-16%. Both length-50 and length-400 ordinary reference curves are present in
-this W&B run.
+The run completed all 10,000 steps. It reached its best length-400 accuracy of
+53.1% at step 200, then settled near 30% and finished at 29.7%. The matched
+ordinary reference finished at 15.6%. Both length-50 and length-400 ordinary
+reference curves are present in this W&B run.
+
+## Persistent router MAML
+
+The router-MAML variant keeps both the task model and attention-gradient router
+across iterations. Each iteration:
+
+1. Computes one hypothetical short-task update using router-modified attention
+   gradients.
+2. Evaluates the hypothetical model on the fixed mixed-length meta data.
+3. Differentiates that loss through the hypothetical update and updates only
+   the router.
+4. Discards the hypothetical model weights.
+5. Recomputes the same short batch with the updated router and applies one real
+   persistent Adam update to the task model.
+
+The router changes backward credit on existing causal attention edges but does
+not change the numerical forward pass. It is suppression-only, shares one
+routing map across task-model layers and heads, and begins nearly neutral. This
+is not population evolution: there is one persistent router, one persistent
+task model, one meta update, and one real task-model update per iteration.
+
+Focused tests confirm that routed and ordinary forward logits are identical,
+the long-task loss produces a finite nonzero router gradient through the
+hypothetical model update, and both persistent states are checkpointed. A
+two-step production-shape GPU smoke ran at approximately 11-15 iterations per
+second. The full repository suite passes with 333 tests.

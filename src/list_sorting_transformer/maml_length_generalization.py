@@ -17,6 +17,8 @@ from torch.func import functional_call
 
 from .evaluate import resolve_device
 from .shortcut_credit import (
+    AttentionRoutingRule,
+    AttentionRoutingRuleConfig,
     ShortcutBatch,
     ShortcutDecoderTransformer,
     evaluate_shortcut_batches,
@@ -46,6 +48,11 @@ class MAMLLengthConfig:
     meta_learning_rate: float = 3e-4
     ordinary_learning_rate: float = 3e-4
     gradient_clip: float = 1.0
+    router_learning_rate: float = 3e-4
+    router_d_model: int = 128
+    router_heads: int = 4
+    router_initial_gate: float = 1e-3
+    router_minimum_gate: float = 1e-6
     d_model: int = 128
     layers: int = 2
     heads: int = 4
@@ -75,6 +82,8 @@ class MAMLLengthConfig:
             self.d_model,
             self.layers,
             self.heads,
+            self.router_d_model,
+            self.router_heads,
             self.log_interval,
             self.eval_interval,
             self.checkpoint_interval,
@@ -83,8 +92,8 @@ class MAMLLengthConfig:
             raise ValueError("integer configuration values must be positive")
         if not 2 <= self.min_length <= self.max_length:
             raise ValueError("invalid training length range")
-        if self.method not in {"maml", "ordinary"}:
-            raise ValueError("method must be maml or ordinary")
+        if self.method not in {"maml", "ordinary", "router_maml"}:
+            raise ValueError("method must be maml, ordinary, or router_maml")
         if self.meta_update_scope not in {"all", "qkv"}:
             raise ValueError("meta update scope must be all or qkv")
         meta_lengths = parse_meta_lengths(self.meta_lengths)
@@ -98,10 +107,15 @@ class MAMLLengthConfig:
             )
         if self.d_model % self.heads:
             raise ValueError("d_model must be divisible by heads")
+        if self.router_d_model % self.router_heads:
+            raise ValueError("router_d_model must be divisible by router_heads")
         if min(
             self.inner_learning_rate,
             self.meta_learning_rate,
             self.ordinary_learning_rate,
+            self.router_learning_rate,
+            self.router_initial_gate,
+            self.router_minimum_gate,
             self.gradient_clip,
         ) <= 0:
             raise ValueError("learning rates and gradient clip must be positive")
@@ -205,6 +219,32 @@ def make_model(
     ).to(device)
 
 
+def make_router(
+    config: MAMLLengthConfig,
+    vocabulary: PointerNextVocabulary,
+    *,
+    device: torch.device,
+) -> AttentionRoutingRule:
+    router = AttentionRoutingRule(
+        AttentionRoutingRuleConfig(
+            vocab_size=vocabulary.size,
+            d_model=config.router_d_model,
+            forward_d_model=config.d_model,
+            n_heads=config.router_heads,
+            forward_layers=config.layers,
+            routing_credit_mode="suppress_renorm",
+            route_output_projection=False,
+            shared_routing_map=True,
+            condition_on_forward_state=False,
+            leak_token=None,
+        )
+    ).to(device)
+    router.requires_grad_(True)
+    with torch.no_grad():
+        router.gates.fill_(config.router_initial_gate)
+    return router
+
+
 def select_meta_parameters(
     model: ShortcutDecoderTransformer,
     scope: str,
@@ -278,6 +318,50 @@ def one_step_maml_objective(
     )
 
 
+def one_step_router_maml_objective(
+    model: ShortcutDecoderTransformer,
+    router: AttentionRoutingRule,
+    short_batch: ShortcutBatch,
+    meta_batch: ShortcutBatch,
+    *,
+    inner_learning_rate: float,
+) -> MAMLObjective:
+    """Meta-train a router through one virtual routed model update."""
+
+    parameters = dict(model.named_parameters())
+    buffers = dict(model.named_buffers())
+    short_logits = model.forward_with_backward_rule(
+        short_batch.input_ids,
+        router,
+    )[:, -1]
+    short_loss = F.cross_entropy(short_logits, short_batch.targets)
+    short_gradients = torch.autograd.grad(
+        short_loss,
+        tuple(parameters.values()),
+        create_graph=True,
+    )
+    adapted_parameters = {
+        name: parameter - inner_learning_rate * gradient
+        for (name, parameter), gradient in zip(
+            parameters.items(),
+            short_gradients,
+        )
+    }
+    meta_logits = functional_call(
+        model,
+        (adapted_parameters, buffers),
+        (meta_batch.input_ids,),
+    )[:, -1]
+    meta_loss = F.cross_entropy(meta_logits, meta_batch.targets)
+    return MAMLObjective(
+        short_loss=short_loss,
+        meta_loss=meta_loss,
+        meta_accuracy=meta_logits.argmax(dim=-1).eq(
+            meta_batch.targets
+        ).float().mean(),
+    )
+
+
 def batch_loss(
     model: ShortcutDecoderTransformer,
     batch: ShortcutBatch,
@@ -311,6 +395,31 @@ def evaluate_lengths(
             metrics.prediction_mode_fraction
         )
     return summary
+
+
+@torch.no_grad()
+def router_summary(
+    router: AttentionRoutingRule,
+    batch: ShortcutBatch,
+) -> dict[str, float]:
+    gates = torch.stack(
+        router.attention_gates(batch.input_ids),
+        dim=1,
+    )
+    causal = torch.ones(
+        gates.shape[-2:],
+        dtype=torch.bool,
+        device=gates.device,
+    ).tril()
+    valid_gates = gates[..., causal]
+    return {
+        "router/gate_parameter_mean": float(router.gates.mean()),
+        "router/backward_multiplier_mean": float(valid_gates.mean()),
+        "router/backward_multiplier_min": float(valid_gates.min()),
+        "router/suppressed_fraction": float(
+            valid_gates.lt(0.99).float().mean()
+        ),
+    }
 
 
 def initialize_wandb(config: MAMLLengthConfig) -> Any | None:
@@ -358,6 +467,7 @@ def save_checkpoint(
     *,
     config: MAMLLengthConfig,
     model: ShortcutDecoderTransformer,
+    router: AttentionRoutingRule | None,
     meta_optimizer: torch.optim.Optimizer,
     ordinary_optimizer: torch.optim.Optimizer,
     train_generator: torch.Generator,
@@ -368,6 +478,7 @@ def save_checkpoint(
             "experiment": "pointer_next_one_step_maml",
             "config": asdict(config),
             "model": model.state_dict(),
+            "router": None if router is None else router.state_dict(),
             "meta_optimizer": meta_optimizer.state_dict(),
             "ordinary_optimizer": ordinary_optimizer.state_dict(),
             "train_generator_state": train_generator.get_state(),
@@ -389,13 +500,26 @@ def run(config: MAMLLengthConfig) -> Path:
     vocabulary = PointerNextVocabulary("numbers", 10)
     model = make_model(config, vocabulary, device=device)
     parameters = tuple(model.parameters())
-    _, meta_parameters = select_meta_parameters(
-        model,
-        config.meta_update_scope,
+    router = (
+        make_router(config, vocabulary, device=device)
+        if config.method == "router_maml"
+        else None
+    )
+    meta_parameters = (
+        tuple(router.parameters())
+        if router is not None
+        else select_meta_parameters(
+            model,
+            config.meta_update_scope,
+        )[1]
     )
     meta_optimizer = torch.optim.Adam(
         meta_parameters,
-        lr=config.meta_learning_rate,
+        lr=(
+            config.router_learning_rate
+            if router is not None
+            else config.meta_learning_rate
+        ),
     )
     ordinary_optimizer = torch.optim.Adam(
         parameters,
@@ -408,6 +532,10 @@ def run(config: MAMLLengthConfig) -> Path:
         if checkpoint.get("experiment") != "pointer_next_one_step_maml":
             raise ValueError("resume checkpoint belongs to another experiment")
         model.load_state_dict(checkpoint["model"])
+        if router is not None:
+            if checkpoint["router"] is None:
+                raise ValueError("router checkpoint state is missing")
+            router.load_state_dict(checkpoint["router"])
         meta_optimizer.load_state_dict(checkpoint["meta_optimizer"])
         ordinary_optimizer.load_state_dict(checkpoint["ordinary_optimizer"])
         train_generator.set_state(checkpoint["train_generator_state"])
@@ -419,7 +547,7 @@ def run(config: MAMLLengthConfig) -> Path:
             vocabulary=vocabulary,
             device=device,
         )
-        if config.method == "maml"
+        if config.method != "ordinary"
         else ()
     )
     meta_lengths = parse_meta_lengths(config.meta_lengths)
@@ -507,11 +635,21 @@ def run(config: MAMLLengthConfig) -> Path:
             meta_optimizer.zero_grad(set_to_none=True)
             ordinary_optimizer.zero_grad(set_to_none=True)
             with second_order_attention_context(device):
-                objective = one_step_maml_objective(
-                    model,
-                    short_batch,
-                    meta_batch,
-                    inner_learning_rate=config.inner_learning_rate,
+                objective = (
+                    one_step_router_maml_objective(
+                        model,
+                        router,
+                        short_batch,
+                        meta_batch,
+                        inner_learning_rate=config.inner_learning_rate,
+                    )
+                    if router is not None
+                    else one_step_maml_objective(
+                        model,
+                        short_batch,
+                        meta_batch,
+                        inner_learning_rate=config.inner_learning_rate,
+                    )
                 )
                 meta_gradients = torch.autograd.grad(
                     objective.meta_loss,
@@ -527,9 +665,22 @@ def run(config: MAMLLengthConfig) -> Path:
                 config.gradient_clip,
             )
             meta_optimizer.step()
+            if router is not None:
+                with torch.no_grad():
+                    router.gates.clamp_(
+                        min=config.router_minimum_gate
+                    )
+            meta_optimizer.zero_grad(set_to_none=True)
 
         ordinary_optimizer.zero_grad(set_to_none=True)
-        ordinary_logits = model(short_batch.input_ids)[:, -1]
+        ordinary_logits = (
+            model.forward_with_backward_rule(
+                short_batch.input_ids,
+                router,
+            )[:, -1]
+            if router is not None
+            else model(short_batch.input_ids)[:, -1]
+        )
         ordinary_loss = F.cross_entropy(
             ordinary_logits,
             short_batch.targets,
@@ -590,6 +741,8 @@ def run(config: MAMLLengthConfig) -> Path:
                 summary["train/virtual_step_meta_loss_change"] = (
                     float(objective.meta_loss.detach()) - meta_loss_before
                 )
+            if router is not None:
+                summary.update(router_summary(router, short_batch))
             if step % config.eval_interval == 0 or step == config.steps:
                 summary.update(
                     evaluate_lengths(
@@ -620,6 +773,7 @@ def run(config: MAMLLengthConfig) -> Path:
                 output_dir / f"checkpoint_{step:06d}.pt",
                 config=config,
                 model=model,
+                router=router,
                 meta_optimizer=meta_optimizer,
                 ordinary_optimizer=ordinary_optimizer,
                 train_generator=train_generator,
@@ -629,6 +783,7 @@ def run(config: MAMLLengthConfig) -> Path:
                 output_dir / "latest.pt",
                 config=config,
                 model=model,
+                router=router,
                 meta_optimizer=meta_optimizer,
                 ordinary_optimizer=ordinary_optimizer,
                 train_generator=train_generator,
