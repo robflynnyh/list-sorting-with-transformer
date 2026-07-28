@@ -85,7 +85,7 @@ class ShortcutCreditExperimentConfig:
     elite_acceptance_trajectories: int = 1
     candidate_ranking_trajectories: int = 1
     adaptive_elite_counts: str | None = None
-    deduplicate_antithetic_elites: bool = False
+    deduplicate_antithetic_elites: bool = True
     adaptive_commit_scale: float | None = None
     adaptive_commit_scale_multiplier: float = 2.0
     horizon_promotion_mode: str = "plateau"
@@ -4830,11 +4830,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--deduplicate-antithetic-elites",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=True,
         help=(
             "allow at most one sign from each antithetic direction in an "
-            "elite centroid; disabled by default to reproduce the stable "
-            "historical controller"
+            "elite centroid; use --no-deduplicate-antithetic-elites to "
+            "reproduce the historical population-top-k controller"
         ),
     )
     parser.add_argument(

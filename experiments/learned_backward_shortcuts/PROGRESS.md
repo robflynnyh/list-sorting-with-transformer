@@ -3022,12 +3022,11 @@ opt-in ablation.
 
 ### Antithetic-pair-aware elite selection
 
-Antithetic-pair-aware selection is an opt-in ablation. For every `+d/-d` pair,
-it retains the fitter sign, ranks those per-direction winners, and builds
-nested elite-1/2/4/8 proposals from distinct directions. The canonical
-historical controller instead ranks the full population, so both signs can
-occupy elite slots and partially cancel in the centroid; this occurred in 6
-of its 70 generations.
+Antithetic-pair-aware selection is now the default. For every `+d/-d` pair, it
+retains the fitter sign, ranks those per-direction winners, and builds nested
+elite-1/2/4/8 proposals from distinct directions. The historical controller
+instead ranked the full population, so both signs could occupy elite slots and
+partially cancel in the centroid; this occurred in 6 of its 70 generations.
 
 Candidate sampling, all 64 full trajectory evaluations, strict matched
 acceptance, sigma control, and the horizon curriculum are unchanged.
@@ -3040,12 +3039,11 @@ first rejection left sigma at `0.168` instead of `0.105`; performance diverged
 immediately afterward. It was stopped after generation 35, having never
 exceeded `34.4%` held-out minimum-mode accuracy.
 
-The canonical controller and the dedicated deduplication launcher now both
-use the proven coarse-to-fine sigma policy: one rejection multiplies sigma by
-`0.5`, and three consecutive accepted updates multiply it by `2`. The
-canonical default uses ordinary population top-k, while the launcher adds only
-`--deduplicate-antithetic-elites`. This makes the next run a clean
-deduplication comparison against W&B run `abrcnn6i`.
+The default controller uses the proven coarse-to-fine sigma policy: one
+rejection multiplies sigma by `0.5`, and three consecutive accepted updates
+multiply it by `2`. Historical population-wide top-k remains available through
+[`launch_population_topk_controller.sh`](launch_population_topk_controller.sh),
+which adds only `--no-deduplicate-antithetic-elites`.
 
 The clean comparison is running as W&B run `pg3s1u7d`. Generation 0 matches
 `abrcnn6i`: both select elite-2, accept the update with minimum matched fitness
@@ -3064,6 +3062,8 @@ averaged 94.1% over its final five generations. It therefore outperformed the
 canonical population-top-k controller in this matched seed, although another
 seed would be needed to separate a robust method improvement from a favorable
 single evolutionary trajectory.
+
+Based on this result, antithetic deduplication was promoted to the default.
 
 ### Decoupled candidate search and commit scale
 

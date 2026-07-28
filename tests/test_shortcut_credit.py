@@ -785,7 +785,7 @@ def test_default_elite_selection_matches_historical_population_topk() -> None:
     )
 
     assert indices.tolist() == [0, 1]
-    assert not ShortcutCreditExperimentConfig().deduplicate_antithetic_elites
+    assert ShortcutCreditExperimentConfig().deduplicate_antithetic_elites
 
 
 def test_elite_selection_rejects_more_elites_than_directions() -> None:

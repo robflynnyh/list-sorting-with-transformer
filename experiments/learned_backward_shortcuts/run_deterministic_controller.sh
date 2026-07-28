@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-RUN_NAME="${RUN_NAME:-attention-router-signed-credit-strict-default-h160-p64-seed7}"
+RUN_NAME="${RUN_NAME:-attention-router-signed-antithetic-default-h160-p64-seed7}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${ROOT}/artifacts/learned_backward_shortcuts}"
 GPU_DEVICES="${GPU_DEVICES:-cuda:0,cuda:1,cuda:2}"
 ROUTING_CREDIT_MODE="${ROUTING_CREDIT_MODE:-signed}"
