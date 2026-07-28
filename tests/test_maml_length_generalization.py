@@ -328,6 +328,7 @@ def test_router_maml_mode_persists_model_and_router_checkpoints(
             heads=1,
             router_d_model=16,
             router_heads=1,
+            router_meta_updates_per_step=2,
             log_interval=1,
             eval_interval=1,
             checkpoint_interval=1,
@@ -341,5 +342,14 @@ def test_router_maml_mode_persists_model_and_router_checkpoints(
 
     assert checkpoint["router"] is not None
     assert checkpoint["step"] == 1
+    assert {
+        int(state["step"])
+        for state in checkpoint["meta_optimizer"]["state"].values()
+    } == {2}
+    assert {
+        int(state["step"])
+        for state in checkpoint["ordinary_optimizer"]["state"].values()
+    } == {1}
     assert row["gradient/meta_parameter_count"] > 0
+    assert row["train/router_meta_updates_per_step"] == 2
     assert "router/backward_multiplier_mean" in row

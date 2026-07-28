@@ -169,3 +169,13 @@ All data, model, optimizer, seed, and evaluation settings remain unchanged.
 Focused tests and a production-shape GPU smoke confirm that signed router
 meta-gradients flow through the hypothetical update. The full repository suite
 passes with 334 tests.
+
+The 1:1 signed run finished at 100% length-50 accuracy and 27.3% length-400
+accuracy, compared with 90.6% and 15.6% for ordinary Adam. However, the router
+meta-gradient fell to `5.4e-8` by the end because the short-task loss was
+already effectively zero.
+
+The next ablation performs four router-only meta-updates while the task model
+is fixed, followed by one persistent task-model update. All four hypothetical
+models are discarded. This gives the router four optimization opportunities
+per task-model update without changing the persistent-update semantics.

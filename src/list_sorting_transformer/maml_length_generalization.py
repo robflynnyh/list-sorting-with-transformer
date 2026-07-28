@@ -51,6 +51,7 @@ class MAMLLengthConfig:
     router_learning_rate: float = 3e-4
     router_d_model: int = 128
     router_heads: int = 4
+    router_meta_updates_per_step: int = 1
     router_credit_mode: str = "suppress_renorm"
     router_initial_gate: float = 1e-3
     router_minimum_gate: float = 1e-6
@@ -85,6 +86,7 @@ class MAMLLengthConfig:
             self.heads,
             self.router_d_model,
             self.router_heads,
+            self.router_meta_updates_per_step,
             self.log_interval,
             self.eval_interval,
             self.checkpoint_interval,
@@ -619,24 +621,36 @@ def run(config: MAMLLengthConfig) -> Path:
             vocabulary=vocabulary,
             device=device,
         )
-        meta_batch = (
-            meta_batches[(step - 1) % len(meta_batches)]
-            if meta_batches
-            else None
-        )
         report_step = (
             step % config.log_interval == 0
             or step % config.eval_interval == 0
             or step == config.steps
         )
+        meta_update_count = (
+            config.router_meta_updates_per_step
+            if router is not None
+            else 1
+        )
+        meta_batch = None
         meta_loss_before = None
-        if report_step and meta_batch is not None:
-            with torch.no_grad():
-                meta_loss_before = float(batch_loss(model, meta_batch))
-
         objective = None
         meta_gradient_norm = None
-        if meta_batch is not None:
+        meta_gradient_norms = []
+        for meta_update_index in range(
+            meta_update_count if meta_batches else 0
+        ):
+            meta_batch = meta_batches[
+                (
+                    (step - 1) * meta_update_count
+                    + meta_update_index
+                )
+                % len(meta_batches)
+            ]
+            if report_step and meta_update_index == meta_update_count - 1:
+                with torch.no_grad():
+                    meta_loss_before = float(
+                        batch_loss(model, meta_batch)
+                    )
             meta_optimizer.zero_grad(set_to_none=True)
             ordinary_optimizer.zero_grad(set_to_none=True)
             with second_order_attention_context(device):
@@ -669,6 +683,7 @@ def run(config: MAMLLengthConfig) -> Path:
                 meta_parameters,
                 config.gradient_clip,
             )
+            meta_gradient_norms.append(float(meta_gradient_norm))
             meta_optimizer.step()
             if router is not None:
                 with torch.no_grad():
@@ -748,6 +763,12 @@ def run(config: MAMLLengthConfig) -> Path:
                 )
             if router is not None:
                 summary.update(router_summary(router, short_batch))
+                summary["train/router_meta_updates_per_step"] = float(
+                    meta_update_count
+                )
+                summary["gradient/meta_norm_mean"] = (
+                    sum(meta_gradient_norms) / len(meta_gradient_norms)
+                )
             if step % config.eval_interval == 0 or step == config.steps:
                 summary.update(
                     evaluate_lengths(
