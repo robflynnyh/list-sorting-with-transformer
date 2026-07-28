@@ -9,7 +9,7 @@ from list_sorting_transformer.maml_shortcut_experiment import (
     MAMLShortcutConfig,
     make_fitness_pairs,
     make_model,
-    one_step_router_objective,
+    router_lookahead_objective,
     run,
 )
 from list_sorting_transformer.maml_length_generalization import make_router
@@ -82,6 +82,10 @@ def test_shortcut_router_receives_meta_gradient() -> None:
     vocabulary = ShortcutPointerVocabulary("numbers", 10)
     model = make_model(config, vocabulary, device=torch.device("cpu"))
     router = make_router(config, vocabulary, device=torch.device("cpu"))
+    ordinary_optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=config.ordinary_learning_rate,
+    )
     generator = torch.Generator().manual_seed(41)
     biased_batch = make_shortcut_batch(
         4,
@@ -98,12 +102,13 @@ def test_shortcut_router_receives_meta_gradient() -> None:
         seed_offset=10_000,
     )[0]
 
-    objective = one_step_router_objective(
+    objective = router_lookahead_objective(
         model,
         router,
-        biased_batch,
+        (biased_batch, biased_batch),
         fitness_pair,
-        inner_learning_rate=config.inner_learning_rate,
+        ordinary_optimizer=ordinary_optimizer,
+        gradient_clip=config.gradient_clip,
     )
     gradients = torch.autograd.grad(
         objective.meta_loss,
@@ -119,6 +124,7 @@ def test_shortcut_router_run_persists_both_networks(tmp_path: Path) -> None:
         small_config(
             run_name="shortcut-router-smoke",
             output_dir=str(tmp_path),
+            lookahead_steps=2,
         )
     )
     checkpoint = torch.load(output_dir / "latest.pt", map_location="cpu")
@@ -129,6 +135,8 @@ def test_shortcut_router_run_persists_both_networks(tmp_path: Path) -> None:
     assert checkpoint["step"] == 1
     assert checkpoint["router"] is not None
     assert checkpoint["router_optimizer"] is not None
+    assert len(checkpoint["lookahead_batches"]) == 2
+    assert row["train/lookahead_steps"] == 2
     assert "fitness_fixed/masked_accuracy" in row
     assert "fitness_heldout/incorrect_accuracy" in row
     assert "correct_leak/accuracy" in row

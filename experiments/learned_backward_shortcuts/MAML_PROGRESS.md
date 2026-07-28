@@ -50,3 +50,19 @@ meta-gradient norm fell to approximately `1.8e-5` after the task model had
 already fit the shortcut. The matched result supports a signal-starvation
 failure: once correct-leak training loss approaches zero, the hypothetical
 one-step update is too small for the clean fitness loss to teach the router.
+
+## Eight-step lookahead follow-up
+
+The next run keeps both persistent networks but replaces the one-step virtual
+update with a receding eight-step lookahead. At each persistent step:
+
+1. Simulate differentiable Adam on the current batch and seven forthcoming
+   biased batches, starting from the task model's current Adam moments.
+2. Evaluate the eight-step virtual model on the next fixed clean-fitness
+   minibatch and update only the router.
+3. Discard the virtual trajectory.
+4. Commit only the current batch as one real persistent Adam update.
+5. Shift the eight-batch window by one.
+
+The virtual trajectory uses the same learning rate, Adam equations, and
+differentiable global gradient clipping as the persistent optimizer.

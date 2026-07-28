@@ -38,6 +38,7 @@ class MAMLShortcutConfig:
     output_dir: str = "artifacts/maml_shortcut"
     method: str = "router_maml"
     steps: int = 2_000
+    lookahead_steps: int = 1
     batch_size: int = 64
     min_length: int = 8
     max_length: int = 32
@@ -45,7 +46,6 @@ class MAMLShortcutConfig:
     fitness_batch_size: int = 32
     eval_examples: int = 256
     eval_batch_size: int = 64
-    inner_learning_rate: float = 3e-4
     ordinary_learning_rate: float = 3e-4
     router_learning_rate: float = 3e-4
     gradient_clip: float = 1.0
@@ -71,6 +71,7 @@ class MAMLShortcutConfig:
     def __post_init__(self) -> None:
         positive_integers = (
             self.steps,
+            self.lookahead_steps,
             self.batch_size,
             self.min_length,
             self.max_length,
@@ -108,7 +109,6 @@ class MAMLShortcutConfig:
         if self.eval_examples % self.eval_batch_size:
             raise ValueError("eval examples must divide into full batches")
         if min(
-            self.inner_learning_rate,
             self.ordinary_learning_rate,
             self.router_learning_rate,
             self.gradient_clip,
@@ -121,6 +121,7 @@ class MAMLShortcutConfig:
 @dataclass(frozen=True)
 class ShortcutMAMLObjective:
     short_loss: Tensor
+    lookahead_mean_loss: Tensor
     meta_loss: Tensor
     meta_accuracy: Tensor
 
@@ -223,33 +224,135 @@ def make_evaluation_batches(
     return tuple(batches)
 
 
-def one_step_router_objective(
+def make_biased_batch(
+    config: MAMLShortcutConfig,
+    *,
+    generator: torch.Generator,
+    vocabulary: ShortcutPointerVocabulary,
+    device: torch.device,
+) -> ShortcutBatch:
+    length = int(
+        torch.randint(
+            config.min_length,
+            config.max_length + 1,
+            (),
+            generator=generator,
+        )
+    )
+    return make_shortcut_batch(
+        config.batch_size,
+        length,
+        leak_mode="correct",
+        leak_placement="random_list",
+        generator=generator,
+        vocabulary=vocabulary,
+        device=device,
+    )
+
+
+def clip_virtual_gradients(
+    gradients: tuple[Tensor, ...],
+    *,
+    max_norm: float,
+) -> tuple[Tensor, ...]:
+    total_norm = torch.sqrt(
+        sum(gradient.float().square().sum() for gradient in gradients)
+    )
+    coefficient = (max_norm / (total_norm + 1e-6)).clamp(max=1.0)
+    return tuple(
+        gradient * coefficient.to(dtype=gradient.dtype)
+        for gradient in gradients
+    )
+
+
+def router_lookahead_objective(
     model: ShortcutDecoderTransformer,
     router: AttentionRoutingRule,
-    biased_batch: ShortcutBatch,
+    biased_batches: tuple[ShortcutBatch, ...],
     fitness_pair: tuple[ShortcutBatch, ShortcutBatch],
     *,
-    inner_learning_rate: float,
+    ordinary_optimizer: torch.optim.Adam,
+    gradient_clip: float,
 ) -> ShortcutMAMLObjective:
+    if not biased_batches:
+        raise ValueError("lookahead requires at least one biased batch")
+    if len(ordinary_optimizer.param_groups) != 1:
+        raise ValueError("lookahead requires one Adam parameter group")
+    group = ordinary_optimizer.param_groups[0]
+    if group["weight_decay"] != 0 or group["amsgrad"] or group["maximize"]:
+        raise ValueError("unsupported Adam configuration for lookahead")
+
     parameters = dict(model.named_parameters())
     buffers = dict(model.named_buffers())
-    short_logits = model.forward_with_backward_rule(
-        biased_batch.input_ids,
-        router,
-    )[:, -1]
-    short_loss = F.cross_entropy(short_logits, biased_batch.targets)
-    short_gradients = torch.autograd.grad(
-        short_loss,
-        tuple(parameters.values()),
-        create_graph=True,
-    )
-    adapted_parameters = {
-        name: parameter - inner_learning_rate * gradient
-        for (name, parameter), gradient in zip(
-            parameters.items(),
-            short_gradients,
+    adapted_parameters = parameters
+    exp_avg = {}
+    exp_avg_sq = {}
+    optimizer_steps = set()
+    for name, parameter in parameters.items():
+        state = ordinary_optimizer.state.get(parameter, {})
+        exp_avg[name] = state.get(
+            "exp_avg",
+            torch.zeros_like(parameter),
+        ).detach()
+        exp_avg_sq[name] = state.get(
+            "exp_avg_sq",
+            torch.zeros_like(parameter),
+        ).detach()
+        optimizer_steps.add(
+            int(state.get("step", torch.tensor(0)).item())
         )
-    }
+    if len(optimizer_steps) != 1:
+        raise ValueError("Adam parameters have inconsistent step counts")
+    initial_step = optimizer_steps.pop()
+    beta1, beta2 = group["betas"]
+    learning_rate = float(group["lr"])
+    epsilon = float(group["eps"])
+
+    short_losses = []
+    for lookahead_index, biased_batch in enumerate(biased_batches, start=1):
+        logits = functional_call(
+            model,
+            (adapted_parameters, buffers),
+            (biased_batch.input_ids,),
+            {"backward_rule": router},
+        )[:, -1]
+        short_loss = F.cross_entropy(logits, biased_batch.targets)
+        short_losses.append(short_loss)
+        gradients = torch.autograd.grad(
+            short_loss,
+            tuple(adapted_parameters.values()),
+            create_graph=True,
+        )
+        gradients = clip_virtual_gradients(
+            gradients,
+            max_norm=gradient_clip,
+        )
+        optimizer_step = initial_step + lookahead_index
+        bias_correction1 = 1 - beta1**optimizer_step
+        bias_correction2 = 1 - beta2**optimizer_step
+        next_parameters = {}
+        next_exp_avg = {}
+        next_exp_avg_sq = {}
+        for (name, parameter), gradient in zip(
+            adapted_parameters.items(),
+            gradients,
+        ):
+            mean = beta1 * exp_avg[name] + (1 - beta1) * gradient
+            square_mean = (
+                beta2 * exp_avg_sq[name]
+                + (1 - beta2) * gradient.square()
+            )
+            denominator = (
+                square_mean.sqrt() / bias_correction2**0.5
+            ) + epsilon
+            next_parameters[name] = parameter - (
+                learning_rate / bias_correction1
+            ) * mean / denominator
+            next_exp_avg[name] = mean
+            next_exp_avg_sq[name] = square_mean
+        adapted_parameters = next_parameters
+        exp_avg = next_exp_avg
+        exp_avg_sq = next_exp_avg_sq
 
     losses = []
     correct = []
@@ -262,7 +365,8 @@ def one_step_router_objective(
         losses.append(F.cross_entropy(logits, fitness_batch.targets))
         correct.append(logits.argmax(dim=-1).eq(fitness_batch.targets))
     return ShortcutMAMLObjective(
-        short_loss=short_loss,
+        short_loss=short_losses[0],
+        lookahead_mean_loss=torch.stack(short_losses).mean(),
         meta_loss=torch.stack(losses).mean(),
         meta_accuracy=torch.cat(correct).float().mean(),
     )
@@ -359,6 +463,7 @@ def save_checkpoint(
     router_optimizer: torch.optim.Optimizer | None,
     ordinary_optimizer: torch.optim.Optimizer,
     train_generator: torch.Generator,
+    lookahead_batches: tuple[ShortcutBatch, ...],
     step: int,
 ) -> None:
     torch.save(
@@ -372,6 +477,7 @@ def save_checkpoint(
             ),
             "ordinary_optimizer": ordinary_optimizer.state_dict(),
             "train_generator_state": train_generator.get_state(),
+            "lookahead_batches": lookahead_batches,
             "step": step,
         },
         path,
@@ -405,6 +511,7 @@ def run(config: MAMLShortcutConfig) -> Path:
         lr=config.ordinary_learning_rate,
     )
     train_generator = torch.Generator().manual_seed(config.seed + 1_000)
+    lookahead_batches: list[ShortcutBatch] = []
     start_step = 1
     if config.resume is not None:
         checkpoint = torch.load(config.resume, map_location=device)
@@ -420,6 +527,7 @@ def run(config: MAMLShortcutConfig) -> Path:
             router_optimizer.load_state_dict(checkpoint["router_optimizer"])
         ordinary_optimizer.load_state_dict(checkpoint["ordinary_optimizer"])
         train_generator.set_state(checkpoint["train_generator_state"])
+        lookahead_batches = list(checkpoint.get("lookahead_batches", ()))
         start_step = int(checkpoint["step"]) + 1
 
     fixed_fitness_pairs = make_fitness_pairs(
@@ -441,6 +549,17 @@ def run(config: MAMLShortcutConfig) -> Path:
         leak_mode="correct",
         seed_offset=30_000,
     )
+    while len(lookahead_batches) < config.lookahead_steps:
+        lookahead_batches.append(
+            make_biased_batch(
+                config,
+                generator=train_generator,
+                vocabulary=vocabulary,
+                device=device,
+            )
+        )
+    if len(lookahead_batches) != config.lookahead_steps:
+        raise ValueError("resume lookahead does not match configured horizon")
     wandb_run = initialize_wandb(config)
     if wandb_run is not None:
         print(f"W&B: {wandb_run.url}", flush=True)
@@ -463,23 +582,7 @@ def run(config: MAMLShortcutConfig) -> Path:
     started_at = time.monotonic()
     for step in range(start_step, config.steps + 1):
         model.train()
-        length = int(
-            torch.randint(
-                config.min_length,
-                config.max_length + 1,
-                (),
-                generator=train_generator,
-            )
-        )
-        biased_batch = make_shortcut_batch(
-            config.batch_size,
-            length,
-            leak_mode="correct",
-            leak_placement="random_list",
-            generator=train_generator,
-            vocabulary=vocabulary,
-            device=device,
-        )
+        biased_batch = lookahead_batches[0]
         fitness_pair = fixed_fitness_pairs[
             (step - 1) % len(fixed_fitness_pairs)
         ]
@@ -497,12 +600,13 @@ def run(config: MAMLShortcutConfig) -> Path:
             router_optimizer.zero_grad(set_to_none=True)
             ordinary_optimizer.zero_grad(set_to_none=True)
             with second_order_attention_context(device):
-                objective = one_step_router_objective(
+                objective = router_lookahead_objective(
                     model,
                     router,
-                    biased_batch,
+                    tuple(lookahead_batches),
                     fitness_pair,
-                    inner_learning_rate=config.inner_learning_rate,
+                    ordinary_optimizer=ordinary_optimizer,
+                    gradient_clip=config.gradient_clip,
                 )
                 router_gradients = torch.autograd.grad(
                     objective.meta_loss,
@@ -541,11 +645,21 @@ def run(config: MAMLShortcutConfig) -> Path:
             config.gradient_clip,
         )
         ordinary_optimizer.step()
+        lookahead_batches.pop(0)
+        lookahead_batches.append(
+            make_biased_batch(
+                config,
+                generator=train_generator,
+                vocabulary=vocabulary,
+                device=device,
+            )
+        )
 
         if report_step:
             summary = {
                 "step": float(step),
-                "train/length": float(length),
+                "train/length": float(biased_batch.length),
+                "train/lookahead_steps": float(config.lookahead_steps),
                 "train/correct_leak_loss": float(ordinary_loss.detach()),
                 "train/correct_leak_accuracy": float(
                     ordinary_accuracy.detach()
@@ -559,6 +673,9 @@ def run(config: MAMLShortcutConfig) -> Path:
                     {
                         "train/virtual_short_loss": float(
                             objective.short_loss.detach()
+                        ),
+                        "train/lookahead_mean_short_loss": float(
+                            objective.lookahead_mean_loss.detach()
                         ),
                         "train/fixed_meta_loss_after_virtual": float(
                             objective.meta_loss.detach()
@@ -609,6 +726,7 @@ def run(config: MAMLShortcutConfig) -> Path:
                     router_optimizer=router_optimizer,
                     ordinary_optimizer=ordinary_optimizer,
                     train_generator=train_generator,
+                    lookahead_batches=tuple(lookahead_batches),
                     step=step,
                 )
 

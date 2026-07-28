@@ -995,6 +995,24 @@ BackwardRule = Union[LearnedBackwardRule, AttentionRoutingRule]
 class ShortcutDecoderTransformer(DecoderTransformer):
     """Decoder Transformer that can install training-only backward hooks."""
 
+    def forward(
+        self,
+        token_ids: Tensor,
+        *,
+        extra_input_embeddings: Tensor | None = None,
+        backward_rule: BackwardRule | None = None,
+    ) -> Tensor:
+        if backward_rule is None:
+            return super().forward(
+                token_ids,
+                extra_input_embeddings=extra_input_embeddings,
+            )
+        if extra_input_embeddings is not None:
+            raise ValueError(
+                "backward routing does not support extra input embeddings"
+            )
+        return self.forward_with_backward_rule(token_ids, backward_rule)
+
     def forward_with_backward_rule(
         self,
         token_ids: Tensor,
