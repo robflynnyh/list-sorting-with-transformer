@@ -43,4 +43,18 @@ CPU and real-shape GPU smoke runs completed successfully. The production-shape
 GPU smoke measured approximately 17.5 training iterations per second before
 periodic evaluation overhead.
 
-The full repository suite passes with 327 tests. Long-run launch pending.
+The full repository suite passes with 327 tests.
+
+## Active run
+
+- W&B:
+  <https://wandb.ai/wobrob101/list-sorting-maml/runs/s8ne3b1e>
+- Run: `pointer-next-maml-length20-meta50-heldout400-seed7`
+- Service: `list-sorting-maml-length-generalization.service`
+- Output:
+  `artifacts/maml_length_generalization/pointer-next-maml-length20-meta50-heldout400-seed7`
+
+The run uses one GPU through `with-gpu`. At step 300, fixed-set accuracies were
+100% at lengths 2, 20, and 50, and 16.4% at reporting-only length 400. The
+measured training rate is approximately 18.9 iterations per second before
+periodic evaluation overhead.
