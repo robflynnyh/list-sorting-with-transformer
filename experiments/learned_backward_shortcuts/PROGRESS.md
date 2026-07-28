@@ -3047,6 +3047,12 @@ canonical default uses ordinary population top-k, while the launcher adds only
 `--deduplicate-antithetic-elites`. This makes the next run a clean
 deduplication comparison against W&B run `abrcnn6i`.
 
+The clean comparison is running as W&B run `pg3s1u7d`. Generation 0 matches
+`abrcnn6i`: both select elite-2, accept the update with minimum matched fitness
+gain `1.67749`, and use step scale `0.105`. The top two candidates in this
+generation already came from distinct antithetic directions, so the
+deduplication flag had no effect yet.
+
 ### Decoupled candidate search and commit scale
 
 The adaptive controller can now separate the two roles previously assigned to
