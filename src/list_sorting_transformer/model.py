@@ -580,6 +580,7 @@ class CausalSelfAttention(nn.Module):
         self.top_k: int | None = None
         self.top_k_straight_through = False
         self.manual_attention = False
+        self.active_heads = self.n_heads
 
     def configure_top_k(
         self,
@@ -593,6 +594,22 @@ class CausalSelfAttention(nn.Module):
             raise ValueError("straight-through attention requires top_k")
         self.top_k = top_k
         self.top_k_straight_through = straight_through
+
+    def configure_active_heads(self, active_heads: int) -> None:
+        if not 1 <= active_heads <= self.n_heads:
+            raise ValueError(
+                f"active_heads must be in [1, {self.n_heads}]"
+            )
+        self.active_heads = active_heads
+
+    def _mask_inactive_heads(self, attended: Tensor) -> Tensor:
+        if self.active_heads == self.n_heads:
+            return attended
+        mask = torch.arange(
+            self.n_heads,
+            device=attended.device,
+        ) < self.active_heads
+        return attended * mask.view(1, self.n_heads, 1, 1)
 
     def _top_k_attention(
         self,
@@ -840,6 +857,9 @@ class CausalSelfAttention(nn.Module):
                 attention_mask=combined_mask,
                 is_causal=cache is None and combined_mask is None,
             )
+        attended = self._mask_inactive_heads(attended)
+        if routed_attended is not None:
+            routed_attended = self._mask_inactive_heads(routed_attended)
         attended = attended.transpose(1, 2).contiguous().view(
             batch_size,
             sequence_length,

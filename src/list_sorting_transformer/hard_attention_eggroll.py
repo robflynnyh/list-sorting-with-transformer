@@ -191,6 +191,7 @@ class HardAttentionEggrollConfig:
 class CurriculumState:
     current_max_length: int
     attention_top_k: int | None
+    active_heads: int
     success_streak: int = 0
     promotion_count: int = 0
 
@@ -209,6 +210,22 @@ def initialize_curriculum_state(
             if config.curriculum or config.attention_mode == "dense"
             else 1
         ),
+        active_heads=config.heads,
+    )
+
+
+def restore_curriculum_state(
+    values: dict[str, Any],
+    config: HardAttentionEggrollConfig,
+) -> CurriculumState:
+    """Load curriculum state, including checkpoints from before head pruning."""
+
+    return CurriculumState(
+        current_max_length=int(values["current_max_length"]),
+        attention_top_k=values["attention_top_k"],
+        active_heads=int(values.get("active_heads", config.heads)),
+        success_streak=int(values.get("success_streak", 0)),
+        promotion_count=int(values.get("promotion_count", 0)),
     )
 
 
@@ -220,6 +237,7 @@ def curriculum_is_complete(
         config.curriculum
         and state.current_max_length == config.train_max_length
         and state.attention_top_k == 1
+        and state.active_heads == 1
     )
 
 
@@ -229,7 +247,7 @@ def update_curriculum(
     *,
     criterion_accuracy: float,
 ) -> str | None:
-    """Advance at most one length or sparsity stage."""
+    """Advance at most one length, attention-width, or head-count stage."""
 
     if not config.curriculum or curriculum_is_complete(state, config):
         return None
@@ -251,6 +269,9 @@ def update_curriculum(
     if state.attention_top_k > 1:
         state.attention_top_k -= 1
         return "increase_sparsity"
+    if state.active_heads > 1:
+        state.active_heads -= 1
+        return "prune_head"
     return None
 
 
@@ -301,9 +322,11 @@ class HardAttentionPointerTransformer(nn.Module):
             _set_modular_fourier_codebooks(self.position_embedding)
         self.position_embedding.requires_grad_(False)
         self.current_top_k: int | None = None
+        self.current_active_heads = config.heads
         self.set_attention_top_k(
             1 if config.attention_mode == "top1" else None
         )
+        self.set_active_heads(config.heads)
         self.output = nn.Linear(config.d_model, config.symbol_count)
         nn.init.normal_(self.output.weight, mean=0.0, std=0.02)
         nn.init.zeros_(self.output.bias)
@@ -314,6 +337,15 @@ class HardAttentionPointerTransformer(nn.Module):
         self.current_top_k = top_k
         for block in self.encoder.blocks:
             block.attention.configure_top_k(top_k)
+
+    def set_active_heads(self, active_heads: int) -> None:
+        if not 1 <= active_heads <= self.config.heads:
+            raise ValueError(
+                f"active heads must be in [1, {self.config.heads}]"
+            )
+        self.current_active_heads = active_heads
+        for block in self.encoder.blocks:
+            block.attention.configure_active_heads(active_heads)
 
     def position_embeddings(
         self,
@@ -621,6 +653,17 @@ def _population_attention(
             scores.gather(-1, selected_top_k),
         )
         attended = sparse_scores.softmax(dim=-1) @ value
+    if model.current_active_heads < head_count:
+        head_mask = torch.arange(
+            head_count,
+            device=attended.device,
+        ) < model.current_active_heads
+        attended = attended * head_mask.view(
+            *((1,) * (attended.ndim - 3)),
+            head_count,
+            1,
+            1,
+        )
     attended = attended.transpose(-3, -2).reshape(
         population_size,
         *sample_shape,
@@ -1347,6 +1390,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
     )
     curriculum_state = initialize_curriculum_state(config)
     model.set_attention_top_k(curriculum_state.attention_top_k)
+    model.set_active_heads(curriculum_state.active_heads)
     start_generation = 1
     checkpoint = None
     if config.resume is not None:
@@ -1376,10 +1420,12 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                 checkpoint["curriculum_generator_state"].cpu()
             )
         if "curriculum_state" in checkpoint:
-            curriculum_state = CurriculumState(
-                **checkpoint["curriculum_state"]
+            curriculum_state = restore_curriculum_state(
+                checkpoint["curriculum_state"],
+                config,
             )
         model.set_attention_top_k(curriculum_state.attention_top_k)
+        model.set_active_heads(curriculum_state.active_heads)
         start_generation = int(checkpoint["generation"]) + 1
 
     evaluation_data = make_evaluation_data(
@@ -1411,6 +1457,9 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             ),
             "curriculum/attention_top_k": float(
                 curriculum_state.attention_top_k or 0
+            ),
+            "curriculum/active_heads": float(
+                curriculum_state.active_heads
             ),
             "curriculum/dense_attention": float(
                 curriculum_state.attention_top_k is None
@@ -1662,6 +1711,9 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                     "curriculum/attention_top_k": float(
                         curriculum_state.attention_top_k or 0
                     ),
+                    "curriculum/active_heads": float(
+                        curriculum_state.active_heads
+                    ),
                     "curriculum/dense_attention": float(
                         curriculum_state.attention_top_k is None
                     ),
@@ -1732,6 +1784,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                 model.set_attention_top_k(
                     curriculum_state.attention_top_k
                 )
+                model.set_active_heads(curriculum_state.active_heads)
                 summary.update(
                     {
                         "curriculum/criterion_loss": criterion_loss,
@@ -1751,11 +1804,17 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                         "curriculum/increased_sparsity": float(
                             promotion == "increase_sparsity"
                         ),
+                        "curriculum/pruned_head": float(
+                            promotion == "prune_head"
+                        ),
                         "curriculum/current_max_length": float(
                             curriculum_state.current_max_length
                         ),
                         "curriculum/attention_top_k": float(
                             curriculum_state.attention_top_k or 0
+                        ),
+                        "curriculum/active_heads": float(
+                            curriculum_state.active_heads
                         ),
                         "curriculum/dense_attention": float(
                             curriculum_state.attention_top_k is None

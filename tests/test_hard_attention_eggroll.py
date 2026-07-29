@@ -22,6 +22,7 @@ from list_sorting_transformer.hard_attention_eggroll import (
     make_model,
     pointer_targets,
     population_forward,
+    restore_curriculum_state,
     run,
     sample_antithetic_rank_one_noise,
     shape_fitness,
@@ -86,6 +87,9 @@ def test_model_uses_fixed_modular_positions_and_exact_top1() -> None:
     assert tuple(
         block.attention.top_k for block in model.encoder.blocks
     ) == (1, 1)
+    assert tuple(
+        block.attention.active_heads for block in model.encoder.blocks
+    ) == (4, 4)
     assert not any(
         parameter.requires_grad
         for parameter in model.position_embedding.parameters()
@@ -116,10 +120,13 @@ def test_evaluation_batch_size_respects_attention_budget() -> None:
 
 def assert_factorized_population_matches_materialized_candidates(
     top_k: int | None,
+    *,
+    active_heads: int = 4,
 ) -> None:
     config = small_config()
     model = make_model(config, device=torch.device("cpu"))
     model.set_attention_top_k(top_k)
+    model.set_active_heads(active_heads)
     data_generator = torch.Generator().manual_seed(31)
     batch = make_pointer_next_batch(
         config.batch_size,
@@ -177,6 +184,13 @@ def test_factorized_population_matches_materialized_top2_candidates() -> None:
 
 def test_factorized_population_matches_materialized_dense_candidates() -> None:
     assert_factorized_population_matches_materialized_candidates(None)
+
+
+def test_factorized_population_matches_single_active_head_candidates() -> None:
+    assert_factorized_population_matches_materialized_candidates(
+        1,
+        active_heads=1,
+    )
 
 
 def test_grouped_population_matches_candidate_specific_materialization() -> None:
@@ -338,6 +352,7 @@ def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
     assert state == CurriculumState(
         current_max_length=2,
         attention_top_k=None,
+        active_heads=4,
     )
     assert update_curriculum(state, config, criterion_accuracy=0.69) is None
     assert state.success_streak == 0
@@ -348,8 +363,16 @@ def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
         ("start_sparsity", 4, 3),
         ("increase_sparsity", 4, 2),
         ("increase_sparsity", 4, 1),
+        ("prune_head", 4, 1),
+        ("prune_head", 4, 1),
+        ("prune_head", 4, 1),
     )
-    for promotion, expected_length, expected_top_k in expected_promotions:
+    expected_heads = (4, 4, 4, 4, 4, 3, 2, 1)
+    for (
+        promotion,
+        expected_length,
+        expected_top_k,
+    ), expected_active_heads in zip(expected_promotions, expected_heads):
         assert update_curriculum(
             state,
             config,
@@ -362,10 +385,28 @@ def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
         ) == promotion
         assert state.current_max_length == expected_length
         assert state.attention_top_k == expected_top_k
+        assert state.active_heads == expected_active_heads
 
     assert curriculum_is_complete(state, config)
     assert state.promotion_count == len(expected_promotions)
     assert update_curriculum(state, config, criterion_accuracy=1.0) is None
+
+
+def test_old_curriculum_checkpoint_resumes_before_head_pruning() -> None:
+    config = small_config(curriculum=True)
+
+    state = restore_curriculum_state(
+        {
+            "current_max_length": 4,
+            "attention_top_k": 1,
+            "success_streak": 0,
+            "promotion_count": 5,
+        },
+        config,
+    )
+
+    assert state.active_heads == config.heads
+    assert not curriculum_is_complete(state, config)
 
 
 def test_training_streak_only_checks_current_maximum_length() -> None:
@@ -523,6 +564,7 @@ def test_tiny_run_writes_metrics_and_checkpoint(tmp_path: Path) -> None:
     assert checkpoint["curriculum_state"] == {
         "current_max_length": 4,
         "attention_top_k": 1,
+        "active_heads": 4,
         "success_streak": 0,
         "promotion_count": 0,
     }

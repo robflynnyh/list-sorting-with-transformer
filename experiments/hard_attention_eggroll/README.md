@@ -9,7 +9,8 @@ backward-rule or shortcut experiments.
 - Two-layer, four-head decoder Transformer.
 - The fixed setup uses exact top-1 causal attention. The curriculum setup
   begins with dense attention, progressively restricts it to top-k softmax,
-  and finishes at exact top-1.
+  reaches exact top-1, and then prunes active heads from four to one in every
+  layer.
 - Split 64-dimensional content and 64-dimensional position inputs.
 - Absolute position is the concatenation of fixed Fourier residue codes for
   moduli `2,3,5,7,11,13,17,19`.
@@ -49,12 +50,15 @@ toward the selected elite centroid.
 
 ## Performance-gated curriculum
 
-`--curriculum` enables two sequential curricula:
+`--curriculum` enables three sequential curricula:
 
 1. Attention remains dense while the sampled training range grows from length
    `2` to `2..20`, one maximum length at a time.
 2. At length 20, attention switches to top-20 softmax and then reduces `k` one
    step at a time until top-1 becomes exact argmax attention.
+3. At top-1, the highest-index active head in every layer is masked out one at
+   a time until each layer has one active head. Parameter shapes remain fixed,
+   so checkpoints from before head pruning remain compatible.
 
 Each stage requires at least 70% accuracy on three consecutive fresh
 1,024-example probes at the current maximum length. Probes use independent
@@ -123,6 +127,7 @@ Useful W&B metrics:
   directions using the positive antithetic sign.
 - `curriculum/current_max_length`: active upper training length.
 - `curriculum/attention_top_k`: active `k`, with zero denoting dense attention.
+- `curriculum/active_heads`: number of active attention heads in every layer.
 - `curriculum/probe_accuracy`: fresh performance used for promotion.
 - `curriculum/criterion_accuracy`: accuracy used by either promotion mode.
 - `curriculum/promoted`: whether the current check advanced either curriculum.
