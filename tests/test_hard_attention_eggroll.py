@@ -16,6 +16,7 @@ from list_sorting_transformer.hard_attention_eggroll import (
     curriculum_is_complete,
     estimate_elite_centroid_directions,
     estimate_reward_gradients,
+    evaluation_batch_size,
     evaluate_population,
     initialize_curriculum_state,
     make_model,
@@ -90,6 +91,27 @@ def test_model_uses_fixed_modular_positions_and_exact_top1() -> None:
         for parameter in model.position_embedding.parameters()
     )
     assert model.position_embedding.period == 3 * 5 * 7 * 11
+
+
+def test_evaluation_batch_size_respects_attention_budget() -> None:
+    assert (
+        evaluation_batch_size(
+            configured_batch_size=128,
+            attention_element_budget=4 * 100 * 100,
+            heads=4,
+            prompt_length=10,
+        )
+        == 100
+    )
+    assert (
+        evaluation_batch_size(
+            configured_batch_size=128,
+            attention_element_budget=4 * 100 * 100,
+            heads=4,
+            prompt_length=100,
+        )
+        == 1
+    )
 
 
 def assert_factorized_population_matches_materialized_candidates(

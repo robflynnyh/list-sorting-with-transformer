@@ -617,7 +617,6 @@ class CausalSelfAttention(nn.Module):
         if attention_mask is not None:
             scores = scores.masked_fill(~attention_mask, float("-inf"))
 
-        soft_weights = scores.softmax(dim=-1)
         selected = scores.topk(
             min(self.top_k or key_length, key_length),
             dim=-1,
@@ -626,6 +625,7 @@ class CausalSelfAttention(nn.Module):
         hard_scores.scatter_(-1, selected, scores.gather(-1, selected))
         hard_weights = hard_scores.softmax(dim=-1)
         if self.top_k_straight_through and self.training:
+            soft_weights = scores.softmax(dim=-1)
             weights = soft_weights + (hard_weights - soft_weights).detach()
         else:
             weights = hard_weights

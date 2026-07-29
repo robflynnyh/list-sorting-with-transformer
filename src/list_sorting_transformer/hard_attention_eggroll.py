@@ -41,7 +41,10 @@ class HardAttentionEggrollConfig:
     train_max_length: int = 20
     eval_lengths: tuple[int, ...] = (2, 5, 10, 20, 40, 100)
     eval_examples: int = 1_024
+    long_eval_examples: int = 64
+    long_eval_min_length: int = 1_000
     eval_batch_size: int = 128
+    eval_attention_element_budget: int = 32_000_000
     symbol_count: int = 10
     d_model: int = 128
     layers: int = 2
@@ -85,7 +88,10 @@ class HardAttentionEggrollConfig:
             self.train_min_length,
             self.train_max_length,
             self.eval_examples,
+            self.long_eval_examples,
+            self.long_eval_min_length,
             self.eval_batch_size,
+            self.eval_attention_element_budget,
             self.curriculum_success_checks,
             self.curriculum_check_interval,
             self.curriculum_examples,
@@ -1089,14 +1095,22 @@ def make_evaluation_data(
     return {
         length: (
             make_pointer_next_batch(
-                config.eval_examples,
+                (
+                    config.long_eval_examples
+                    if length >= config.long_eval_min_length
+                    else config.eval_examples
+                ),
                 length,
                 generator=generator,
                 vocabulary=vocabulary,
                 device=device,
             ),
             sample_position_offsets(
-                config.eval_examples,
+                (
+                    config.long_eval_examples
+                    if length >= config.long_eval_min_length
+                    else config.eval_examples
+                ),
                 minimum=config.position_offset_min,
                 maximum=config.position_offset_max,
                 generator=generator,
@@ -1107,6 +1121,21 @@ def make_evaluation_data(
     }
 
 
+def evaluation_batch_size(
+    *,
+    configured_batch_size: int,
+    attention_element_budget: int,
+    heads: int,
+    prompt_length: int,
+) -> int:
+    """Bound the number of materialized attention-score elements per batch."""
+
+    attention_limited = attention_element_budget // (
+        heads * prompt_length * prompt_length
+    )
+    return min(configured_batch_size, max(1, attention_limited))
+
+
 @torch.inference_mode()
 def evaluate_pointer_batch(
     model: HardAttentionPointerTransformer,
@@ -1114,12 +1143,20 @@ def evaluate_pointer_batch(
     offsets: Tensor,
     *,
     eval_batch_size: int,
-) -> tuple[float, float]:
+    eval_attention_element_budget: int,
+    heads: int,
+) -> tuple[float, float, int]:
     targets = pointer_targets(batch)
+    resolved_batch_size = evaluation_batch_size(
+        configured_batch_size=eval_batch_size,
+        attention_element_budget=eval_attention_element_budget,
+        heads=heads,
+        prompt_length=batch.prompt_length,
+    )
     loss_sum = 0.0
     correct = 0
-    for start in range(0, targets.shape[0], eval_batch_size):
-        end = min(start + eval_batch_size, targets.shape[0])
+    for start in range(0, targets.shape[0], resolved_batch_size):
+        end = min(start + resolved_batch_size, targets.shape[0])
         logits = model(
             batch.prompt_ids[start:end],
             offsets=offsets[start:end],
@@ -1137,6 +1174,7 @@ def evaluate_pointer_batch(
     return (
         loss_sum / targets.shape[0],
         correct / targets.shape[0],
+        resolved_batch_size,
     )
 
 
@@ -1147,20 +1185,28 @@ def evaluate_model(
     *,
     train_max_length: int,
     eval_batch_size: int,
+    eval_attention_element_budget: int,
+    heads: int,
 ) -> dict[str, float]:
     model.eval()
     summary = {}
     in_domain_accuracies = []
     out_of_domain_accuracies = []
     for length, (batch, offsets) in evaluation_data.items():
-        loss, accuracy = evaluate_pointer_batch(
+        loss, accuracy, resolved_batch_size = evaluate_pointer_batch(
             model,
             batch,
             offsets,
             eval_batch_size=eval_batch_size,
+            eval_attention_element_budget=eval_attention_element_budget,
+            heads=heads,
         )
         summary[f"eval/length_{length}/loss"] = loss
         summary[f"eval/length_{length}/accuracy"] = accuracy
+        summary[f"eval/length_{length}/examples"] = float(batch.values.shape[0])
+        summary[f"eval/length_{length}/batch_size"] = float(
+            resolved_batch_size
+        )
         (
             in_domain_accuracies
             if length <= train_max_length
@@ -1198,12 +1244,15 @@ def evaluate_curriculum_probe(
         generator=generator,
         device=device,
     )
-    return evaluate_pointer_batch(
+    loss, accuracy, _ = evaluate_pointer_batch(
         model,
         batch,
         offsets,
         eval_batch_size=config.eval_batch_size,
+        eval_attention_element_budget=config.eval_attention_element_budget,
+        heads=config.heads,
     )
+    return loss, accuracy
 
 
 def initialize_wandb(
@@ -1376,6 +1425,10 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                 evaluation_data,
                 train_max_length=config.train_max_length,
                 eval_batch_size=config.eval_batch_size,
+                eval_attention_element_budget=(
+                    config.eval_attention_element_budget
+                ),
+                heads=config.heads,
             )
         )
         with metrics_path.open("a") as metrics_file:
@@ -1637,6 +1690,10 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                         evaluation_data,
                         train_max_length=config.train_max_length,
                         eval_batch_size=config.eval_batch_size,
+                        eval_attention_element_budget=(
+                            config.eval_attention_element_budget
+                        ),
+                        heads=config.heads,
                     )
                 )
                 print(
@@ -1847,9 +1904,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=HardAttentionEggrollConfig.eval_examples,
     )
     parser.add_argument(
+        "--long-eval-examples",
+        type=int,
+        default=HardAttentionEggrollConfig.long_eval_examples,
+    )
+    parser.add_argument(
+        "--long-eval-min-length",
+        type=int,
+        default=HardAttentionEggrollConfig.long_eval_min_length,
+    )
+    parser.add_argument(
         "--eval-batch-size",
         type=int,
         default=HardAttentionEggrollConfig.eval_batch_size,
+    )
+    parser.add_argument(
+        "--eval-attention-element-budget",
+        type=int,
+        default=HardAttentionEggrollConfig.eval_attention_element_budget,
     )
     parser.add_argument("--symbol-count", type=int, default=10)
     parser.add_argument("--d-model", type=int, default=128)

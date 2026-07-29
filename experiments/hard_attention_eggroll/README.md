@@ -85,7 +85,12 @@ Checkpoints store every rank's perturbation RNG state and the active W&B run ID.
 Passing `--resume path/to/latest.pt` with the same GPU count resumes the model,
 optimizer, curriculum, random streams, metrics file, and W&B run.
 Long-length center evaluations are processed in batches of 128 examples to
-bound attention memory without changing the fixed evaluation set.
+bound attention memory without changing the fixed evaluation set. The runtime
+also shrinks that batch dynamically to keep materialized attention matrices
+under `--eval-attention-element-budget`. Lengths at or above
+`--long-eval-min-length` use a separate fixed sample count configured by
+`--long-eval-examples`, making extreme-length probes practical without changing
+the existing evaluation sets.
 
 The paper-style grouped launcher defaults to population 8,192, eight unique
 examples, bf16 candidate forwards, and the performance-gated curriculum:

@@ -24,7 +24,10 @@ ARGS=(
   --train-max-length 20 \
   --eval-lengths 2,5,10,20,40,100,400 \
   --eval-examples 1024 \
+  --long-eval-examples 64 \
+  --long-eval-min-length 1000 \
   --eval-batch-size 128 \
+  --eval-attention-element-budget 32000000 \
   --d-model 128 \
   --layers 2 \
   --heads 4 \
