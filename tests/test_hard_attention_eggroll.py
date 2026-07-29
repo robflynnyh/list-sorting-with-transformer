@@ -233,6 +233,74 @@ def test_grouped_population_matches_candidate_specific_materialization() -> None
     torch.testing.assert_close(population.losses, expected_losses)
 
 
+def test_grouped_population_preserves_global_pair_assignment_across_chunks() -> None:
+    config = small_config(batch_size=2, population_size=16)
+    model = make_model(config, device=torch.device("cpu"))
+    data_generator = torch.Generator().manual_seed(47)
+    batch = make_pointer_next_batch(
+        config.batch_size,
+        4,
+        generator=data_generator,
+        vocabulary=model.vocabulary,
+    )
+    offsets = torch.tensor([-91, 73])
+    antithetic_noise = sample_antithetic_rank_one_noise(
+        model,
+        config.population_size,
+        generator=torch.Generator().manual_seed(53),
+    )
+    signed_noise = antithetic_noise.pair_chunk(
+        0,
+        antithetic_noise.pair_count,
+    )
+    pair_examples = torch.arange(antithetic_noise.pair_count) % len(offsets)
+    signed_examples = torch.cat((pair_examples, pair_examples))
+
+    materialized_logits = torch.stack(
+        [
+            materialize_candidate(
+                model,
+                signed_noise,
+                candidate_index,
+                config.sigma,
+            )(
+                batch.prompt_ids[example_index : example_index + 1],
+                offsets=offsets[example_index : example_index + 1],
+            )[0]
+            for candidate_index, example_index in enumerate(
+                signed_examples.tolist()
+            )
+        ]
+    )
+    expected_losses = F.cross_entropy(
+        materialized_logits,
+        pointer_targets(batch)[signed_examples],
+        reduction="none",
+    )
+
+    chunked = evaluate_population(
+        model,
+        batch,
+        offsets,
+        antithetic_noise,
+        sigma=config.sigma,
+        population_chunk_size=6,
+        data_mode="grouped",
+    )
+    unchunked = evaluate_population(
+        model,
+        batch,
+        offsets,
+        antithetic_noise,
+        sigma=config.sigma,
+        population_chunk_size=config.population_size,
+        data_mode="grouped",
+    )
+
+    torch.testing.assert_close(chunked.losses, expected_losses)
+    torch.testing.assert_close(chunked.losses, unchunked.losses)
+
+
 def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
     config = small_config(
         curriculum=True,
