@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from itertools import product
 import json
 import math
 import os
@@ -196,9 +197,25 @@ class HardAttentionEggrollConfig:
 class CurriculumState:
     current_max_length: int
     attention_top_k: int | None
-    active_heads: int
+    active_head_indices: tuple[tuple[int, ...], ...]
     success_streak: int = 0
     promotion_count: int = 0
+
+    @property
+    def active_heads(self) -> int:
+        head_counts = {len(indices) for indices in self.active_head_indices}
+        if len(head_counts) != 1:
+            raise ValueError("all layers must have the same active head count")
+        return head_counts.pop()
+
+
+@dataclass(frozen=True)
+class HeadPruningSelection:
+    active_head_indices: tuple[tuple[int, ...], ...]
+    removed_head_indices: tuple[int, ...]
+    loss: float
+    accuracy: float
+    candidates_evaluated: int
 
 
 def initialize_curriculum_state(
@@ -215,7 +232,9 @@ def initialize_curriculum_state(
             if config.curriculum or config.attention_mode == "dense"
             else 1
         ),
-        active_heads=config.heads,
+        active_head_indices=tuple(
+            tuple(range(config.heads)) for _ in range(config.layers)
+        ),
     )
 
 
@@ -225,10 +244,21 @@ def restore_curriculum_state(
 ) -> CurriculumState:
     """Load curriculum state, including checkpoints from before head pruning."""
 
+    active_heads = int(values.get("active_heads", config.heads))
+    stored_indices = values.get("active_head_indices")
+    active_head_indices = (
+        tuple(tuple(int(index) for index in layer) for layer in stored_indices)
+        if stored_indices is not None
+        else tuple(
+            tuple(range(active_heads)) for _ in range(config.layers)
+        )
+    )
+    if len(active_head_indices) != config.layers:
+        raise ValueError("checkpoint active heads do not match model layers")
     return CurriculumState(
         current_max_length=int(values["current_max_length"]),
         attention_top_k=values["attention_top_k"],
-        active_heads=int(values.get("active_heads", config.heads)),
+        active_head_indices=active_head_indices,
         success_streak=int(values.get("success_streak", 0)),
         promotion_count=int(values.get("promotion_count", 0)),
     )
@@ -251,17 +281,24 @@ def update_curriculum(
     config: HardAttentionEggrollConfig,
     *,
     criterion_accuracy: float,
+    next_active_head_indices: tuple[tuple[int, ...], ...] | None = None,
 ) -> str | None:
     """Advance at most one length, attention-width, or head-count stage."""
 
     if not config.curriculum or curriculum_is_complete(state, config):
         return None
-    if criterion_accuracy < config.curriculum_accuracy_threshold:
-        state.success_streak = 0
-        return None
-    state.success_streak += 1
-    if state.success_streak < config.curriculum_success_checks:
-        return None
+    head_pruning_stage = (
+        state.current_max_length == config.train_max_length
+        and state.attention_top_k == 1
+        and state.active_heads > 1
+    )
+    if not head_pruning_stage:
+        if criterion_accuracy < config.curriculum_accuracy_threshold:
+            state.success_streak = 0
+            return None
+        state.success_streak += 1
+        if state.success_streak < config.curriculum_success_checks:
+            return None
 
     state.success_streak = 0
     state.promotion_count += 1
@@ -275,9 +312,53 @@ def update_curriculum(
         state.attention_top_k -= 1
         return "increase_sparsity"
     if state.active_heads > 1:
-        state.active_heads -= 1
+        if next_active_head_indices is None:
+            next_active_head_indices = tuple(
+                indices[:-1] for indices in state.active_head_indices
+            )
+        expected_head_count = state.active_heads - 1
+        if (
+            len(next_active_head_indices) != config.layers
+            or any(
+                len(indices) != expected_head_count
+                for indices in next_active_head_indices
+            )
+        ):
+            raise ValueError("pruned head selection has the wrong shape")
+        state.active_head_indices = next_active_head_indices
         return "prune_head"
     return None
+
+
+def head_pruning_due(
+    state: CurriculumState,
+    config: HardAttentionEggrollConfig,
+) -> bool:
+    return (
+        config.curriculum
+        and state.current_max_length == config.train_max_length
+        and state.attention_top_k == 1
+        and state.active_heads > 1
+    )
+
+
+def active_head_mask_value(active_head_indices: tuple[int, ...]) -> int:
+    return sum(1 << head_index for head_index in active_head_indices)
+
+
+def curriculum_head_metrics(state: CurriculumState) -> dict[str, float]:
+    metrics = {
+        "curriculum/active_heads": float(state.active_heads),
+    }
+    metrics.update(
+        {
+            f"curriculum/active_head_mask/layer_{layer_index}": float(
+                active_head_mask_value(indices)
+            )
+            for layer_index, indices in enumerate(state.active_head_indices)
+        }
+    )
+    return metrics
 
 
 def curriculum_check_due(
@@ -327,7 +408,9 @@ class HardAttentionPointerTransformer(nn.Module):
             _set_modular_fourier_codebooks(self.position_embedding)
         self.position_embedding.requires_grad_(False)
         self.current_top_k: int | None = None
-        self.current_active_heads = config.heads
+        self.current_active_head_indices = tuple(
+            tuple(range(config.heads)) for _ in range(config.layers)
+        )
         self.set_attention_top_k(
             1 if config.attention_mode == "top1" else None
         )
@@ -352,9 +435,29 @@ class HardAttentionPointerTransformer(nn.Module):
             raise ValueError(
                 f"active heads must be in [1, {self.config.heads}]"
             )
-        self.current_active_heads = active_heads
-        for block in self.encoder.blocks:
-            block.attention.configure_active_heads(active_heads)
+        self.set_active_head_indices(
+            tuple(
+                tuple(range(active_heads)) for _ in range(self.config.layers)
+            )
+        )
+
+    def set_active_head_indices(
+        self,
+        active_head_indices: tuple[tuple[int, ...], ...],
+    ) -> None:
+        if len(active_head_indices) != self.config.layers:
+            raise ValueError("active heads must be specified for every layer")
+        head_counts = {len(indices) for indices in active_head_indices}
+        if len(head_counts) != 1:
+            raise ValueError("all layers must have the same active head count")
+        self.current_active_head_indices = tuple(
+            tuple(indices) for indices in active_head_indices
+        )
+        for block, indices in zip(
+            self.encoder.blocks,
+            self.current_active_head_indices,
+        ):
+            block.attention.configure_active_head_indices(indices)
 
     def position_embeddings(
         self,
@@ -676,11 +779,15 @@ def _population_attention(
             scores.gather(-1, selected_top_k),
         )
         attended = sparse_scores.softmax(dim=-1) @ value
-    if model.current_active_heads < head_count:
-        head_mask = torch.arange(
+    active_head_indices = model.current_active_head_indices[layer_index]
+    if len(active_head_indices) < head_count:
+        head_mask = torch.zeros(
             head_count,
+            dtype=torch.bool,
             device=attended.device,
-        ) < model.current_active_heads
+        )
+        for active_head_index in active_head_indices:
+            head_mask[active_head_index] = True
         attended = attended * head_mask.view(
             *((1,) * (attended.ndim - 3)),
             head_count,
@@ -1294,14 +1401,14 @@ def evaluate_model(
         model.train(was_training)
 
 
-def evaluate_curriculum_probe(
+def make_curriculum_probe_data(
     model: HardAttentionPointerTransformer,
     config: HardAttentionEggrollConfig,
     state: CurriculumState,
     *,
     generator: torch.Generator,
     device: torch.device,
-) -> tuple[float, float]:
+) -> tuple[PointerNextBatch, Tensor]:
     batch = make_pointer_next_batch(
         config.curriculum_examples,
         state.current_max_length,
@@ -1313,6 +1420,24 @@ def evaluate_curriculum_probe(
         config.curriculum_examples,
         minimum=config.position_offset_min,
         maximum=config.position_offset_max,
+        generator=generator,
+        device=device,
+    )
+    return batch, offsets
+
+
+def evaluate_curriculum_probe(
+    model: HardAttentionPointerTransformer,
+    config: HardAttentionEggrollConfig,
+    state: CurriculumState,
+    *,
+    generator: torch.Generator,
+    device: torch.device,
+) -> tuple[float, float]:
+    batch, offsets = make_curriculum_probe_data(
+        model,
+        config,
+        state,
         generator=generator,
         device=device,
     )
@@ -1330,6 +1455,76 @@ def evaluate_curriculum_probe(
         return loss, accuracy
     finally:
         model.train(was_training)
+
+
+@torch.inference_mode()
+def select_best_head_pruning(
+    model: HardAttentionPointerTransformer,
+    state: CurriculumState,
+    batch: PointerNextBatch,
+    offsets: Tensor,
+    *,
+    eval_batch_size: int,
+    eval_attention_element_budget: int,
+    heads: int,
+) -> HeadPruningSelection:
+    """Choose the simultaneous per-layer head removal with least damage."""
+
+    if state.active_heads <= 1:
+        raise ValueError("cannot prune a one-head model")
+    original_indices = model.current_active_head_indices
+    was_training = model.training
+    model.eval()
+    best_selection = None
+    candidate_count = 0
+    try:
+        for removed_indices in product(*state.active_head_indices):
+            candidate_indices = tuple(
+                tuple(
+                    head_index
+                    for head_index in layer_indices
+                    if head_index != removed_index
+                )
+                for layer_indices, removed_index in zip(
+                    state.active_head_indices,
+                    removed_indices,
+                )
+            )
+            model.set_active_head_indices(candidate_indices)
+            loss, accuracy, _ = evaluate_pointer_batch(
+                model,
+                batch,
+                offsets,
+                eval_batch_size=eval_batch_size,
+                eval_attention_element_budget=eval_attention_element_budget,
+                heads=heads,
+            )
+            candidate_count += 1
+            selection = HeadPruningSelection(
+                active_head_indices=candidate_indices,
+                removed_head_indices=tuple(removed_indices),
+                loss=loss,
+                accuracy=accuracy,
+                candidates_evaluated=0,
+            )
+            if (
+                best_selection is None
+                or (selection.accuracy, -selection.loss)
+                > (best_selection.accuracy, -best_selection.loss)
+            ):
+                best_selection = selection
+    finally:
+        model.set_active_head_indices(original_indices)
+        model.train(was_training)
+
+    assert best_selection is not None
+    return HeadPruningSelection(
+        active_head_indices=best_selection.active_head_indices,
+        removed_head_indices=best_selection.removed_head_indices,
+        loss=best_selection.loss,
+        accuracy=best_selection.accuracy,
+        candidates_evaluated=candidate_count,
+    )
 
 
 def initialize_wandb(
@@ -1433,7 +1628,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
     )
     curriculum_state = initialize_curriculum_state(config)
     model.set_attention_top_k(curriculum_state.attention_top_k)
-    model.set_active_heads(curriculum_state.active_heads)
+    model.set_active_head_indices(curriculum_state.active_head_indices)
     start_generation = 1
     checkpoint = None
     if config.resume is not None:
@@ -1485,7 +1680,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                     attention_sampling_rng_states[rank].cpu()
                 )
         model.set_attention_top_k(curriculum_state.attention_top_k)
-        model.set_active_heads(curriculum_state.active_heads)
+        model.set_active_head_indices(curriculum_state.active_head_indices)
         start_generation = int(checkpoint["generation"]) + 1
 
     evaluation_data = make_evaluation_data(
@@ -1532,6 +1727,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                 curriculum_is_complete(curriculum_state, config)
             ),
         }
+        initial.update(curriculum_head_metrics(curriculum_state))
         initial.update(
             evaluate_model(
                 model,
@@ -1797,6 +1993,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                     "timing/generations_per_second": generation
                     / max(time.monotonic() - started_at, 1e-9),
                 }
+            summary.update(curriculum_head_metrics(curriculum_state))
             if (
                 is_primary_process()
                 and (
@@ -1844,15 +2041,47 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                             device=device,
                         )
                     )
+                pruning_selection = None
+                if head_pruning_due(
+                    curriculum_state,
+                    config,
+                ):
+                    pruning_batch, pruning_offsets = (
+                        make_curriculum_probe_data(
+                            model,
+                            config,
+                            curriculum_state,
+                            generator=curriculum_generator,
+                            device=device,
+                        )
+                    )
+                    pruning_selection = select_best_head_pruning(
+                        model,
+                        curriculum_state,
+                        pruning_batch,
+                        pruning_offsets,
+                        eval_batch_size=config.eval_batch_size,
+                        eval_attention_element_budget=(
+                            config.eval_attention_element_budget
+                        ),
+                        heads=config.heads,
+                    )
                 promotion = update_curriculum(
                     curriculum_state,
                     config,
                     criterion_accuracy=criterion_accuracy,
+                    next_active_head_indices=(
+                        pruning_selection.active_head_indices
+                        if pruning_selection is not None
+                        else None
+                    ),
                 )
                 model.set_attention_top_k(
                     curriculum_state.attention_top_k
                 )
-                model.set_active_heads(curriculum_state.active_heads)
+                model.set_active_head_indices(
+                    curriculum_state.active_head_indices
+                )
                 summary.update(
                     {
                         "curriculum/criterion_loss": criterion_loss,
@@ -1901,6 +2130,31 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                         ),
                     }
                 )
+                summary.update(curriculum_head_metrics(curriculum_state))
+                if pruning_selection is not None:
+                    summary.update(
+                        {
+                            "curriculum/pruning_probe_loss": (
+                                pruning_selection.loss
+                            ),
+                            "curriculum/pruning_probe_accuracy": (
+                                pruning_selection.accuracy
+                            ),
+                            "curriculum/pruning_candidates_evaluated": float(
+                                pruning_selection.candidates_evaluated
+                            ),
+                        }
+                    )
+                    summary.update(
+                        {
+                            f"curriculum/pruned_head/layer_{layer_index}": float(
+                                head_index
+                            )
+                            for layer_index, head_index in enumerate(
+                                pruning_selection.removed_head_indices
+                            )
+                        }
+                    )
                 if not uses_training_batch:
                     summary.update(
                         {

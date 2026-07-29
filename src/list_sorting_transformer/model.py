@@ -646,7 +646,7 @@ class CausalSelfAttention(nn.Module):
         self.top_k_straight_through = False
         self.sample_top_k = False
         self.manual_attention = False
-        self.active_heads = self.n_heads
+        self.active_head_indices = tuple(range(self.n_heads))
 
     def configure_top_k(
         self,
@@ -670,15 +670,41 @@ class CausalSelfAttention(nn.Module):
             raise ValueError(
                 f"active_heads must be in [1, {self.n_heads}]"
             )
-        self.active_heads = active_heads
+        self.configure_active_head_indices(tuple(range(active_heads)))
+
+    def configure_active_head_indices(
+        self,
+        active_head_indices: tuple[int, ...],
+    ) -> None:
+        if not active_head_indices:
+            raise ValueError("at least one attention head must remain active")
+        if len(set(active_head_indices)) != len(active_head_indices):
+            raise ValueError("active attention heads must be unique")
+        if any(
+            not 0 <= head_index < self.n_heads
+            for head_index in active_head_indices
+        ):
+            raise ValueError("active attention head index is out of range")
+        self.active_head_indices = tuple(sorted(active_head_indices))
+
+    @property
+    def active_heads(self) -> int:
+        return len(self.active_head_indices)
 
     def _mask_inactive_heads(self, attended: Tensor) -> Tensor:
         if self.active_heads == self.n_heads:
             return attended
-        mask = torch.arange(
+        head_indices = torch.arange(
             self.n_heads,
             device=attended.device,
-        ) < self.active_heads
+        )
+        mask = torch.zeros(
+            self.n_heads,
+            dtype=torch.bool,
+            device=attended.device,
+        )
+        for active_head_index in self.active_head_indices:
+            mask |= head_indices == active_head_index
         return attended * mask.view(1, self.n_heads, 1, 1)
 
     def _top_k_attention(

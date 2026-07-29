@@ -56,9 +56,13 @@ toward the selected elite centroid.
    `2` to `2..20`, one maximum length at a time.
 2. At length 20, attention switches to top-20 softmax and then reduces `k` one
    step at a time until top-1 becomes exact argmax attention.
-3. At top-1, the highest-index active head in every layer is masked out one at
-   a time until each layer has one active head. Parameter shapes remain fixed,
-   so checkpoints from before head pruning remain compatible.
+3. At top-1, every possible simultaneous one-head-per-layer removal is scored
+   on a fresh deterministic probe. The least harmful combination is applied,
+   then the search repeats at subsequent maximum-length checks until each
+   layer has one active head. Head removals do not wait for the accuracy
+   threshold, which prevents a difficult pruning stage from stalling the path
+   to one head. Parameter shapes remain fixed, so
+   checkpoints from before head pruning remain compatible.
 
 `--sample-sparse-attention` changes each sparse stage from deterministic
 highest-score selection to sampling `k` distinct sources from the attention
@@ -138,6 +142,10 @@ Useful W&B metrics:
 - `curriculum/current_max_length`: active upper training length.
 - `curriculum/attention_top_k`: active `k`, with zero denoting dense attention.
 - `curriculum/active_heads`: number of active attention heads in every layer.
+- `curriculum/active_head_mask/layer_N`: bitmask of retained head indices.
+- `curriculum/pruning_probe_accuracy`: deterministic accuracy of the selected
+  removal.
+- `curriculum/pruned_head/layer_N`: head index removed at a pruning event.
 - `attention/sampled_top_k`: whether sparse positions are sampled.
 - `attention/eval_argmax`: confirms fixed evaluation uses deterministic routes.
 - `curriculum/probe_accuracy`: fresh performance used for promotion.

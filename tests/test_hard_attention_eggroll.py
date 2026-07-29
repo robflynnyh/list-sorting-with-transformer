@@ -12,6 +12,7 @@ from list_sorting_transformer.hard_attention_eggroll import (
     AntitheticRankOneNoise,
     CurriculumState,
     HardAttentionEggrollConfig,
+    HeadPruningSelection,
     RankOneFactors,
     curriculum_check_due,
     curriculum_is_complete,
@@ -29,6 +30,7 @@ from list_sorting_transformer.hard_attention_eggroll import (
     run,
     sample_antithetic_rank_one_noise,
     shape_fitness,
+    select_best_head_pruning,
     update_curriculum,
 )
 from list_sorting_transformer.data import make_pointer_next_batch
@@ -216,11 +218,15 @@ def assert_factorized_population_matches_materialized_candidates(
     top_k: int | None,
     *,
     active_heads: int = 4,
+    active_head_indices: tuple[tuple[int, ...], ...] | None = None,
 ) -> None:
     config = small_config()
     model = make_model(config, device=torch.device("cpu"))
     model.set_attention_top_k(top_k)
-    model.set_active_heads(active_heads)
+    if active_head_indices is None:
+        model.set_active_heads(active_heads)
+    else:
+        model.set_active_head_indices(active_head_indices)
     data_generator = torch.Generator().manual_seed(31)
     batch = make_pointer_next_batch(
         config.batch_size,
@@ -284,6 +290,13 @@ def test_factorized_population_matches_single_active_head_candidates() -> None:
     assert_factorized_population_matches_materialized_candidates(
         1,
         active_heads=1,
+    )
+
+
+def test_factorized_population_matches_nonprefix_active_heads() -> None:
+    assert_factorized_population_matches_materialized_candidates(
+        1,
+        active_head_indices=((1, 3), (0, 2)),
     )
 
 
@@ -484,7 +497,7 @@ def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
     assert state == CurriculumState(
         current_max_length=2,
         attention_top_k=None,
-        active_heads=4,
+        active_head_indices=((0, 1, 2, 3), (0, 1, 2, 3)),
     )
     assert update_curriculum(state, config, criterion_accuracy=0.69) is None
     assert state.success_streak == 0
@@ -495,11 +508,8 @@ def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
         ("start_sparsity", 4, 3),
         ("increase_sparsity", 4, 2),
         ("increase_sparsity", 4, 1),
-        ("prune_head", 4, 1),
-        ("prune_head", 4, 1),
-        ("prune_head", 4, 1),
     )
-    expected_heads = (4, 4, 4, 4, 4, 3, 2, 1)
+    expected_heads = (4, 4, 4, 4, 4)
     for (
         promotion,
         expected_length,
@@ -519,8 +529,26 @@ def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
         assert state.attention_top_k == expected_top_k
         assert state.active_heads == expected_active_heads
 
+    assert update_curriculum(
+        state,
+        config,
+        criterion_accuracy=0.0,
+    ) == "prune_head"
+    assert state.active_heads == 3
+    assert update_curriculum(
+        state,
+        config,
+        criterion_accuracy=0.0,
+    ) == "prune_head"
+    assert state.active_heads == 2
+    assert update_curriculum(
+        state,
+        config,
+        criterion_accuracy=0.0,
+    ) == "prune_head"
+    assert state.active_heads == 1
     assert curriculum_is_complete(state, config)
-    assert state.promotion_count == len(expected_promotions)
+    assert state.promotion_count == len(expected_promotions) + 3
     assert update_curriculum(state, config, criterion_accuracy=1.0) is None
 
 
@@ -538,7 +566,70 @@ def test_old_curriculum_checkpoint_resumes_before_head_pruning() -> None:
     )
 
     assert state.active_heads == config.heads
+    assert state.active_head_indices == (
+        (0, 1, 2, 3),
+        (0, 1, 2, 3),
+    )
     assert not curriculum_is_complete(state, config)
+
+
+def test_head_pruning_selects_least_harmful_combination() -> None:
+    config = small_config(curriculum=True)
+    model = make_model(config, device=torch.device("cpu"))
+    state = restore_curriculum_state(
+        {
+            "current_max_length": 4,
+            "attention_top_k": 1,
+            "active_heads": 4,
+        },
+        config,
+    )
+    batch = make_pointer_next_batch(
+        2,
+        4,
+        generator=torch.Generator().manual_seed(67),
+        vocabulary=model.vocabulary,
+    )
+    offsets = torch.tensor([-7, 11])
+    all_heads = set(range(config.heads))
+
+    def candidate_score(
+        *args: object,
+        **kwargs: object,
+    ) -> tuple[float, float, int]:
+        removed = tuple(
+            next(iter(all_heads - set(indices)))
+            for indices in model.current_active_head_indices
+        )
+        accuracy = 0.95 if removed == (1, 2) else 0.50
+        loss = 0.05 if removed == (1, 2) else 0.50
+        return loss, accuracy, 2
+
+    model.train()
+    with patch(
+        "list_sorting_transformer.hard_attention_eggroll."
+        "evaluate_pointer_batch",
+        side_effect=candidate_score,
+    ):
+        selection = select_best_head_pruning(
+            model,
+            state,
+            batch,
+            offsets,
+            eval_batch_size=2,
+            eval_attention_element_budget=10_000,
+            heads=config.heads,
+        )
+
+    assert selection == HeadPruningSelection(
+        active_head_indices=((0, 2, 3), (0, 1, 3)),
+        removed_head_indices=(1, 2),
+        loss=0.05,
+        accuracy=0.95,
+        candidates_evaluated=16,
+    )
+    assert model.current_active_head_indices == state.active_head_indices
+    assert model.training
 
 
 def test_training_streak_only_checks_current_maximum_length() -> None:
@@ -696,7 +787,7 @@ def test_tiny_run_writes_metrics_and_checkpoint(tmp_path: Path) -> None:
     assert checkpoint["curriculum_state"] == {
         "current_max_length": 4,
         "attention_top_k": 1,
-        "active_heads": 4,
+        "active_head_indices": ((0, 1, 2, 3), (0, 1, 2, 3)),
         "success_streak": 0,
         "promotion_count": 0,
     }
