@@ -29,6 +29,7 @@ from list_sorting_transformer.hard_attention_eggroll import (
     update_curriculum,
 )
 from list_sorting_transformer.data import make_pointer_next_batch
+from list_sorting_transformer.model import sample_top_k_indices
 from list_sorting_transformer.positions import sample_position_offsets
 
 
@@ -95,6 +96,49 @@ def test_model_uses_fixed_modular_positions_and_exact_top1() -> None:
         for parameter in model.position_embedding.parameters()
     )
     assert model.position_embedding.period == 3 * 5 * 7 * 11
+
+
+def test_sampled_top_k_tracks_distribution_without_replacement() -> None:
+    torch.manual_seed(5)
+    probabilities = torch.tensor([0.80, 0.15, 0.05])
+    scores = probabilities.log().expand(20_000, -1)
+
+    top_one = sample_top_k_indices(scores, 1).squeeze(-1)
+    frequencies = torch.bincount(top_one, minlength=3) / top_one.numel()
+    torch.testing.assert_close(
+        frequencies,
+        probabilities,
+        atol=0.015,
+        rtol=0,
+    )
+
+    top_two = sample_top_k_indices(scores, 2)
+    assert top_two[:, 0].ne(top_two[:, 1]).all()
+
+
+def test_sampled_top_k_shares_antithetic_randomness() -> None:
+    torch.manual_seed(7)
+    scores = torch.randn(3, 2, 4)
+    paired_scores = torch.cat((scores, scores), dim=0)
+
+    selected = sample_top_k_indices(
+        paired_scores,
+        2,
+        share_antithetic_pairs=True,
+    )
+
+    assert torch.equal(selected[:3], selected[3:])
+
+
+def test_model_enables_sampled_sparse_attention() -> None:
+    model = make_model(
+        small_config(sample_sparse_attention=True),
+        device=torch.device("cpu"),
+    )
+
+    assert all(
+        block.attention.sample_top_k for block in model.encoder.blocks
+    )
 
 
 def test_evaluation_batch_size_respects_attention_budget() -> None:
@@ -191,6 +235,44 @@ def test_factorized_population_matches_single_active_head_candidates() -> None:
         1,
         active_heads=1,
     )
+
+
+def test_sampled_population_shares_routes_for_identical_antithetic_pairs() -> None:
+    config = small_config(sample_sparse_attention=True)
+    model = make_model(config, device=torch.device("cpu"))
+    data_generator = torch.Generator().manual_seed(53)
+    batch = make_pointer_next_batch(
+        config.batch_size,
+        4,
+        generator=data_generator,
+        vocabulary=model.vocabulary,
+    )
+    offsets = sample_position_offsets(
+        config.batch_size,
+        minimum=config.position_offset_min,
+        maximum=config.position_offset_max,
+        generator=data_generator,
+        device=torch.device("cpu"),
+    )
+    noise = sample_antithetic_rank_one_noise(
+        model,
+        config.population_size,
+        generator=torch.Generator().manual_seed(59),
+    ).pair_chunk(0, config.population_size // 2)
+
+    torch.manual_seed(61)
+    logits, routes = population_forward(
+        model,
+        batch.prompt_ids,
+        offsets,
+        noise,
+        sigma=0.0,
+    )
+    pair_count = config.population_size // 2
+
+    torch.testing.assert_close(logits[:pair_count], logits[pair_count:])
+    for route in routes:
+        assert torch.equal(route[:pair_count], route[pair_count:])
 
 
 def test_grouped_population_matches_candidate_specific_materialization() -> None:
@@ -569,6 +651,7 @@ def test_tiny_run_writes_metrics_and_checkpoint(tmp_path: Path) -> None:
         "promotion_count": 0,
     }
     assert len(checkpoint["noise_generator_states"]) == 1
+    assert len(checkpoint["attention_sampling_rng_states"]) == 1
     assert checkpoint["wandb_run_id"] is None
     assert "curriculum_generator_state" in checkpoint
 

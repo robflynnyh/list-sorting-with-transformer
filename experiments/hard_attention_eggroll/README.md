@@ -60,6 +60,14 @@ toward the selected elite centroid.
    a time until each layer has one active head. Parameter shapes remain fixed,
    so checkpoints from before head pruning remain compatible.
 
+`--sample-sparse-attention` changes each sparse stage from deterministic
+highest-score selection to sampling `k` distinct sources from the attention
+distribution. Selected sources retain their relative softmax weights. At
+top-1 this is categorical sampling, so a route must receive most of the
+probability mass rather than merely have the largest score. Positive and
+negative members of each antithetic pair share the same sampling randomness
+to keep their fitness comparison low variance.
+
 Each stage requires at least 70% accuracy on three consecutive fresh
 1,024-example probes at the current maximum length. Probes use independent
 data and random absolute offsets. The threshold, confirmation count, check
@@ -128,6 +136,7 @@ Useful W&B metrics:
 - `curriculum/current_max_length`: active upper training length.
 - `curriculum/attention_top_k`: active `k`, with zero denoting dense attention.
 - `curriculum/active_heads`: number of active attention heads in every layer.
+- `attention/sampled_top_k`: whether sparse positions are sampled.
 - `curriculum/probe_accuracy`: fresh performance used for promotion.
 - `curriculum/criterion_accuracy`: accuracy used by either promotion mode.
 - `curriculum/promoted`: whether the current check advanced either curriculum.

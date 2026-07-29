@@ -22,7 +22,11 @@ from .compiled_pointer_compare import (
 )
 from .data import PointerNextBatch, make_pointer_next_batch
 from .evaluate import resolve_device
-from .model import ModelConfig, SplitInputDecoderTransformer
+from .model import (
+    ModelConfig,
+    SplitInputDecoderTransformer,
+    sample_top_k_indices,
+)
 from .positions import ModularPositionEmbedding, sample_position_offsets
 from .tokens import VALUE_OFFSET, PointerNextVocabulary
 
@@ -51,6 +55,7 @@ class HardAttentionEggrollConfig:
     heads: int = 4
     ffn_multiplier: float = 4.0
     attention_mode: str = "top1"
+    sample_sparse_attention: bool = False
     position_moduli: tuple[int, ...] = DEFAULT_POSITION_MODULI
     position_offset_min: int = -1_000_000
     position_offset_max: int = 1_000_000
@@ -336,7 +341,11 @@ class HardAttentionPointerTransformer(nn.Module):
             raise ValueError("attention top-k must be positive")
         self.current_top_k = top_k
         for block in self.encoder.blocks:
-            block.attention.configure_top_k(top_k)
+            block.attention.configure_top_k(
+                top_k,
+                sample=self.config.sample_sparse_attention
+                and top_k is not None,
+            )
 
     def set_active_heads(self, active_heads: int) -> None:
         if not 1 <= active_heads <= self.config.heads:
@@ -631,6 +640,12 @@ def _population_attention(
     scores = scores.masked_fill(~causal_mask, float("-inf"))
     selected = scores.argmax(dim=-1)
     if model.current_top_k == 1:
+        if model.config.sample_sparse_attention:
+            selected = sample_top_k_indices(
+                scores,
+                1,
+                share_antithetic_pairs=True,
+            ).squeeze(-1)
         attended = torch.gather(
             value,
             dim=-2,
@@ -642,10 +657,18 @@ def _population_attention(
     elif model.current_top_k is None:
         attended = scores.softmax(dim=-1) @ value
     else:
-        selected_top_k = scores.topk(
-            min(model.current_top_k, sequence_length),
-            dim=-1,
-        ).indices
+        selected_count = min(model.current_top_k, sequence_length)
+        if model.config.sample_sparse_attention:
+            selected_top_k = sample_top_k_indices(
+                scores,
+                selected_count,
+                share_antithetic_pairs=True,
+            )
+        else:
+            selected_top_k = scores.topk(
+                selected_count,
+                dim=-1,
+            ).indices
         sparse_scores = torch.full_like(scores, float("-inf"))
         sparse_scores.scatter_(
             -1,
@@ -1329,6 +1352,7 @@ def save_checkpoint(
     curriculum_generator: torch.Generator,
     curriculum_state: CurriculumState,
     noise_generator_states: list[Tensor],
+    attention_sampling_rng_states: list[Tensor],
     wandb_run_id: str | None,
 ) -> None:
     torch.save(
@@ -1341,6 +1365,9 @@ def save_checkpoint(
             "data_generator_state": data_generator.get_state(),
             "noise_generator_state": noise_generator.get_state(),
             "noise_generator_states": noise_generator_states,
+            "attention_sampling_rng_states": (
+                attention_sampling_rng_states
+            ),
             "curriculum_generator_state": (
                 curriculum_generator.get_state()
             ),
@@ -1381,6 +1408,11 @@ def run(config: HardAttentionEggrollConfig) -> Path:
     metrics_path = output_dir / "metrics.jsonl"
     model = make_model(config, device=device)
     optimizer = make_optimizer(model, config)
+    attention_sampling_seed = config.seed + 4_000 + rank
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(attention_sampling_seed)
+    else:
+        torch.manual_seed(attention_sampling_seed)
     data_generator = torch.Generator().manual_seed(config.seed + 1_000)
     noise_generator = torch.Generator(device=device).manual_seed(
         config.seed + 2_000 + rank
@@ -1424,6 +1456,23 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                 checkpoint["curriculum_state"],
                 config,
             )
+        attention_sampling_rng_states = checkpoint.get(
+            "attention_sampling_rng_states"
+        )
+        if attention_sampling_rng_states is not None:
+            if len(attention_sampling_rng_states) != world_size:
+                raise ValueError(
+                    "checkpoint attention RNG states do not match world size"
+                )
+            if device.type == "cuda":
+                torch.cuda.set_rng_state(
+                    attention_sampling_rng_states[rank].cpu(),
+                    device=device,
+                )
+            else:
+                torch.set_rng_state(
+                    attention_sampling_rng_states[rank].cpu()
+                )
         model.set_attention_top_k(curriculum_state.attention_top_k)
         model.set_active_heads(curriculum_state.active_heads)
         start_generation = int(checkpoint["generation"]) + 1
@@ -1452,6 +1501,9 @@ def run(config: HardAttentionEggrollConfig) -> Path:
         initial = {
             "generation": 0.0,
             "curriculum/enabled": float(config.curriculum),
+            "attention/sampled_top_k": float(
+                config.sample_sparse_attention
+            ),
             "curriculum/current_max_length": float(
                 curriculum_state.current_max_length
             ),
@@ -1705,6 +1757,9 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                         optimizer.param_groups[0]["lr"]
                     ),
                     "curriculum/enabled": float(config.curriculum),
+                    "attention/sampled_top_k": float(
+                        config.sample_sparse_attention
+                    ),
                     "curriculum/current_max_length": float(
                         curriculum_state.current_max_length
                     ),
@@ -1853,6 +1908,11 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             or generation == config.generations
         ):
             local_noise_state = noise_generator.get_state().to(device)
+            local_attention_rng_state = (
+                torch.cuda.get_rng_state(device)
+                if device.type == "cuda"
+                else torch.get_rng_state()
+            ).to(device)
             if dist.is_initialized():
                 gathered_noise_states = [
                     torch.empty_like(local_noise_state)
@@ -1862,8 +1922,22 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                 noise_generator_states = [
                     state.cpu() for state in gathered_noise_states
                 ]
+                gathered_attention_rng_states = [
+                    torch.empty_like(local_attention_rng_state)
+                    for _ in range(world_size)
+                ]
+                dist.all_gather(
+                    gathered_attention_rng_states,
+                    local_attention_rng_state,
+                )
+                attention_sampling_rng_states = [
+                    state.cpu() for state in gathered_attention_rng_states
+                ]
             else:
                 noise_generator_states = [local_noise_state.cpu()]
+                attention_sampling_rng_states = [
+                    local_attention_rng_state.cpu()
+                ]
             if is_primary_process():
                 checkpoint_arguments = {
                     "config": config,
@@ -1875,6 +1949,9 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                     "curriculum_generator": curriculum_generator,
                     "curriculum_state": curriculum_state,
                     "noise_generator_states": noise_generator_states,
+                    "attention_sampling_rng_states": (
+                        attention_sampling_rng_states
+                    ),
                     "wandb_run_id": (
                         wandb_run.id if wandb_run is not None else None
                     ),
@@ -1991,6 +2068,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--attention-mode",
         choices=("top1", "dense"),
         default="top1",
+    )
+    parser.add_argument(
+        "--sample-sparse-attention",
+        action="store_true",
+        help="sample top-k source positions instead of taking the largest scores",
     )
     parser.add_argument(
         "--position-moduli",

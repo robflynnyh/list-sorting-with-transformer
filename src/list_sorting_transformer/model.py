@@ -562,6 +562,32 @@ class RotaryEmbedding(nn.Module):
         return rotated.flatten(start_dim=-2)
 
 
+def sample_top_k_indices(
+    scores: Tensor,
+    top_k: int,
+    *,
+    share_antithetic_pairs: bool = False,
+) -> Tensor:
+    """Sample distinct indices without replacement from softmax scores."""
+
+    if not 1 <= top_k <= scores.shape[-1]:
+        raise ValueError("top_k must fit within the score dimension")
+    random_shape = scores.shape
+    if share_antithetic_pairs:
+        if scores.shape[0] % 2:
+            raise ValueError("antithetic sampling requires an even population")
+        random_shape = (scores.shape[0] // 2, *scores.shape[1:])
+    uniforms = torch.rand(
+        random_shape,
+        device=scores.device,
+        dtype=torch.float32,
+    ).clamp_(min=1e-6, max=1 - 1e-6)
+    if share_antithetic_pairs:
+        uniforms = torch.cat((uniforms, uniforms), dim=0)
+    gumbel = -torch.log(-torch.log(uniforms))
+    return (scores.float() + gumbel).topk(top_k, dim=-1).indices
+
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, config: ModelConfig, *, use_rotary: bool) -> None:
         super().__init__()
@@ -579,6 +605,7 @@ class CausalSelfAttention(nn.Module):
         )
         self.top_k: int | None = None
         self.top_k_straight_through = False
+        self.sample_top_k = False
         self.manual_attention = False
         self.active_heads = self.n_heads
 
@@ -587,13 +614,17 @@ class CausalSelfAttention(nn.Module):
         top_k: int | None,
         *,
         straight_through: bool = False,
+        sample: bool = False,
     ) -> None:
         if top_k is not None and top_k < 1:
             raise ValueError("top_k must be positive")
         if straight_through and top_k is None:
             raise ValueError("straight-through attention requires top_k")
+        if sample and top_k is None:
+            raise ValueError("sampled attention requires top_k")
         self.top_k = top_k
         self.top_k_straight_through = straight_through
+        self.sample_top_k = sample
 
     def configure_active_heads(self, active_heads: int) -> None:
         if not 1 <= active_heads <= self.n_heads:
@@ -634,10 +665,11 @@ class CausalSelfAttention(nn.Module):
         if attention_mask is not None:
             scores = scores.masked_fill(~attention_mask, float("-inf"))
 
-        selected = scores.topk(
-            min(self.top_k or key_length, key_length),
-            dim=-1,
-        ).indices
+        selected_count = min(self.top_k or key_length, key_length)
+        if self.sample_top_k:
+            selected = sample_top_k_indices(scores, selected_count)
+        else:
+            selected = scores.topk(selected_count, dim=-1).indices
         hard_scores = torch.full_like(scores, float("-inf"))
         hard_scores.scatter_(-1, selected, scores.gather(-1, selected))
         hard_weights = hard_scores.softmax(dim=-1)
