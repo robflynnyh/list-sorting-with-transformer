@@ -359,6 +359,25 @@ def curriculum_head_metrics(state: CurriculumState) -> dict[str, float]:
     return metrics
 
 
+def synchronize_curriculum_criterion(
+    loss: float,
+    accuracy: float,
+    *,
+    device: torch.device,
+) -> tuple[float, float]:
+    """Use rank zero's criterion so every worker advances identically."""
+
+    if not dist.is_initialized():
+        return loss, accuracy
+    values = torch.tensor(
+        [loss, accuracy],
+        dtype=torch.float64,
+        device=device,
+    )
+    dist.broadcast(values, src=0)
+    return float(values[0]), float(values[1])
+
+
 def curriculum_check_due(
     config: HardAttentionEggrollConfig,
     state: CurriculumState,
@@ -1747,6 +1766,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
 
     started_at = time.monotonic()
     for generation in range(start_generation, config.generations + 1):
+        curriculum_promotion = None
         batch, offsets = make_training_batch(
             config,
             vocabulary=model.vocabulary,
@@ -2039,6 +2059,13 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                             device=device,
                         )
                     )
+                criterion_loss, criterion_accuracy = (
+                    synchronize_curriculum_criterion(
+                        criterion_loss,
+                        criterion_accuracy,
+                        device=device,
+                    )
+                )
                 pruning_selection = None
                 if head_pruning_due(
                     curriculum_state,
@@ -2065,7 +2092,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                         ),
                         heads=config.heads,
                     )
-                promotion = update_curriculum(
+                curriculum_promotion = update_curriculum(
                     curriculum_state,
                     config,
                     criterion_accuracy=criterion_accuracy,
@@ -2089,19 +2116,19 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                             uses_training_batch
                         ),
                         "curriculum/promoted": float(
-                            promotion is not None
+                            curriculum_promotion is not None
                         ),
                         "curriculum/promoted_length": float(
-                            promotion == "length"
+                            curriculum_promotion == "length"
                         ),
                         "curriculum/started_sparsity": float(
-                            promotion == "start_sparsity"
+                            curriculum_promotion == "start_sparsity"
                         ),
                         "curriculum/increased_sparsity": float(
-                            promotion == "increase_sparsity"
+                            curriculum_promotion == "increase_sparsity"
                         ),
                         "curriculum/pruned_head": float(
-                            promotion == "prune_head"
+                            curriculum_promotion == "prune_head"
                         ),
                         "curriculum/current_max_length": float(
                             curriculum_state.current_max_length
@@ -2172,6 +2199,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
         if (
             generation % config.checkpoint_interval == 0
             or generation == config.generations
+            or curriculum_promotion == "prune_head"
         ):
             local_noise_state = noise_generator.get_state().to(device)
             local_attention_rng_state = (

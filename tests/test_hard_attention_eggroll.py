@@ -31,6 +31,7 @@ from list_sorting_transformer.hard_attention_eggroll import (
     sample_antithetic_rank_one_noise,
     shape_fitness,
     select_best_head_pruning,
+    synchronize_curriculum_criterion,
     update_curriculum,
 )
 from list_sorting_transformer.data import make_pointer_next_batch
@@ -657,6 +658,31 @@ def test_training_streak_only_checks_current_maximum_length() -> None:
         generation=3,
         batch_length=4,
     )
+
+
+def test_curriculum_criterion_uses_rank_zero_values() -> None:
+    def fake_broadcast(values: torch.Tensor, src: int) -> None:
+        assert src == 0
+        values.copy_(torch.tensor([0.25, 0.75], dtype=values.dtype))
+
+    with (
+        patch(
+            "list_sorting_transformer.hard_attention_eggroll.dist.is_initialized",
+            return_value=True,
+        ),
+        patch(
+            "list_sorting_transformer.hard_attention_eggroll.dist.broadcast",
+            side_effect=fake_broadcast,
+        ),
+    ):
+        loss, accuracy = synchronize_curriculum_criterion(
+            9.0,
+            0.0,
+            device=torch.device("cpu"),
+        )
+
+    assert loss == 0.25
+    assert accuracy == 0.75
 
 
 def test_elite_centroid_selects_one_sign_per_antithetic_pair() -> None:

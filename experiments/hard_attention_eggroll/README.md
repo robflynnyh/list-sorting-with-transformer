@@ -63,6 +63,9 @@ toward the selected elite centroid.
    success streak beforehand; no additional confirmation is required after
    the final removal. Parameter shapes remain fixed, so
    checkpoints from before head pruning remain compatible.
+   In distributed runs, rank zero's curriculum criterion is shared with all
+   workers before promotion, and every head removal writes an immediate
+   checkpoint.
 
 `--sample-sparse-attention` changes each sparse stage from deterministic
 highest-score selection to sampling `k` distinct sources from the attention
