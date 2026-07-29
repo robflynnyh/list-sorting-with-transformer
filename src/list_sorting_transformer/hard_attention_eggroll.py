@@ -50,7 +50,7 @@ class HardAttentionEggrollConfig:
     sigma: float = 0.005
     learning_rate: float = 0.3
     momentum: float = 0.0
-    weight_decay: float = 1e-3
+    weight_decay: float = 0.0
     fitness_shaping: str = "zscore"
     log_interval: int = 10
     eval_interval: int = 100
@@ -1142,7 +1142,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sigma", type=float, default=0.005)
     parser.add_argument("--learning-rate", type=float, default=0.3)
     parser.add_argument("--momentum", type=float, default=0.0)
-    parser.add_argument("--weight-decay", type=float, default=1e-3)
+    parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument(
         "--fitness-shaping",
         choices=("zscore", "centered_rank"),

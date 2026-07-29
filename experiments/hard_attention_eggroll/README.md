@@ -26,7 +26,8 @@ offsets. Candidate matrix weights are not materialized: the batched forward
 pass applies each rank-one perturbation in factorized form.
 
 The reward is negative cross-entropy, standardized across the population. Its
-EGGROLL estimate updates the persistent center model with SGD.
+EGGROLL estimate updates the persistent center model with plain SGD and no
+weight decay, matching the reference optimizer default.
 
 ## Run
 

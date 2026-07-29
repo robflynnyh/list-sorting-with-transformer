@@ -35,6 +35,7 @@ exec "${WITH_GPU}" "${GPU_POOL}" -- env PYTHONPATH="${ROOT}/src" \
   --position-offset-max 1000000 \
   --sigma 0.005 \
   --learning-rate 0.3 \
+  --weight-decay 0 \
   --fitness-shaping zscore \
   --log-interval 10 \
   --eval-interval 100 \
