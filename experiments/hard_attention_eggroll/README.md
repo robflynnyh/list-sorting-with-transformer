@@ -74,8 +74,16 @@ between every counted result.
 experiments/hard_attention_eggroll/run_clean_pointer.sh
 ```
 
-The launcher always acquires one GPU through `with-gpu`. Set `GPU_POOL`,
-`RUN_NAME`, or `GENERATIONS` in the environment to override its defaults.
+The launcher always acquires its requested GPUs through `with-gpu`. Set
+`GPU_POOL`, `GPU_COUNT`, `RUN_NAME`, or `GENERATIONS` in the environment to
+override its defaults. With `GPU_COUNT=2`, the global population is split
+evenly across two local ranks. Candidate losses are gathered before fitness
+shaping, reconstructed gradients are averaged across ranks, and both model
+replicas apply the same update.
+
+Checkpoints store every rank's perturbation RNG state and the active W&B run ID.
+Passing `--resume path/to/latest.pt` with the same GPU count resumes the model,
+optimizer, curriculum, random streams, metrics file, and W&B run.
 Long-length center evaluations are processed in batches of 128 examples to
 bound attention memory without changing the fixed evaluation set.
 
@@ -98,6 +106,8 @@ Useful W&B metrics:
 - `population/candidates_per_example`: signed candidates sharing each example.
 - `population/candidate_example_evaluations`: total candidate/example forwards
   represented by one generation.
+- `population/distributed_workers`: number of workers sharing the population.
+- `population/local_population_size`: candidates evaluated by each worker.
 - `routing/antithetic_disagreement_fraction`: fraction of selected attention
   edges that differ between the positive and negative member of a pair.
 - `optimization/parameter_update_rms`: RMS size of the actual persistent

@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torch import Tensor, nn
 
@@ -71,6 +73,7 @@ class HardAttentionEggrollConfig:
     wandb: bool = False
     wandb_project: str = "list-sorting-hard-attention-eggroll"
     wandb_entity: str | None = None
+    wandb_run_id: str | None = None
     resume: str | None = None
 
     def __post_init__(self) -> None:
@@ -859,6 +862,39 @@ class PopulationMetrics:
     losses: Tensor
     accuracies: Tensor
     route_disagreement_fraction: float
+    antithetic_loss_gap_abs_mean: float
+
+
+def distributed_world_size() -> int:
+    return dist.get_world_size() if dist.is_initialized() else 1
+
+
+def distributed_rank() -> int:
+    return dist.get_rank() if dist.is_initialized() else 0
+
+
+def is_primary_process() -> bool:
+    return distributed_rank() == 0
+
+
+def gather_population(values: Tensor) -> Tensor:
+    if not dist.is_initialized():
+        return values
+    gathered = [torch.empty_like(values) for _ in range(dist.get_world_size())]
+    dist.all_gather(gathered, values)
+    return torch.cat(gathered)
+
+
+def average_gradients_across_workers(
+    gradients: dict[str, Tensor],
+) -> None:
+    if not dist.is_initialized():
+        return
+    world_size = dist.get_world_size()
+    for name, value in gradients.items():
+        reduced = value.contiguous()
+        dist.all_reduce(reduced, op=dist.ReduceOp.SUM)
+        gradients[name] = reduced.div_(world_size)
 
 
 @torch.no_grad()
@@ -967,6 +1003,12 @@ def evaluate_population(
             (*positive_accuracies, *negative_accuracies)
         ),
         route_disagreement_fraction=disagreement_count / route_count,
+        antithetic_loss_gap_abs_mean=float(
+            (
+                torch.cat(positive_losses)
+                - torch.cat(negative_losses)
+            ).abs().mean()
+        ),
     )
 
 
@@ -1164,7 +1206,11 @@ def evaluate_curriculum_probe(
     )
 
 
-def initialize_wandb(config: HardAttentionEggrollConfig) -> Any | None:
+def initialize_wandb(
+    config: HardAttentionEggrollConfig,
+    *,
+    run_id: str | None,
+) -> Any | None:
     if not config.wandb:
         return None
     import wandb
@@ -1174,6 +1220,8 @@ def initialize_wandb(config: HardAttentionEggrollConfig) -> Any | None:
         entity=config.wandb_entity,
         name=config.run_name,
         config=asdict(config),
+        id=run_id,
+        resume="allow" if run_id is not None else None,
     )
 
 
@@ -1188,6 +1236,8 @@ def save_checkpoint(
     noise_generator: torch.Generator,
     curriculum_generator: torch.Generator,
     curriculum_state: CurriculumState,
+    noise_generator_states: list[Tensor],
+    wandb_run_id: str | None,
 ) -> None:
     torch.save(
         {
@@ -1198,10 +1248,12 @@ def save_checkpoint(
             "generation": generation,
             "data_generator_state": data_generator.get_state(),
             "noise_generator_state": noise_generator.get_state(),
+            "noise_generator_states": noise_generator_states,
             "curriculum_generator_state": (
                 curriculum_generator.get_state()
             ),
             "curriculum_state": asdict(curriculum_state),
+            "wandb_run_id": wandb_run_id,
         },
         path,
     )
@@ -1209,17 +1261,37 @@ def save_checkpoint(
 
 def run(config: HardAttentionEggrollConfig) -> Path:
     device = resolve_device(config.device)
+    world_size = distributed_world_size()
+    rank = distributed_rank()
+    if config.population_size % world_size:
+        raise ValueError(
+            "global population must divide evenly across distributed workers"
+        )
+    local_population_size = config.population_size // world_size
+    if local_population_size < 2 or local_population_size % 2:
+        raise ValueError(
+            "each distributed worker needs a positive even local population"
+        )
+    if config.population_chunk_size > local_population_size:
+        raise ValueError(
+            "population chunk cannot exceed the per-worker population"
+        )
+    if world_size > 1 and config.update_rule != "paper_standardized":
+        raise ValueError(
+            "distributed execution currently supports paper_standardized only"
+        )
     output_dir = Path(config.output_dir) / config.run_name
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "config.json").write_text(
-        json.dumps(asdict(config), indent=2) + "\n"
-    )
+    if is_primary_process():
+        (output_dir / "config.json").write_text(
+            json.dumps(asdict(config), indent=2) + "\n"
+        )
     metrics_path = output_dir / "metrics.jsonl"
     model = make_model(config, device=device)
     optimizer = make_optimizer(model, config)
     data_generator = torch.Generator().manual_seed(config.seed + 1_000)
     noise_generator = torch.Generator(device=device).manual_seed(
-        config.seed + 2_000
+        config.seed + 2_000 + rank
     )
     curriculum_generator = torch.Generator().manual_seed(
         config.seed + 3_000
@@ -1227,6 +1299,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
     curriculum_state = initialize_curriculum_state(config)
     model.set_attention_top_k(curriculum_state.attention_top_k)
     start_generation = 1
+    checkpoint = None
     if config.resume is not None:
         checkpoint = torch.load(config.resume, map_location=device)
         if checkpoint.get("experiment") != "hard_attention_forward_eggroll":
@@ -1234,7 +1307,21 @@ def run(config: HardAttentionEggrollConfig) -> Path:
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         data_generator.set_state(checkpoint["data_generator_state"].cpu())
-        noise_generator.set_state(checkpoint["noise_generator_state"].cpu())
+        noise_generator_states = checkpoint.get("noise_generator_states")
+        if noise_generator_states is not None:
+            if len(noise_generator_states) != world_size:
+                raise ValueError(
+                    "checkpoint noise RNG states do not match world size"
+                )
+            noise_generator.set_state(noise_generator_states[rank].cpu())
+        elif world_size == 1:
+            noise_generator.set_state(
+                checkpoint["noise_generator_state"].cpu()
+            )
+        else:
+            raise ValueError(
+                "distributed resume requires per-worker noise RNG states"
+            )
         if "curriculum_generator_state" in checkpoint:
             curriculum_generator.set_state(
                 checkpoint["curriculum_generator_state"].cpu()
@@ -1251,10 +1338,22 @@ def run(config: HardAttentionEggrollConfig) -> Path:
         vocabulary=model.vocabulary,
         device=device,
     )
-    wandb_run = initialize_wandb(config)
+    resumed_wandb_run_id = (
+        config.wandb_run_id
+        or (
+            checkpoint.get("wandb_run_id")
+            if checkpoint is not None
+            else None
+        )
+    )
+    wandb_run = (
+        initialize_wandb(config, run_id=resumed_wandb_run_id)
+        if is_primary_process()
+        else None
+    )
     if wandb_run is not None:
         print(f"W&B: {wandb_run.url}", flush=True)
-    if start_generation == 1:
+    if start_generation == 1 and is_primary_process():
         initial = {
             "generation": 0.0,
             "curriculum/enabled": float(config.curriculum),
@@ -1283,6 +1382,8 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             metrics_file.write(json.dumps(initial) + "\n")
         if wandb_run is not None:
             wandb_run.log(initial, step=0)
+    if dist.is_initialized():
+        dist.barrier()
 
     started_at = time.monotonic()
     for generation in range(start_generation, config.generations + 1):
@@ -1295,10 +1396,10 @@ def run(config: HardAttentionEggrollConfig) -> Path:
         )
         noise = sample_antithetic_rank_one_noise(
             model,
-            config.population_size,
+            local_population_size,
             generator=noise_generator,
         )
-        population = evaluate_population(
+        local_population = evaluate_population(
             model,
             batch,
             offsets,
@@ -1308,13 +1409,42 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             data_mode=config.population_data_mode,
             precision=config.population_precision,
         )
+        global_losses = gather_population(local_population.losses)
+        global_accuracies = gather_population(local_population.accuracies)
         fitness = shape_fitness(
-            population.losses,
+            global_losses,
             config.fitness_shaping,
+        )
+        fitness_start = rank * local_population_size
+        local_fitness = fitness[
+            fitness_start : fitness_start + local_population_size
+        ]
+        route_disagreement = torch.tensor(
+            local_population.route_disagreement_fraction,
+            device=device,
+        )
+        antithetic_loss_gap = torch.tensor(
+            local_population.antithetic_loss_gap_abs_mean,
+            device=device,
+        )
+        if dist.is_initialized():
+            dist.all_reduce(route_disagreement, op=dist.ReduceOp.SUM)
+            route_disagreement.div_(world_size)
+            dist.all_reduce(antithetic_loss_gap, op=dist.ReduceOp.SUM)
+            antithetic_loss_gap.div_(world_size)
+        population = PopulationMetrics(
+            losses=global_losses,
+            accuracies=global_accuracies,
+            route_disagreement_fraction=float(route_disagreement),
+            antithetic_loss_gap_abs_mean=float(antithetic_loss_gap),
         )
         selected_elites = None
         if config.update_rule == "paper_standardized":
-            reward_gradients = estimate_reward_gradients(noise, fitness)
+            reward_gradients = estimate_reward_gradients(
+                noise,
+                local_fitness,
+            )
+            average_gradients_across_workers(reward_gradients)
             gradient_scale = (
                 config.sigma * math.sqrt(config.population_size)
             )
@@ -1421,14 +1551,15 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                         if config.population_data_mode == "grouped"
                         else config.population_size * config.batch_size
                     ),
+                    "population/distributed_workers": float(world_size),
+                    "population/local_population_size": float(
+                        local_population_size
+                    ),
                     "population/bfloat16_forward": float(
                         config.population_precision == "bfloat16"
                     ),
                     "population/antithetic_loss_gap_abs_mean": float(
-                        (
-                            population.losses[: noise.pair_count]
-                            - population.losses[noise.pair_count :]
-                        ).abs().mean()
+                        population.antithetic_loss_gap_abs_mean
                     ),
                     "routing/antithetic_disagreement_fraction": (
                         population.route_disagreement_fraction
@@ -1494,8 +1625,11 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                     / max(time.monotonic() - started_at, 1e-9),
                 }
             if (
-                generation % config.eval_interval == 0
-                or generation == config.generations
+                is_primary_process()
+                and (
+                    generation % config.eval_interval == 0
+                    or generation == config.generations
+                )
             ):
                 summary.update(
                     evaluate_model(
@@ -1590,39 +1724,59 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                             "curriculum/probe_accuracy": criterion_accuracy,
                         }
                     )
-            with metrics_path.open("a") as metrics_file:
-                metrics_file.write(json.dumps(summary) + "\n")
-            if wandb_run is not None:
-                wandb_run.log(summary, step=generation)
+            if is_primary_process():
+                with metrics_path.open("a") as metrics_file:
+                    metrics_file.write(json.dumps(summary) + "\n")
+                if wandb_run is not None:
+                    wandb_run.log(summary, step=generation)
+            if dist.is_initialized():
+                dist.barrier()
 
         if (
             generation % config.checkpoint_interval == 0
             or generation == config.generations
         ):
-            save_checkpoint(
-                output_dir / f"checkpoint_{generation:06d}.pt",
-                config=config,
-                model=model,
-                optimizer=optimizer,
-                generation=generation,
-                data_generator=data_generator,
-                noise_generator=noise_generator,
-                curriculum_generator=curriculum_generator,
-                curriculum_state=curriculum_state,
-            )
-            save_checkpoint(
-                output_dir / "latest.pt",
-                config=config,
-                model=model,
-                optimizer=optimizer,
-                generation=generation,
-                data_generator=data_generator,
-                noise_generator=noise_generator,
-                curriculum_generator=curriculum_generator,
-                curriculum_state=curriculum_state,
-            )
-    if wandb_run is not None:
+            local_noise_state = noise_generator.get_state().to(device)
+            if dist.is_initialized():
+                gathered_noise_states = [
+                    torch.empty_like(local_noise_state)
+                    for _ in range(world_size)
+                ]
+                dist.all_gather(gathered_noise_states, local_noise_state)
+                noise_generator_states = [
+                    state.cpu() for state in gathered_noise_states
+                ]
+            else:
+                noise_generator_states = [local_noise_state.cpu()]
+            if is_primary_process():
+                checkpoint_arguments = {
+                    "config": config,
+                    "model": model,
+                    "optimizer": optimizer,
+                    "generation": generation,
+                    "data_generator": data_generator,
+                    "noise_generator": noise_generator,
+                    "curriculum_generator": curriculum_generator,
+                    "curriculum_state": curriculum_state,
+                    "noise_generator_states": noise_generator_states,
+                    "wandb_run_id": (
+                        wandb_run.id if wandb_run is not None else None
+                    ),
+                }
+                save_checkpoint(
+                    output_dir / f"checkpoint_{generation:06d}.pt",
+                    **checkpoint_arguments,
+                )
+                save_checkpoint(
+                    output_dir / "latest.pt",
+                    **checkpoint_arguments,
+                )
+            if dist.is_initialized():
+                dist.barrier()
+    if wandb_run is not None and is_primary_process():
         wandb_run.finish()
+    if dist.is_initialized():
+        dist.barrier()
     return output_dir
 
 
@@ -1771,15 +1925,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=HardAttentionEggrollConfig.wandb_project,
     )
     parser.add_argument("--wandb-entity")
+    parser.add_argument("--wandb-run-id")
     parser.add_argument("--resume")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
-    config = HardAttentionEggrollConfig(**vars(args))
-    output_dir = run(config)
-    print(f"Artifacts: {output_dir}", flush=True)
+    distributed = int(os.environ.get("WORLD_SIZE", "1")) > 1
+    if distributed:
+        dist.init_process_group(backend="nccl")
+        args.device = f"cuda:{int(os.environ['LOCAL_RANK'])}"
+    try:
+        config = HardAttentionEggrollConfig(**vars(args))
+        output_dir = run(config)
+        if is_primary_process():
+            print(f"Artifacts: {output_dir}", flush=True)
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
 
 if __name__ == "__main__":

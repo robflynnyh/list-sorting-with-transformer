@@ -15,6 +15,7 @@ from list_sorting_transformer.hard_attention_eggroll import (
     curriculum_check_due,
     curriculum_is_complete,
     estimate_elite_centroid_directions,
+    estimate_reward_gradients,
     evaluate_population,
     initialize_curriculum_state,
     make_model,
@@ -22,6 +23,7 @@ from list_sorting_transformer.hard_attention_eggroll import (
     population_forward,
     run,
     sample_antithetic_rank_one_noise,
+    shape_fitness,
     update_curriculum,
 )
 from list_sorting_transformer.data import make_pointer_next_batch
@@ -401,6 +403,77 @@ def test_elite_centroid_selects_one_sign_per_antithetic_pair() -> None:
     )
 
 
+def test_averaged_local_estimators_equal_global_population_estimator() -> None:
+    worker_noises = (
+        AntitheticRankOneNoise(
+            matrices={
+                "matrix": RankOneFactors(
+                    left=torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+                    right=torch.tensor([[0.5, 1.5], [2.5, 3.5]]),
+                )
+            },
+            vectors={"vector": torch.tensor([[1.0, -1.0], [2.0, -2.0]])},
+        ),
+        AntitheticRankOneNoise(
+            matrices={
+                "matrix": RankOneFactors(
+                    left=torch.tensor([[5.0, 6.0], [7.0, 8.0]]),
+                    right=torch.tensor([[4.5, 5.5], [6.5, 7.5]]),
+                )
+            },
+            vectors={"vector": torch.tensor([[3.0, -3.0], [4.0, -4.0]])},
+        ),
+    )
+    worker_losses = (
+        torch.tensor([1.0, 1.5, 2.0, 2.5]),
+        torch.tensor([0.5, 1.25, 1.75, 3.0]),
+    )
+    block_fitness = shape_fitness(torch.cat(worker_losses), "zscore")
+    local_gradients = [
+        estimate_reward_gradients(
+            noise,
+            block_fitness[index * 4 : (index + 1) * 4],
+        )
+        for index, noise in enumerate(worker_noises)
+    ]
+    averaged = {
+        name: (local_gradients[0][name] + local_gradients[1][name]) / 2
+        for name in local_gradients[0]
+    }
+
+    global_noise = AntitheticRankOneNoise(
+        matrices={
+            "matrix": RankOneFactors(
+                left=torch.cat(
+                    tuple(
+                        noise.matrices["matrix"].left
+                        for noise in worker_noises
+                    )
+                ),
+                right=torch.cat(
+                    tuple(
+                        noise.matrices["matrix"].right
+                        for noise in worker_noises
+                    )
+                ),
+            )
+        },
+        vectors={
+            "vector": torch.cat(
+                tuple(noise.vectors["vector"] for noise in worker_noises)
+            )
+        },
+    )
+    global_order = torch.tensor([0, 1, 4, 5, 2, 3, 6, 7])
+    global_gradients = estimate_reward_gradients(
+        global_noise,
+        block_fitness[global_order],
+    )
+
+    for name in averaged:
+        torch.testing.assert_close(averaged[name], global_gradients[name])
+
+
 def test_tiny_run_writes_metrics_and_checkpoint(tmp_path: Path) -> None:
     output_dir = run(
         small_config(
@@ -431,6 +504,8 @@ def test_tiny_run_writes_metrics_and_checkpoint(tmp_path: Path) -> None:
         "success_streak": 0,
         "promotion_count": 0,
     }
+    assert len(checkpoint["noise_generator_states"]) == 1
+    assert checkpoint["wandb_run_id"] is None
     assert "curriculum_generator_state" in checkpoint
 
 

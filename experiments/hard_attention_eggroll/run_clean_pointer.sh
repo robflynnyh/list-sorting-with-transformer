@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-/store/store4/software/bin/anaconda3/envs/flash_attn_pytorch2/bin/python}"
 WITH_GPU="${WITH_GPU:-/store/store5/software/simple-gpu-schedule/with-gpu}"
 GPU_POOL="${GPU_POOL:-all}"
+GPU_COUNT="${GPU_COUNT:-1}"
 RUN_NAME="${RUN_NAME:-clean-pointer-top1-eggroll-seed7}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${ROOT}/artifacts/hard_attention_eggroll}"
 GENERATIONS="${GENERATIONS:-20000}"
@@ -12,9 +13,7 @@ GENERATIONS="${GENERATIONS:-20000}"
 cd "${ROOT}"
 export WANDB__SERVICE_WAIT="${WANDB__SERVICE_WAIT:-300}"
 
-exec "${WITH_GPU}" "${GPU_POOL}" -- env PYTHONPATH="${ROOT}/src" \
-  "${PYTHON_BIN}" -u \
-  -m list_sorting_transformer.hard_attention_eggroll \
+ARGS=(
   --run-name "${RUN_NAME}" \
   --output-dir "${OUTPUT_ROOT}" \
   --generations "${GENERATIONS}" \
@@ -46,3 +45,19 @@ exec "${WITH_GPU}" "${GPU_POOL}" -- env PYTHONPATH="${ROOT}/src" \
   --wandb-project list-sorting-hard-attention-eggroll \
   --wandb-entity wobrob101 \
   "$@"
+)
+
+if [[ "${GPU_COUNT}" == "1" ]]; then
+  exec "${WITH_GPU}" "${GPU_POOL}" -- env PYTHONPATH="${ROOT}/src" \
+    "${PYTHON_BIN}" -u \
+    -m list_sorting_transformer.hard_attention_eggroll \
+    "${ARGS[@]}"
+fi
+
+exec "${WITH_GPU}" "${GPU_POOL}" --num "${GPU_COUNT}" -- \
+  env PYTHONPATH="${ROOT}/src" \
+  "${PYTHON_BIN}" -u -m torch.distributed.run \
+  --standalone \
+  --nproc-per-node "${GPU_COUNT}" \
+  -m list_sorting_transformer.hard_attention_eggroll \
+  "${ARGS[@]}"
