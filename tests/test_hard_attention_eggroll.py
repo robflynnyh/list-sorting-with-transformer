@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
@@ -17,8 +18,10 @@ from list_sorting_transformer.hard_attention_eggroll import (
     estimate_elite_centroid_directions,
     estimate_reward_gradients,
     evaluation_batch_size,
+    evaluate_model,
     evaluate_population,
     initialize_curriculum_state,
+    make_evaluation_data,
     make_model,
     pointer_targets,
     population_forward,
@@ -139,6 +142,53 @@ def test_model_enables_sampled_sparse_attention() -> None:
     assert all(
         block.attention.sample_top_k for block in model.encoder.blocks
     )
+
+
+def test_sampled_sparse_attention_uses_argmax_in_eval() -> None:
+    model = make_model(
+        small_config(sample_sparse_attention=True),
+        device=torch.device("cpu"),
+    )
+    attention = model.encoder.blocks[0].attention
+    hidden = torch.randn(2, 5, model.config.d_model)
+
+    with patch(
+        "list_sorting_transformer.model.sample_top_k_indices",
+        wraps=sample_top_k_indices,
+    ) as sampled:
+        attention.train()
+        attention(hidden)
+        sampled.assert_called_once()
+
+        sampled.reset_mock()
+        attention.eval()
+        first = attention(hidden)
+        second = attention(hidden)
+        sampled.assert_not_called()
+
+    torch.testing.assert_close(first, second)
+
+
+def test_fixed_evaluation_restores_training_mode() -> None:
+    config = small_config(sample_sparse_attention=True)
+    model = make_model(config, device=torch.device("cpu"))
+    evaluation_data = make_evaluation_data(
+        config,
+        vocabulary=model.vocabulary,
+        device=torch.device("cpu"),
+    )
+    model.train()
+
+    evaluate_model(
+        model,
+        evaluation_data,
+        train_max_length=config.train_max_length,
+        eval_batch_size=config.eval_batch_size,
+        eval_attention_element_budget=config.eval_attention_element_budget,
+        heads=config.heads,
+    )
+
+    assert model.training
 
 
 def test_evaluation_batch_size_respects_attention_budget() -> None:

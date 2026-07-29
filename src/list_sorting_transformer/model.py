@@ -705,7 +705,7 @@ class CausalSelfAttention(nn.Module):
             scores = scores.masked_fill(~attention_mask, float("-inf"))
 
         selected_count = min(self.top_k or key_length, key_length)
-        if self.sample_top_k:
+        if self.sample_top_k and self.training:
             selected = sample_top_k_indices(scores, selected_count)
         else:
             selected = scores.topk(selected_count, dim=-1).indices

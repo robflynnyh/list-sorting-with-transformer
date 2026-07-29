@@ -1254,38 +1254,44 @@ def evaluate_model(
     eval_attention_element_budget: int,
     heads: int,
 ) -> dict[str, float]:
+    was_training = model.training
     model.eval()
-    summary = {}
-    in_domain_accuracies = []
-    out_of_domain_accuracies = []
-    for length, (batch, offsets) in evaluation_data.items():
-        loss, accuracy, resolved_batch_size = evaluate_pointer_batch(
-            model,
-            batch,
-            offsets,
-            eval_batch_size=eval_batch_size,
-            eval_attention_element_budget=eval_attention_element_budget,
-            heads=heads,
-        )
-        summary[f"eval/length_{length}/loss"] = loss
-        summary[f"eval/length_{length}/accuracy"] = accuracy
-        summary[f"eval/length_{length}/examples"] = float(batch.values.shape[0])
-        summary[f"eval/length_{length}/batch_size"] = float(
-            resolved_batch_size
-        )
-        (
+    try:
+        summary = {}
+        in_domain_accuracies = []
+        out_of_domain_accuracies = []
+        for length, (batch, offsets) in evaluation_data.items():
+            loss, accuracy, resolved_batch_size = evaluate_pointer_batch(
+                model,
+                batch,
+                offsets,
+                eval_batch_size=eval_batch_size,
+                eval_attention_element_budget=eval_attention_element_budget,
+                heads=heads,
+            )
+            summary[f"eval/length_{length}/loss"] = loss
+            summary[f"eval/length_{length}/accuracy"] = accuracy
+            summary[f"eval/length_{length}/examples"] = float(
+                batch.values.shape[0]
+            )
+            summary[f"eval/length_{length}/batch_size"] = float(
+                resolved_batch_size
+            )
+            (
+                in_domain_accuracies
+                if length <= train_max_length
+                else out_of_domain_accuracies
+            ).append(accuracy)
+        summary["eval/in_domain_accuracy_mean"] = sum(
             in_domain_accuracies
-            if length <= train_max_length
-            else out_of_domain_accuracies
-        ).append(accuracy)
-    summary["eval/in_domain_accuracy_mean"] = sum(
-        in_domain_accuracies
-    ) / len(in_domain_accuracies)
-    if out_of_domain_accuracies:
-        summary["eval/out_of_domain_accuracy_mean"] = sum(
-            out_of_domain_accuracies
-        ) / len(out_of_domain_accuracies)
-    return summary
+        ) / len(in_domain_accuracies)
+        if out_of_domain_accuracies:
+            summary["eval/out_of_domain_accuracy_mean"] = sum(
+                out_of_domain_accuracies
+            ) / len(out_of_domain_accuracies)
+        return summary
+    finally:
+        model.train(was_training)
 
 
 def evaluate_curriculum_probe(
@@ -1310,15 +1316,20 @@ def evaluate_curriculum_probe(
         generator=generator,
         device=device,
     )
-    loss, accuracy, _ = evaluate_pointer_batch(
-        model,
-        batch,
-        offsets,
-        eval_batch_size=config.eval_batch_size,
-        eval_attention_element_budget=config.eval_attention_element_budget,
-        heads=config.heads,
-    )
-    return loss, accuracy
+    was_training = model.training
+    model.eval()
+    try:
+        loss, accuracy, _ = evaluate_pointer_batch(
+            model,
+            batch,
+            offsets,
+            eval_batch_size=config.eval_batch_size,
+            eval_attention_element_budget=config.eval_attention_element_budget,
+            heads=config.heads,
+        )
+        return loss, accuracy
+    finally:
+        model.train(was_training)
 
 
 def initialize_wandb(
@@ -1504,6 +1515,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             "attention/sampled_top_k": float(
                 config.sample_sparse_attention
             ),
+            "attention/eval_argmax": 1.0,
             "curriculum/current_max_length": float(
                 curriculum_state.current_max_length
             ),
@@ -1760,6 +1772,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                     "attention/sampled_top_k": float(
                         config.sample_sparse_attention
                     ),
+                    "attention/eval_argmax": 1.0,
                     "curriculum/current_max_length": float(
                         curriculum_state.current_max_length
                     ),

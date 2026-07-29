@@ -67,6 +67,8 @@ top-1 this is categorical sampling, so a route must receive most of the
 probability mass rather than merely have the largest score. Positive and
 negative members of each antithetic pair share the same sampling randomness
 to keep their fitness comparison low variance.
+Fixed evaluations and curriculum probes remain deterministic: they select the
+highest-scoring sources rather than sampling.
 
 Each stage requires at least 70% accuracy on three consecutive fresh
 1,024-example probes at the current maximum length. Probes use independent
@@ -137,6 +139,7 @@ Useful W&B metrics:
 - `curriculum/attention_top_k`: active `k`, with zero denoting dense attention.
 - `curriculum/active_heads`: number of active attention heads in every layer.
 - `attention/sampled_top_k`: whether sparse positions are sampled.
+- `attention/eval_argmax`: confirms fixed evaluation uses deterministic routes.
 - `curriculum/probe_accuracy`: fresh performance used for promotion.
 - `curriculum/criterion_accuracy`: accuracy used by either promotion mode.
 - `curriculum/promoted`: whether the current check advanced either curriculum.
