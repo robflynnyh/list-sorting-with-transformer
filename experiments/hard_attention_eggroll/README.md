@@ -36,6 +36,8 @@ experiments/hard_attention_eggroll/run_clean_pointer.sh
 
 The launcher always acquires one GPU through `with-gpu`. Set `GPU_POOL`,
 `RUN_NAME`, or `GENERATIONS` in the environment to override its defaults.
+Long-length center evaluations are processed in batches of 128 examples to
+bound attention memory without changing the fixed evaluation set.
 
 Useful W&B metrics:
 

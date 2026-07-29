@@ -136,6 +136,7 @@ def test_tiny_run_writes_metrics_and_checkpoint(tmp_path: Path) -> None:
             population_chunk_size=2,
             batch_size=2,
             eval_examples=2,
+            eval_batch_size=1,
         )
     )
 

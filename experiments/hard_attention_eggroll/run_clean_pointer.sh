@@ -25,6 +25,7 @@ exec "${WITH_GPU}" "${GPU_POOL}" -- env PYTHONPATH="${ROOT}/src" \
   --train-max-length 20 \
   --eval-lengths 2,5,10,20,40,100,400 \
   --eval-examples 1024 \
+  --eval-batch-size 128 \
   --d-model 128 \
   --layers 2 \
   --heads 4 \

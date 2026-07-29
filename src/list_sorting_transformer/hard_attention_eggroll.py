@@ -37,6 +37,7 @@ class HardAttentionEggrollConfig:
     train_max_length: int = 20
     eval_lengths: tuple[int, ...] = (2, 5, 10, 20, 40, 100)
     eval_examples: int = 1_024
+    eval_batch_size: int = 128
     symbol_count: int = 10
     d_model: int = 128
     layers: int = 2
@@ -70,6 +71,7 @@ class HardAttentionEggrollConfig:
             self.train_min_length,
             self.train_max_length,
             self.eval_examples,
+            self.eval_batch_size,
             self.symbol_count,
             self.d_model,
             self.layers,
@@ -781,17 +783,35 @@ def evaluate_model(
     evaluation_data: dict[int, tuple[PointerNextBatch, Tensor]],
     *,
     train_max_length: int,
+    eval_batch_size: int,
 ) -> dict[str, float]:
     model.eval()
     summary = {}
     in_domain_accuracies = []
     out_of_domain_accuracies = []
     for length, (batch, offsets) in evaluation_data.items():
-        logits = model(batch.prompt_ids, offsets=offsets)
         targets = pointer_targets(batch)
-        accuracy = float(logits.argmax(dim=-1).eq(targets).float().mean())
-        summary[f"eval/length_{length}/loss"] = float(
-            F.cross_entropy(logits, targets)
+        loss_sum = 0.0
+        correct = 0
+        for start in range(0, targets.shape[0], eval_batch_size):
+            end = min(start + eval_batch_size, targets.shape[0])
+            logits = model(
+                batch.prompt_ids[start:end],
+                offsets=offsets[start:end],
+            )
+            loss_sum += float(
+                F.cross_entropy(
+                    logits,
+                    targets[start:end],
+                    reduction="sum",
+                )
+            )
+            correct += int(
+                logits.argmax(dim=-1).eq(targets[start:end]).sum()
+            )
+        accuracy = correct / targets.shape[0]
+        summary[f"eval/length_{length}/loss"] = (
+            loss_sum / targets.shape[0]
         )
         summary[f"eval/length_{length}/accuracy"] = accuracy
         (
@@ -886,6 +906,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                 model,
                 evaluation_data,
                 train_max_length=config.train_max_length,
+                eval_batch_size=config.eval_batch_size,
             )
         )
         with metrics_path.open("a") as metrics_file:
@@ -998,6 +1019,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                         model,
                         evaluation_data,
                         train_max_length=config.train_max_length,
+                        eval_batch_size=config.eval_batch_size,
                     )
                 )
                 print(
@@ -1094,6 +1116,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--eval-examples",
         type=int,
         default=HardAttentionEggrollConfig.eval_examples,
+    )
+    parser.add_argument(
+        "--eval-batch-size",
+        type=int,
+        default=HardAttentionEggrollConfig.eval_batch_size,
     )
     parser.add_argument("--symbol-count", type=int, default=10)
     parser.add_argument("--d-model", type=int, default=128)
