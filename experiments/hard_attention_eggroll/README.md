@@ -59,9 +59,9 @@ toward the selected elite centroid.
 3. At top-1, every possible simultaneous one-head-per-layer removal is scored
    on a fresh deterministic probe. The least harmful combination is applied,
    then the search repeats at subsequent maximum-length checks until each
-   layer has one active head. Head removals do not wait for the accuracy
-   threshold, which prevents a difficult pruning stage from stalling the path
-   to one head. Parameter shapes remain fixed, so
+   layer has one active head. Every removal requires the normal accuracy
+   success streak beforehand; no additional confirmation is required after
+   the final removal. Parameter shapes remain fixed, so
    checkpoints from before head pruning remain compatible.
 
 `--sample-sparse-attention` changes each sparse stage from deterministic

@@ -287,18 +287,12 @@ def update_curriculum(
 
     if not config.curriculum or curriculum_is_complete(state, config):
         return None
-    head_pruning_stage = (
-        state.current_max_length == config.train_max_length
-        and state.attention_top_k == 1
-        and state.active_heads > 1
-    )
-    if not head_pruning_stage:
-        if criterion_accuracy < config.curriculum_accuracy_threshold:
-            state.success_streak = 0
-            return None
-        state.success_streak += 1
-        if state.success_streak < config.curriculum_success_checks:
-            return None
+    if criterion_accuracy < config.curriculum_accuracy_threshold:
+        state.success_streak = 0
+        return None
+    state.success_streak += 1
+    if state.success_streak < config.curriculum_success_checks:
+        return None
 
     state.success_streak = 0
     state.promotion_count += 1
@@ -333,12 +327,16 @@ def update_curriculum(
 def head_pruning_due(
     state: CurriculumState,
     config: HardAttentionEggrollConfig,
+    *,
+    criterion_accuracy: float,
 ) -> bool:
     return (
         config.curriculum
         and state.current_max_length == config.train_max_length
         and state.attention_top_k == 1
         and state.active_heads > 1
+        and criterion_accuracy >= config.curriculum_accuracy_threshold
+        and state.success_streak + 1 >= config.curriculum_success_checks
     )
 
 
@@ -2045,6 +2043,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                 if head_pruning_due(
                     curriculum_state,
                     config,
+                    criterion_accuracy=criterion_accuracy,
                 ):
                     pruning_batch, pruning_offsets = (
                         make_curriculum_probe_data(

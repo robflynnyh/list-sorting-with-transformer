@@ -533,20 +533,19 @@ def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
         state,
         config,
         criterion_accuracy=0.0,
-    ) == "prune_head"
-    assert state.active_heads == 3
-    assert update_curriculum(
-        state,
-        config,
-        criterion_accuracy=0.0,
-    ) == "prune_head"
-    assert state.active_heads == 2
-    assert update_curriculum(
-        state,
-        config,
-        criterion_accuracy=0.0,
-    ) == "prune_head"
-    assert state.active_heads == 1
+    ) is None
+    for expected_active_heads in (3, 2, 1):
+        assert update_curriculum(
+            state,
+            config,
+            criterion_accuracy=0.70,
+        ) is None
+        assert update_curriculum(
+            state,
+            config,
+            criterion_accuracy=0.80,
+        ) == "prune_head"
+        assert state.active_heads == expected_active_heads
     assert curriculum_is_complete(state, config)
     assert state.promotion_count == len(expected_promotions) + 3
     assert update_curriculum(state, config, criterion_accuracy=1.0) is None
