@@ -52,6 +52,8 @@ class HardAttentionEggrollConfig:
     momentum: float = 0.0
     weight_decay: float = 0.0
     fitness_shaping: str = "zscore"
+    update_rule: str = "paper_standardized"
+    elite_count: int = 8
     log_interval: int = 10
     eval_interval: int = 100
     checkpoint_interval: int = 1_000
@@ -116,6 +118,18 @@ class HardAttentionEggrollConfig:
             raise ValueError("attention mode must be top1 or dense")
         if self.fitness_shaping not in {"zscore", "centered_rank"}:
             raise ValueError("unknown fitness shaping")
+        if self.update_rule not in {
+            "paper_standardized",
+            "elite_centroid",
+        }:
+            raise ValueError("unknown update rule")
+        if (
+            self.update_rule == "elite_centroid"
+            and not 1 <= self.elite_count <= self.population_size // 2
+        ):
+            raise ValueError(
+                "elite count must fit the unique antithetic directions"
+            )
         if self.sigma <= 0 or self.learning_rate <= 0:
             raise ValueError("sigma and learning rate must be positive")
         if not 0 <= self.momentum < 1:
@@ -607,6 +621,53 @@ def estimate_reward_gradients(
     return gradients
 
 
+def estimate_elite_centroid_directions(
+    noise: AntitheticRankOneNoise,
+    losses: Tensor,
+    *,
+    elite_count: int,
+) -> tuple[dict[str, Tensor], Tensor]:
+    """Average the best signs from the top unique antithetic directions."""
+
+    if losses.shape != (noise.population_size,):
+        raise ValueError("losses must have one value per candidate")
+    if not 1 <= elite_count <= noise.pair_count:
+        raise ValueError("elite count must fit the antithetic directions")
+    positive_losses = losses[: noise.pair_count]
+    negative_losses = losses[noise.pair_count :]
+    prefer_positive = positive_losses <= negative_losses
+    preferred_losses = torch.minimum(positive_losses, negative_losses)
+    elite_pairs = preferred_losses.topk(
+        elite_count,
+        largest=False,
+    ).indices
+    elite_signs = torch.where(
+        prefer_positive[elite_pairs],
+        torch.ones_like(preferred_losses[elite_pairs]),
+        -torch.ones_like(preferred_losses[elite_pairs]),
+    )
+    directions = {}
+    for name, factors in noise.matrices.items():
+        directions[name] = torch.einsum(
+            "p,po,pi->oi",
+            elite_signs.to(factors.left.dtype),
+            factors.left[elite_pairs],
+            factors.right[elite_pairs],
+        ) / elite_count
+    for name, values in noise.vectors.items():
+        broadcast = (elite_count,) + (1,) * (values.ndim - 1)
+        directions[name] = (
+            elite_signs.to(values.dtype).reshape(broadcast)
+            * values[elite_pairs]
+        ).mean(dim=0)
+    selected_candidates = torch.where(
+        prefer_positive[elite_pairs],
+        elite_pairs,
+        elite_pairs + noise.pair_count,
+    )
+    return directions, selected_candidates
+
+
 def assign_maximization_gradients(
     model: nn.Module,
     reward_gradients: dict[str, Tensor],
@@ -947,8 +1008,21 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             population.losses,
             config.fitness_shaping,
         )
-        reward_gradients = estimate_reward_gradients(noise, fitness)
-        gradient_scale = config.sigma * math.sqrt(config.population_size)
+        selected_elites = None
+        if config.update_rule == "paper_standardized":
+            reward_gradients = estimate_reward_gradients(noise, fitness)
+            gradient_scale = (
+                config.sigma * math.sqrt(config.population_size)
+            )
+        else:
+            reward_gradients, selected_elites = (
+                estimate_elite_centroid_directions(
+                    noise,
+                    population.losses,
+                    elite_count=config.elite_count,
+                )
+            )
+            gradient_scale = config.sigma
         reward_gradients = {
             name: gradient * gradient_scale
             for name, gradient in reward_gradients.items()
@@ -1033,6 +1107,26 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                     ),
                     "optimization/fitness_std": float(
                         fitness.std(unbiased=False)
+                    ),
+                    "optimization/update_rule_paper_standardized": float(
+                        config.update_rule == "paper_standardized"
+                    ),
+                    "optimization/update_rule_elite_centroid": float(
+                        config.update_rule == "elite_centroid"
+                    ),
+                    "optimization/elite_count": float(
+                        config.elite_count
+                        if selected_elites is not None
+                        else 0
+                    ),
+                    "optimization/elite_positive_fraction": float(
+                        (
+                            selected_elites.lt(noise.pair_count)
+                            .float()
+                            .mean()
+                        )
+                        if selected_elites is not None
+                        else 0
                     ),
                     "optimization/gradient_scale": gradient_scale,
                     "optimization/reward_gradient_rms": (
@@ -1190,6 +1284,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("zscore", "centered_rank"),
         default="zscore",
     )
+    parser.add_argument(
+        "--update-rule",
+        choices=("paper_standardized", "elite_centroid"),
+        default="paper_standardized",
+    )
+    parser.add_argument("--elite-count", type=int, default=8)
     parser.add_argument("--log-interval", type=int, default=10)
     parser.add_argument("--eval-interval", type=int, default=100)
     parser.add_argument("--checkpoint-interval", type=int, default=1_000)

@@ -29,6 +29,12 @@ The reward is negative cross-entropy, standardized across the population. Its
 EGGROLL estimate updates the persistent center model with plain SGD and no
 weight decay, matching the reference optimizer default.
 
+`--update-rule elite_centroid` provides the earlier elite alternative. It
+keeps only the fitter sign from each antithetic pair, selects the eight best
+unique directions by default, and moves the center by `learning_rate` times
+the mean candidate displacement. Thus `--learning-rate 0.03` means a 3% move
+toward the selected elite centroid.
+
 ## Run
 
 ```bash
@@ -52,4 +58,6 @@ Useful W&B metrics:
   center-model update.
 - `optimization/update_to_parameter_rms_ratio`: update RMS divided by current
   parameter RMS.
+- `optimization/elite_positive_fraction`: fraction of selected unique elite
+  directions using the positive antithetic sign.
 - `train/prediction_mode_fraction`: collapse diagnostic for center predictions.

@@ -5,7 +5,10 @@ from pathlib import Path
 import torch
 
 from list_sorting_transformer.hard_attention_eggroll import (
+    AntitheticRankOneNoise,
     HardAttentionEggrollConfig,
+    RankOneFactors,
+    estimate_elite_centroid_directions,
     make_model,
     population_forward,
     run,
@@ -127,6 +130,35 @@ def test_factorized_population_matches_materialized_candidates() -> None:
     )
 
 
+def test_elite_centroid_selects_one_sign_per_antithetic_pair() -> None:
+    noise = AntitheticRankOneNoise(
+        matrices={
+            "matrix": RankOneFactors(
+                left=torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
+                right=torch.tensor([[2.0, 3.0], [4.0, 5.0]]),
+            )
+        },
+        vectors={
+            "vector": torch.tensor([[6.0, 7.0], [8.0, 9.0]])
+        },
+    )
+    directions, selected = estimate_elite_centroid_directions(
+        noise,
+        torch.tensor([3.0, 1.0, 0.0, 2.0]),
+        elite_count=1,
+    )
+
+    assert selected.tolist() == [2]
+    torch.testing.assert_close(
+        directions["matrix"],
+        -torch.tensor([[2.0, 3.0], [0.0, 0.0]]),
+    )
+    torch.testing.assert_close(
+        directions["vector"],
+        -torch.tensor([6.0, 7.0]),
+    )
+
+
 def test_tiny_run_writes_metrics_and_checkpoint(tmp_path: Path) -> None:
     output_dir = run(
         small_config(
@@ -151,3 +183,25 @@ def test_tiny_run_writes_metrics_and_checkpoint(tmp_path: Path) -> None:
     assert rows[1]["optimization/update_to_parameter_rms_ratio"] > 0
     assert checkpoint["experiment"] == "hard_attention_forward_eggroll"
     assert checkpoint["generation"] == 1
+
+
+def test_tiny_elite_run_reports_selected_centroid(tmp_path: Path) -> None:
+    output_dir = run(
+        small_config(
+            run_name="tiny-elite",
+            output_dir=str(tmp_path),
+            population_size=2,
+            population_chunk_size=2,
+            batch_size=2,
+            eval_examples=2,
+            eval_batch_size=1,
+            update_rule="elite_centroid",
+            elite_count=1,
+        )
+    )
+
+    final = json.loads(
+        (output_dir / "metrics.jsonl").read_text().splitlines()[-1]
+    )
+    assert final["optimization/update_rule_elite_centroid"] == 1
+    assert final["optimization/elite_count"] == 1
