@@ -27,6 +27,16 @@ population of 64 candidates. All candidates see the same examples and position
 offsets. Candidate matrix weights are not materialized: the batched forward
 pass applies each rank-one perturbation in factorized form.
 
+`--population-data-mode grouped` instead assigns one example to each candidate.
+Antithetic pairs always share the same example, and the configured batch size
+is the number of unique examples distributed evenly across all pairs. This
+matches the large-population data-sharing regime used by EGGROLL without
+forming a wasteful population-by-batch Cartesian product.
+
+`--population-precision bfloat16` uses bf16 only for candidate forward passes.
+Persistent parameters, logits used by cross-entropy, fitness shaping, and
+updates remain fp32.
+
 The reward is negative cross-entropy, standardized across the population. Its
 EGGROLL estimate updates the persistent center model with plain SGD and no
 weight decay, matching the reference optimizer default.
@@ -63,12 +73,25 @@ The launcher always acquires one GPU through `with-gpu`. Set `GPU_POOL`,
 Long-length center evaluations are processed in batches of 128 examples to
 bound attention memory without changing the fixed evaluation set.
 
+The paper-style grouped launcher defaults to population 8,192, eight unique
+examples, bf16 candidate forwards, and the performance-gated curriculum:
+
+```bash
+experiments/hard_attention_eggroll/run_grouped_population.sh
+```
+
+`POPULATION_SIZE`, `UNIQUE_EXAMPLES`, `POPULATION_CHUNK_SIZE`,
+`POPULATION_PRECISION`, and `LEARNING_RATE` are environment overrides.
+
 Useful W&B metrics:
 
 - `eval/length_N/accuracy`: center-model accuracy at each fixed test length.
 - `eval/in_domain_accuracy_mean`: mean over lengths at or below 20.
 - `eval/out_of_domain_accuracy_mean`: mean over lengths above 20.
 - `population/loss_std`: variation in candidate fitness.
+- `population/candidates_per_example`: signed candidates sharing each example.
+- `population/candidate_example_evaluations`: total candidate/example forwards
+  represented by one generation.
 - `routing/antithetic_disagreement_fraction`: fraction of selected attention
   edges that differ between the positive and negative member of a pair.
 - `optimization/parameter_update_rms`: RMS size of the actual persistent

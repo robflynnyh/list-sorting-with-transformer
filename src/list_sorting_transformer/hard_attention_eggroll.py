@@ -33,6 +33,8 @@ class HardAttentionEggrollConfig:
     population_size: int = 64
     population_chunk_size: int = 16
     batch_size: int = 256
+    population_data_mode: str = "cartesian"
+    population_precision: str = "float32"
     train_min_length: int = 2
     train_max_length: int = 20
     eval_lengths: tuple[int, ...] = (2, 5, 10, 20, 40, 100)
@@ -100,6 +102,22 @@ class HardAttentionEggrollConfig:
             raise ValueError("population chunk size must be even")
         if self.population_chunk_size > self.population_size:
             raise ValueError("population chunk cannot exceed population size")
+        if self.population_data_mode not in {"cartesian", "grouped"}:
+            raise ValueError(
+                "population data mode must be cartesian or grouped"
+            )
+        if self.population_precision not in {"float32", "bfloat16"}:
+            raise ValueError(
+                "population precision must be float32 or bfloat16"
+            )
+        if (
+            self.population_data_mode == "grouped"
+            and self.population_size // 2 % self.batch_size
+        ):
+            raise ValueError(
+                "grouped mode requires antithetic pairs to divide evenly "
+                "across the unique examples"
+            )
         if not 2 <= self.train_min_length <= self.train_max_length:
             raise ValueError("invalid training length range")
         if not self.eval_lengths or any(length < 2 for length in self.eval_lengths):
@@ -447,8 +465,18 @@ def _population_embedding(
     name: str,
     noise: SignedPopulationNoise,
     sigma: float,
+    *,
+    candidate_inputs: bool,
 ) -> Tensor:
     factors = noise.matrices[f"{name}.weight"]
+    if candidate_inputs:
+        if token_ids.shape[0] != noise.population_size:
+            raise ValueError(
+                "candidate token inputs have the wrong leading dimension"
+            )
+        base = embedding(token_ids)
+        selected_left = factors.left.gather(1, token_ids).unsqueeze(-1)
+        return base + sigma * selected_left * factors.right[:, None, :]
     base = embedding(token_ids).unsqueeze(0).expand(
         noise.population_size,
         -1,
@@ -477,9 +505,14 @@ def _population_layer_norm(
         f"{name}.weight"
     ]
     bias = layer.bias.unsqueeze(0) + sigma * noise.vectors[f"{name}.bias"]
+    broadcast_shape = (
+        noise.population_size,
+        *((1,) * (normalized.ndim - 2)),
+        weight.shape[-1],
+    )
     return (
-        normalized * weight[:, None, None, :]
-        + bias[:, None, None, :]
+        normalized * weight.view(broadcast_shape)
+        + bias.view(broadcast_shape)
     )
 
 
@@ -507,18 +540,20 @@ def _population_attention(
         sigma,
         population_input=True,
     ).chunk(3, dim=-1)
-    population_size, batch_size, sequence_length, model_dim = query.shape
+    population_size = query.shape[0]
+    sequence_length, model_dim = query.shape[-2:]
+    sample_shape = query.shape[1:-2]
     head_count = block.attention.n_heads
     head_dim = model_dim // head_count
 
     def split_heads(tensor: Tensor) -> Tensor:
         return tensor.view(
             population_size,
-            batch_size,
+            *sample_shape,
             sequence_length,
             head_count,
             head_dim,
-        ).permute(0, 1, 3, 2, 4)
+        ).transpose(-3, -2)
 
     query = split_heads(query)
     key = split_heads(key)
@@ -555,9 +590,9 @@ def _population_attention(
             scores.gather(-1, selected_top_k),
         )
         attended = sparse_scores.softmax(dim=-1) @ value
-    attended = attended.permute(0, 1, 3, 2, 4).reshape(
+    attended = attended.transpose(-3, -2).reshape(
         population_size,
-        batch_size,
+        *sample_shape,
         sequence_length,
         model_dim,
     )
@@ -581,6 +616,8 @@ def population_forward(
     offsets: Tensor,
     noise: SignedPopulationNoise,
     sigma: float,
+    *,
+    candidate_inputs: bool = False,
 ) -> tuple[Tensor, tuple[Tensor, ...]]:
     """Evaluate rank-one candidates without materializing candidate weights."""
 
@@ -592,6 +629,7 @@ def population_forward(
         "encoder.token_embedding",
         noise,
         sigma,
+        candidate_inputs=candidate_inputs,
     )
     if model.encoder.number_projection is not None:
         is_value = (prompt_ids >= VALUE_OFFSET) & (
@@ -608,18 +646,20 @@ def population_forward(
             "encoder.number_projection",
             noise,
             sigma,
-            population_input=False,
+            population_input=candidate_inputs,
         )
     positions = model.position_embeddings(prompt_ids, offsets)
+    if not candidate_inputs:
+        positions = positions.unsqueeze(0).expand(
+            noise.population_size,
+            -1,
+            -1,
+            -1,
+        )
     hidden = torch.cat(
         (
             content,
-            positions.unsqueeze(0).expand(
-                noise.population_size,
-                -1,
-                -1,
-                -1,
-            ),
+            positions,
         ),
         dim=-1,
     )
@@ -666,7 +706,7 @@ def population_forward(
         sigma,
     )
     logits = _population_linear(
-        hidden[:, :, -1],
+        hidden[..., -1, :],
         model.output,
         "output",
         noise,
@@ -808,10 +848,27 @@ def evaluate_population(
     *,
     sigma: float,
     population_chunk_size: int,
+    data_mode: str = "cartesian",
+    precision: str = "float32",
 ) -> PopulationMetrics:
     if population_chunk_size % 2:
         raise ValueError("population chunk size must be even")
+    if data_mode not in {"cartesian", "grouped"}:
+        raise ValueError("population data mode must be cartesian or grouped")
+    if precision not in {"float32", "bfloat16"}:
+        raise ValueError("population precision must be float32 or bfloat16")
     targets = pointer_targets(batch)
+    if data_mode == "grouped" and noise.pair_count % len(targets):
+        raise ValueError(
+            "antithetic pairs must divide evenly across grouped examples"
+        )
+    device_type = next(model.parameters()).device.type
+    if (
+        precision == "bfloat16"
+        and device_type == "cuda"
+        and not torch.cuda.is_bf16_supported()
+    ):
+        raise ValueError("CUDA device does not support bfloat16")
     pair_chunk_size = population_chunk_size // 2
     positive_losses = []
     negative_losses = []
@@ -822,26 +879,57 @@ def evaluate_population(
     for start in range(0, noise.pair_count, pair_chunk_size):
         end = min(start + pair_chunk_size, noise.pair_count)
         signed_noise = noise.pair_chunk(start, end)
-        logits, routes = population_forward(
-            model,
-            batch.prompt_ids,
-            offsets,
-            signed_noise,
-            sigma,
-        )
         local_pair_count = end - start
-        expanded_targets = targets.unsqueeze(0).expand(
-            2 * local_pair_count,
-            -1,
-        )
-        losses = F.cross_entropy(
-            logits.transpose(1, 2),
-            expanded_targets,
-            reduction="none",
-        ).mean(dim=1)
-        accuracies = logits.argmax(dim=-1).eq(
-            expanded_targets
-        ).float().mean(dim=1)
+        if data_mode == "grouped":
+            pair_examples = (
+                torch.arange(start, end, device=targets.device)
+                % targets.shape[0]
+            )
+            signed_examples = torch.cat(
+                (pair_examples, pair_examples),
+                dim=0,
+            )
+            prompt_ids = batch.prompt_ids[signed_examples]
+            chunk_offsets = offsets[signed_examples]
+            chunk_targets = targets[signed_examples]
+            candidate_inputs = True
+        else:
+            prompt_ids = batch.prompt_ids
+            chunk_offsets = offsets
+            chunk_targets = targets.unsqueeze(0).expand(
+                2 * local_pair_count,
+                -1,
+            )
+            candidate_inputs = False
+        with torch.autocast(
+            device_type=device_type,
+            dtype=torch.bfloat16,
+            enabled=precision == "bfloat16",
+        ):
+            logits, routes = population_forward(
+                model,
+                prompt_ids,
+                chunk_offsets,
+                signed_noise,
+                sigma,
+                candidate_inputs=candidate_inputs,
+            )
+        if data_mode == "grouped":
+            losses = F.cross_entropy(
+                logits.float(),
+                chunk_targets,
+                reduction="none",
+            )
+            accuracies = logits.argmax(dim=-1).eq(chunk_targets).float()
+        else:
+            losses = F.cross_entropy(
+                logits.float().transpose(1, 2),
+                chunk_targets,
+                reduction="none",
+            ).mean(dim=1)
+            accuracies = logits.argmax(dim=-1).eq(
+                chunk_targets
+            ).float().mean(dim=1)
         positive_losses.append(losses[:local_pair_count])
         negative_losses.append(losses[local_pair_count:])
         positive_accuracies.append(accuracies[:local_pair_count])
@@ -1123,11 +1211,11 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             raise ValueError("resume checkpoint belongs to another experiment")
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
-        data_generator.set_state(checkpoint["data_generator_state"])
-        noise_generator.set_state(checkpoint["noise_generator_state"])
+        data_generator.set_state(checkpoint["data_generator_state"].cpu())
+        noise_generator.set_state(checkpoint["noise_generator_state"].cpu())
         if "curriculum_generator_state" in checkpoint:
             curriculum_generator.set_state(
-                checkpoint["curriculum_generator_state"]
+                checkpoint["curriculum_generator_state"].cpu()
             )
         if "curriculum_state" in checkpoint:
             curriculum_state = CurriculumState(
@@ -1195,6 +1283,8 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             noise,
             sigma=config.sigma,
             population_chunk_size=config.population_chunk_size,
+            data_mode=config.population_data_mode,
+            precision=config.population_precision,
         )
         fitness = shape_fitness(
             population.losses,
@@ -1292,6 +1382,23 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                     ),
                     "population/best_accuracy": float(
                         population.accuracies.max()
+                    ),
+                    "population/grouped_data": float(
+                        config.population_data_mode == "grouped"
+                    ),
+                    "population/unique_examples": float(config.batch_size),
+                    "population/candidates_per_example": float(
+                        config.population_size / config.batch_size
+                        if config.population_data_mode == "grouped"
+                        else config.population_size
+                    ),
+                    "population/candidate_example_evaluations": float(
+                        config.population_size
+                        if config.population_data_mode == "grouped"
+                        else config.population_size * config.batch_size
+                    ),
+                    "population/bfloat16_forward": float(
+                        config.population_precision == "bfloat16"
                     ),
                     "population/antithetic_loss_gap_abs_mean": float(
                         (
@@ -1507,6 +1614,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--batch-size",
         type=int,
         default=HardAttentionEggrollConfig.batch_size,
+    )
+    parser.add_argument(
+        "--population-data-mode",
+        choices=("cartesian", "grouped"),
+        default=HardAttentionEggrollConfig.population_data_mode,
+    )
+    parser.add_argument(
+        "--population-precision",
+        choices=("float32", "bfloat16"),
+        default=HardAttentionEggrollConfig.population_precision,
     )
     parser.add_argument(
         "--train-min-length",

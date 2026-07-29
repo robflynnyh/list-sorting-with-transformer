@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 
 from list_sorting_transformer.hard_attention_eggroll import (
     AntitheticRankOneNoise,
@@ -13,8 +14,10 @@ from list_sorting_transformer.hard_attention_eggroll import (
     RankOneFactors,
     curriculum_is_complete,
     estimate_elite_centroid_directions,
+    evaluate_population,
     initialize_curriculum_state,
     make_model,
+    pointer_targets,
     population_forward,
     run,
     sample_antithetic_rank_one_noise,
@@ -151,6 +154,85 @@ def test_factorized_population_matches_materialized_dense_candidates() -> None:
     assert_factorized_population_matches_materialized_candidates(None)
 
 
+def test_grouped_population_matches_candidate_specific_materialization() -> None:
+    config = small_config(batch_size=2, population_size=4)
+    model = make_model(config, device=torch.device("cpu"))
+    data_generator = torch.Generator().manual_seed(41)
+    batch = make_pointer_next_batch(
+        config.batch_size,
+        4,
+        generator=data_generator,
+        vocabulary=model.vocabulary,
+    )
+    offsets = sample_position_offsets(
+        config.batch_size,
+        minimum=config.position_offset_min,
+        maximum=config.position_offset_max,
+        generator=data_generator,
+        device=torch.device("cpu"),
+    )
+    antithetic_noise = sample_antithetic_rank_one_noise(
+        model,
+        config.population_size,
+        generator=torch.Generator().manual_seed(43),
+    )
+    signed_noise = antithetic_noise.pair_chunk(
+        0,
+        antithetic_noise.pair_count,
+    )
+    example_indices = torch.tensor([0, 1, 0, 1])
+
+    for top_k in (None, 2, 1):
+        model.set_attention_top_k(top_k)
+        grouped_logits, _ = population_forward(
+            model,
+            batch.prompt_ids[example_indices],
+            offsets[example_indices],
+            signed_noise,
+            config.sigma,
+            candidate_inputs=True,
+        )
+        materialized_logits = torch.stack(
+            [
+                materialize_candidate(
+                    model,
+                    signed_noise,
+                    candidate_index,
+                    config.sigma,
+                )(
+                    batch.prompt_ids[example_index : example_index + 1],
+                    offsets=offsets[example_index : example_index + 1],
+                )[0]
+                for candidate_index, example_index in enumerate(
+                    example_indices.tolist()
+                )
+            ]
+        )
+        torch.testing.assert_close(
+            grouped_logits,
+            materialized_logits,
+            rtol=1e-5,
+            atol=2e-6,
+        )
+
+    population = evaluate_population(
+        model,
+        batch,
+        offsets,
+        antithetic_noise,
+        sigma=config.sigma,
+        population_chunk_size=2,
+        data_mode="grouped",
+    )
+    targets = pointer_targets(batch)[example_indices]
+    expected_losses = F.cross_entropy(
+        materialized_logits,
+        targets,
+        reduction="none",
+    )
+    torch.testing.assert_close(population.losses, expected_losses)
+
+
 def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
     config = small_config(
         curriculum=True,
@@ -275,3 +357,63 @@ def test_tiny_elite_run_reports_selected_centroid(tmp_path: Path) -> None:
     )
     assert final["optimization/update_rule_elite_centroid"] == 1
     assert final["optimization/elite_count"] == 1
+
+
+def test_tiny_grouped_run_reports_data_allocation(tmp_path: Path) -> None:
+    output_dir = run(
+        small_config(
+            run_name="tiny-grouped",
+            output_dir=str(tmp_path),
+            population_size=4,
+            population_chunk_size=2,
+            batch_size=2,
+            eval_examples=2,
+            eval_batch_size=1,
+            population_data_mode="grouped",
+        )
+    )
+
+    final = json.loads(
+        (output_dir / "metrics.jsonl").read_text().splitlines()[-1]
+    )
+    assert final["population/grouped_data"] == 1
+    assert final["population/unique_examples"] == 2
+    assert final["population/candidates_per_example"] == 2
+    assert final["population/candidate_example_evaluations"] == 4
+
+
+def test_tiny_grouped_run_resumes_generator_states(tmp_path: Path) -> None:
+    first = run(
+        small_config(
+            run_name="tiny-grouped-resume",
+            output_dir=str(tmp_path),
+            population_size=4,
+            population_chunk_size=2,
+            batch_size=2,
+            eval_examples=2,
+            eval_batch_size=1,
+            population_data_mode="grouped",
+        )
+    )
+    resumed = run(
+        small_config(
+            run_name="tiny-grouped-resume",
+            output_dir=str(tmp_path),
+            generations=2,
+            population_size=4,
+            population_chunk_size=2,
+            batch_size=2,
+            eval_examples=2,
+            eval_batch_size=1,
+            population_data_mode="grouped",
+            resume=str(first / "latest.pt"),
+        )
+    )
+
+    rows = [
+        json.loads(line)
+        for line in (resumed / "metrics.jsonl").read_text().splitlines()
+    ]
+    assert [row["generation"] for row in rows] == [0.0, 1.0, 2.0]
+    checkpoint = torch.load(resumed / "latest.pt", map_location="cpu")
+    assert checkpoint["generation"] == 2
