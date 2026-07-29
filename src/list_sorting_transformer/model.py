@@ -590,17 +590,17 @@ def sample_top_k_indices(
                     (pair_count, *scores.shape[1:-1], 1),
                     device=scores.device,
                 )
-                positive = torch.searchsorted(
-                    cumulative[:pair_count].contiguous(),
-                    uniforms,
+                positive = cumulative[:pair_count].lt(uniforms).sum(
+                    dim=-1,
+                    keepdim=True,
                 )
-                negative = torch.searchsorted(
-                    cumulative[pair_count:].contiguous(),
-                    uniforms,
+                negative = cumulative[pair_count:].lt(uniforms).sum(
+                    dim=-1,
+                    keepdim=True,
                 )
                 return torch.cat((positive, negative), dim=0)
             uniforms = torch.rand(random_shape, device=scores.device)
-            return torch.searchsorted(cumulative.contiguous(), uniforms)
+            return cumulative.lt(uniforms).sum(dim=-1, keepdim=True)
 
         sampling_dtype = (
             torch.float32
