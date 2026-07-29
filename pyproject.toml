@@ -38,6 +38,7 @@ sort-shortcut-credit-plot = "list_sorting_transformer.shortcut_credit_plot:main"
 sort-shortcut-credit-compare-plot = "list_sorting_transformer.shortcut_credit_compare_plot:main"
 sort-shortcut-credit-routing-plot = "list_sorting_transformer.shortcut_credit_routing_plot:main"
 sort-maml-length = "list_sorting_transformer.maml_length_generalization:main"
+sort-hard-attention-eggroll = "list_sorting_transformer.hard_attention_eggroll:main"
 
 [build-system]
 requires = ["setuptools>=68"]
