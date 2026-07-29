@@ -147,5 +147,7 @@ def test_tiny_run_writes_metrics_and_checkpoint(tmp_path: Path) -> None:
     checkpoint = torch.load(output_dir / "latest.pt", map_location="cpu")
 
     assert [row["generation"] for row in rows] == [0.0, 1.0]
+    assert rows[1]["optimization/parameter_update_rms"] > 0
+    assert rows[1]["optimization/update_to_parameter_rms_ratio"] > 0
     assert checkpoint["experiment"] == "hard_attention_forward_eggroll"
     assert checkpoint["generation"] == 1

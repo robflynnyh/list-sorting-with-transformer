@@ -48,4 +48,8 @@ Useful W&B metrics:
 - `population/loss_std`: variation in candidate fitness.
 - `routing/antithetic_disagreement_fraction`: fraction of selected attention
   edges that differ between the positive and negative member of a pair.
+- `optimization/parameter_update_rms`: RMS size of the actual persistent
+  center-model update.
+- `optimization/update_to_parameter_rms_ratio`: update RMS divided by current
+  parameter RMS.
 - `train/prediction_mode_fraction`: collapse diagnostic for center predictions.

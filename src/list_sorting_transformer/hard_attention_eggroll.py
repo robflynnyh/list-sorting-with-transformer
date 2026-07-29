@@ -622,6 +622,14 @@ def assign_maximization_gradients(
         parameter.grad = -reward_gradients[name]
 
 
+def tensor_collection_rms(tensors: list[Tensor]) -> float:
+    squared_sum = sum(
+        tensor.detach().float().square().sum() for tensor in tensors
+    )
+    element_count = sum(tensor.numel() for tensor in tensors)
+    return float(torch.sqrt(squared_sum / element_count))
+
+
 @dataclass(frozen=True)
 class PopulationMetrics:
     losses: Tensor
@@ -945,16 +953,40 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             name: gradient * gradient_scale
             for name, gradient in reward_gradients.items()
         }
-        optimizer.zero_grad(set_to_none=True)
-        assign_maximization_gradients(model, reward_gradients)
-        optimizer.step()
-
         report_generation = (
             generation % config.log_interval == 0
             or generation % config.eval_interval == 0
             or generation == config.generations
         )
+        trainable_parameters = [
+            parameter
+            for parameter in model.parameters()
+            if parameter.requires_grad
+        ]
+        parameters_before_update = (
+            [
+                parameter.detach().clone()
+                for parameter in trainable_parameters
+            ]
+            if report_generation
+            else None
+        )
+        optimizer.zero_grad(set_to_none=True)
+        assign_maximization_gradients(model, reward_gradients)
+        optimizer.step()
+
         if report_generation:
+            assert parameters_before_update is not None
+            parameter_rms = tensor_collection_rms(trainable_parameters)
+            update_rms = tensor_collection_rms(
+                [
+                    parameter.detach() - previous
+                    for parameter, previous in zip(
+                        trainable_parameters,
+                        parameters_before_update,
+                    )
+                ]
+            )
             with torch.inference_mode():
                 center_logits = model(batch.prompt_ids, offsets=offsets)
                 targets = pointer_targets(batch)
@@ -1003,6 +1035,16 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                         fitness.std(unbiased=False)
                     ),
                     "optimization/gradient_scale": gradient_scale,
+                    "optimization/reward_gradient_rms": (
+                        tensor_collection_rms(
+                            list(reward_gradients.values())
+                        )
+                    ),
+                    "optimization/parameter_update_rms": update_rms,
+                    "optimization/parameter_rms": parameter_rms,
+                    "optimization/update_to_parameter_rms_ratio": (
+                        update_rms / max(parameter_rms, 1e-12)
+                    ),
                     "optimization/sigma": config.sigma,
                     "optimization/learning_rate": (
                         optimizer.param_groups[0]["lr"]
