@@ -54,6 +54,12 @@ class HardAttentionEggrollConfig:
     fitness_shaping: str = "zscore"
     update_rule: str = "paper_standardized"
     elite_count: int = 8
+    curriculum: bool = False
+    curriculum_accuracy_threshold: float = 0.70
+    curriculum_success_checks: int = 3
+    curriculum_check_interval: int = 500
+    curriculum_examples: int = 1_024
+    curriculum_initial_top_k: int = 20
     log_interval: int = 10
     eval_interval: int = 100
     checkpoint_interval: int = 1_000
@@ -74,6 +80,10 @@ class HardAttentionEggrollConfig:
             self.train_max_length,
             self.eval_examples,
             self.eval_batch_size,
+            self.curriculum_success_checks,
+            self.curriculum_check_interval,
+            self.curriculum_examples,
+            self.curriculum_initial_top_k,
             self.symbol_count,
             self.d_model,
             self.layers,
@@ -136,6 +146,77 @@ class HardAttentionEggrollConfig:
             raise ValueError("momentum must be in [0, 1)")
         if self.weight_decay < 0:
             raise ValueError("weight decay must be nonnegative")
+        if not 0 < self.curriculum_accuracy_threshold <= 1:
+            raise ValueError(
+                "curriculum accuracy threshold must be in (0, 1]"
+            )
+
+
+@dataclass
+class CurriculumState:
+    current_max_length: int
+    attention_top_k: int | None
+    success_streak: int = 0
+    promotion_count: int = 0
+
+
+def initialize_curriculum_state(
+    config: HardAttentionEggrollConfig,
+) -> CurriculumState:
+    return CurriculumState(
+        current_max_length=(
+            config.train_min_length
+            if config.curriculum
+            else config.train_max_length
+        ),
+        attention_top_k=(
+            None
+            if config.curriculum or config.attention_mode == "dense"
+            else 1
+        ),
+    )
+
+
+def curriculum_is_complete(
+    state: CurriculumState,
+    config: HardAttentionEggrollConfig,
+) -> bool:
+    return (
+        config.curriculum
+        and state.current_max_length == config.train_max_length
+        and state.attention_top_k == 1
+    )
+
+
+def update_curriculum(
+    state: CurriculumState,
+    config: HardAttentionEggrollConfig,
+    *,
+    probe_accuracy: float,
+) -> str | None:
+    """Advance at most one length or sparsity stage."""
+
+    if not config.curriculum or curriculum_is_complete(state, config):
+        return None
+    if probe_accuracy < config.curriculum_accuracy_threshold:
+        state.success_streak = 0
+        return None
+    state.success_streak += 1
+    if state.success_streak < config.curriculum_success_checks:
+        return None
+
+    state.success_streak = 0
+    state.promotion_count += 1
+    if state.current_max_length < config.train_max_length:
+        state.current_max_length += 1
+        return "length"
+    if state.attention_top_k is None:
+        state.attention_top_k = config.curriculum_initial_top_k
+        return "start_sparsity"
+    if state.attention_top_k > 1:
+        state.attention_top_k -= 1
+        return "increase_sparsity"
+    return None
 
 
 class HardAttentionPointerTransformer(nn.Module):
@@ -170,12 +251,20 @@ class HardAttentionPointerTransformer(nn.Module):
         with torch.no_grad():
             _set_modular_fourier_codebooks(self.position_embedding)
         self.position_embedding.requires_grad_(False)
-        if config.attention_mode == "top1":
-            for block in self.encoder.blocks:
-                block.attention.configure_top_k(1)
+        self.current_top_k: int | None = None
+        self.set_attention_top_k(
+            1 if config.attention_mode == "top1" else None
+        )
         self.output = nn.Linear(config.d_model, config.symbol_count)
         nn.init.normal_(self.output.weight, mean=0.0, std=0.02)
         nn.init.zeros_(self.output.bias)
+
+    def set_attention_top_k(self, top_k: int | None) -> None:
+        if top_k is not None and top_k < 1:
+            raise ValueError("attention top-k must be positive")
+        self.current_top_k = top_k
+        for block in self.encoder.blocks:
+            block.attention.configure_top_k(top_k)
 
     def position_embeddings(
         self,
@@ -443,7 +532,7 @@ def _population_attention(
     ).tril()
     scores = scores.masked_fill(~causal_mask, float("-inf"))
     selected = scores.argmax(dim=-1)
-    if model.config.attention_mode == "top1":
+    if model.current_top_k == 1:
         attended = torch.gather(
             value,
             dim=-2,
@@ -452,8 +541,20 @@ def _population_attention(
                 head_dim,
             ),
         )
-    else:
+    elif model.current_top_k is None:
         attended = scores.softmax(dim=-1) @ value
+    else:
+        selected_top_k = scores.topk(
+            min(model.current_top_k, sequence_length),
+            dim=-1,
+        ).indices
+        sparse_scores = torch.full_like(scores, float("-inf"))
+        sparse_scores.scatter_(
+            -1,
+            selected_top_k,
+            scores.gather(-1, selected_top_k),
+        )
+        attended = sparse_scores.softmax(dim=-1) @ value
     attended = attended.permute(0, 1, 3, 2, 4).reshape(
         population_size,
         batch_size,
@@ -792,11 +893,19 @@ def make_training_batch(
     vocabulary: PointerNextVocabulary,
     generator: torch.Generator,
     device: torch.device,
+    max_length: int | None = None,
 ) -> tuple[PointerNextBatch, Tensor]:
+    resolved_max_length = (
+        config.train_max_length if max_length is None else max_length
+    )
+    if not config.train_min_length <= resolved_max_length <= (
+        config.train_max_length
+    ):
+        raise ValueError("training maximum is outside the configured range")
     length = int(
         torch.randint(
             config.train_min_length,
-            config.train_max_length + 1,
+            resolved_max_length + 1,
             (),
             generator=generator,
         )
@@ -847,6 +956,39 @@ def make_evaluation_data(
 
 
 @torch.inference_mode()
+def evaluate_pointer_batch(
+    model: HardAttentionPointerTransformer,
+    batch: PointerNextBatch,
+    offsets: Tensor,
+    *,
+    eval_batch_size: int,
+) -> tuple[float, float]:
+    targets = pointer_targets(batch)
+    loss_sum = 0.0
+    correct = 0
+    for start in range(0, targets.shape[0], eval_batch_size):
+        end = min(start + eval_batch_size, targets.shape[0])
+        logits = model(
+            batch.prompt_ids[start:end],
+            offsets=offsets[start:end],
+        )
+        loss_sum += float(
+            F.cross_entropy(
+                logits,
+                targets[start:end],
+                reduction="sum",
+            )
+        )
+        correct += int(
+            logits.argmax(dim=-1).eq(targets[start:end]).sum()
+        )
+    return (
+        loss_sum / targets.shape[0],
+        correct / targets.shape[0],
+    )
+
+
+@torch.inference_mode()
 def evaluate_model(
     model: HardAttentionPointerTransformer,
     evaluation_data: dict[int, tuple[PointerNextBatch, Tensor]],
@@ -859,29 +1001,13 @@ def evaluate_model(
     in_domain_accuracies = []
     out_of_domain_accuracies = []
     for length, (batch, offsets) in evaluation_data.items():
-        targets = pointer_targets(batch)
-        loss_sum = 0.0
-        correct = 0
-        for start in range(0, targets.shape[0], eval_batch_size):
-            end = min(start + eval_batch_size, targets.shape[0])
-            logits = model(
-                batch.prompt_ids[start:end],
-                offsets=offsets[start:end],
-            )
-            loss_sum += float(
-                F.cross_entropy(
-                    logits,
-                    targets[start:end],
-                    reduction="sum",
-                )
-            )
-            correct += int(
-                logits.argmax(dim=-1).eq(targets[start:end]).sum()
-            )
-        accuracy = correct / targets.shape[0]
-        summary[f"eval/length_{length}/loss"] = (
-            loss_sum / targets.shape[0]
+        loss, accuracy = evaluate_pointer_batch(
+            model,
+            batch,
+            offsets,
+            eval_batch_size=eval_batch_size,
         )
+        summary[f"eval/length_{length}/loss"] = loss
         summary[f"eval/length_{length}/accuracy"] = accuracy
         (
             in_domain_accuracies
@@ -896,6 +1022,36 @@ def evaluate_model(
             out_of_domain_accuracies
         ) / len(out_of_domain_accuracies)
     return summary
+
+
+def evaluate_curriculum_probe(
+    model: HardAttentionPointerTransformer,
+    config: HardAttentionEggrollConfig,
+    state: CurriculumState,
+    *,
+    generator: torch.Generator,
+    device: torch.device,
+) -> tuple[float, float]:
+    batch = make_pointer_next_batch(
+        config.curriculum_examples,
+        state.current_max_length,
+        generator=generator,
+        vocabulary=model.vocabulary,
+        device=device,
+    )
+    offsets = sample_position_offsets(
+        config.curriculum_examples,
+        minimum=config.position_offset_min,
+        maximum=config.position_offset_max,
+        generator=generator,
+        device=device,
+    )
+    return evaluate_pointer_batch(
+        model,
+        batch,
+        offsets,
+        eval_batch_size=config.eval_batch_size,
+    )
 
 
 def initialize_wandb(config: HardAttentionEggrollConfig) -> Any | None:
@@ -920,6 +1076,8 @@ def save_checkpoint(
     generation: int,
     data_generator: torch.Generator,
     noise_generator: torch.Generator,
+    curriculum_generator: torch.Generator,
+    curriculum_state: CurriculumState,
 ) -> None:
     torch.save(
         {
@@ -930,6 +1088,10 @@ def save_checkpoint(
             "generation": generation,
             "data_generator_state": data_generator.get_state(),
             "noise_generator_state": noise_generator.get_state(),
+            "curriculum_generator_state": (
+                curriculum_generator.get_state()
+            ),
+            "curriculum_state": asdict(curriculum_state),
         },
         path,
     )
@@ -949,6 +1111,11 @@ def run(config: HardAttentionEggrollConfig) -> Path:
     noise_generator = torch.Generator(device=device).manual_seed(
         config.seed + 2_000
     )
+    curriculum_generator = torch.Generator().manual_seed(
+        config.seed + 3_000
+    )
+    curriculum_state = initialize_curriculum_state(config)
+    model.set_attention_top_k(curriculum_state.attention_top_k)
     start_generation = 1
     if config.resume is not None:
         checkpoint = torch.load(config.resume, map_location=device)
@@ -958,6 +1125,15 @@ def run(config: HardAttentionEggrollConfig) -> Path:
         optimizer.load_state_dict(checkpoint["optimizer"])
         data_generator.set_state(checkpoint["data_generator_state"])
         noise_generator.set_state(checkpoint["noise_generator_state"])
+        if "curriculum_generator_state" in checkpoint:
+            curriculum_generator.set_state(
+                checkpoint["curriculum_generator_state"]
+            )
+        if "curriculum_state" in checkpoint:
+            curriculum_state = CurriculumState(
+                **checkpoint["curriculum_state"]
+            )
+        model.set_attention_top_k(curriculum_state.attention_top_k)
         start_generation = int(checkpoint["generation"]) + 1
 
     evaluation_data = make_evaluation_data(
@@ -969,7 +1145,22 @@ def run(config: HardAttentionEggrollConfig) -> Path:
     if wandb_run is not None:
         print(f"W&B: {wandb_run.url}", flush=True)
     if start_generation == 1:
-        initial = {"generation": 0.0}
+        initial = {
+            "generation": 0.0,
+            "curriculum/enabled": float(config.curriculum),
+            "curriculum/current_max_length": float(
+                curriculum_state.current_max_length
+            ),
+            "curriculum/attention_top_k": float(
+                curriculum_state.attention_top_k or 0
+            ),
+            "curriculum/dense_attention": float(
+                curriculum_state.attention_top_k is None
+            ),
+            "curriculum/complete": float(
+                curriculum_is_complete(curriculum_state, config)
+            ),
+        }
         initial.update(
             evaluate_model(
                 model,
@@ -990,6 +1181,7 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             vocabulary=model.vocabulary,
             generator=data_generator,
             device=device,
+            max_length=curriculum_state.current_max_length,
         )
         noise = sample_antithetic_rank_one_noise(
             model,
@@ -1027,9 +1219,14 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             name: gradient * gradient_scale
             for name, gradient in reward_gradients.items()
         }
+        curriculum_check = (
+            config.curriculum
+            and generation % config.curriculum_check_interval == 0
+        )
         report_generation = (
             generation % config.log_interval == 0
             or generation % config.eval_interval == 0
+            or curriculum_check
             or generation == config.generations
         )
         trainable_parameters = [
@@ -1143,6 +1340,25 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                     "optimization/learning_rate": (
                         optimizer.param_groups[0]["lr"]
                     ),
+                    "curriculum/enabled": float(config.curriculum),
+                    "curriculum/current_max_length": float(
+                        curriculum_state.current_max_length
+                    ),
+                    "curriculum/attention_top_k": float(
+                        curriculum_state.attention_top_k or 0
+                    ),
+                    "curriculum/dense_attention": float(
+                        curriculum_state.attention_top_k is None
+                    ),
+                    "curriculum/success_streak": float(
+                        curriculum_state.success_streak
+                    ),
+                    "curriculum/promotion_count": float(
+                        curriculum_state.promotion_count
+                    ),
+                    "curriculum/complete": float(
+                        curriculum_is_complete(curriculum_state, config)
+                    ),
                     "timing/generations_per_second": generation
                     / max(time.monotonic() - started_at, 1e-9),
                 }
@@ -1165,6 +1381,61 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                     f"ood={summary.get('eval/out_of_domain_accuracy_mean', 0):.3f}",
                     flush=True,
                 )
+            if curriculum_check:
+                probe_loss, probe_accuracy = evaluate_curriculum_probe(
+                    model,
+                    config,
+                    curriculum_state,
+                    generator=curriculum_generator,
+                    device=device,
+                )
+                promotion = update_curriculum(
+                    curriculum_state,
+                    config,
+                    probe_accuracy=probe_accuracy,
+                )
+                model.set_attention_top_k(
+                    curriculum_state.attention_top_k
+                )
+                summary.update(
+                    {
+                        "curriculum/probe_loss": probe_loss,
+                        "curriculum/probe_accuracy": probe_accuracy,
+                        "curriculum/promoted": float(
+                            promotion is not None
+                        ),
+                        "curriculum/promoted_length": float(
+                            promotion == "length"
+                        ),
+                        "curriculum/started_sparsity": float(
+                            promotion == "start_sparsity"
+                        ),
+                        "curriculum/increased_sparsity": float(
+                            promotion == "increase_sparsity"
+                        ),
+                        "curriculum/current_max_length": float(
+                            curriculum_state.current_max_length
+                        ),
+                        "curriculum/attention_top_k": float(
+                            curriculum_state.attention_top_k or 0
+                        ),
+                        "curriculum/dense_attention": float(
+                            curriculum_state.attention_top_k is None
+                        ),
+                        "curriculum/success_streak": float(
+                            curriculum_state.success_streak
+                        ),
+                        "curriculum/promotion_count": float(
+                            curriculum_state.promotion_count
+                        ),
+                        "curriculum/complete": float(
+                            curriculum_is_complete(
+                                curriculum_state,
+                                config,
+                            )
+                        ),
+                    }
+                )
             with metrics_path.open("a") as metrics_file:
                 metrics_file.write(json.dumps(summary) + "\n")
             if wandb_run is not None:
@@ -1182,6 +1453,8 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                 generation=generation,
                 data_generator=data_generator,
                 noise_generator=noise_generator,
+                curriculum_generator=curriculum_generator,
+                curriculum_state=curriculum_state,
             )
             save_checkpoint(
                 output_dir / "latest.pt",
@@ -1191,6 +1464,8 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                 generation=generation,
                 data_generator=data_generator,
                 noise_generator=noise_generator,
+                curriculum_generator=curriculum_generator,
+                curriculum_state=curriculum_state,
             )
     if wandb_run is not None:
         wandb_run.finish()
@@ -1290,6 +1565,32 @@ def build_parser() -> argparse.ArgumentParser:
         default="paper_standardized",
     )
     parser.add_argument("--elite-count", type=int, default=8)
+    parser.add_argument("--curriculum", action="store_true")
+    parser.add_argument(
+        "--curriculum-accuracy-threshold",
+        type=float,
+        default=HardAttentionEggrollConfig.curriculum_accuracy_threshold,
+    )
+    parser.add_argument(
+        "--curriculum-success-checks",
+        type=int,
+        default=HardAttentionEggrollConfig.curriculum_success_checks,
+    )
+    parser.add_argument(
+        "--curriculum-check-interval",
+        type=int,
+        default=HardAttentionEggrollConfig.curriculum_check_interval,
+    )
+    parser.add_argument(
+        "--curriculum-examples",
+        type=int,
+        default=HardAttentionEggrollConfig.curriculum_examples,
+    )
+    parser.add_argument(
+        "--curriculum-initial-top-k",
+        type=int,
+        default=HardAttentionEggrollConfig.curriculum_initial_top_k,
+    )
     parser.add_argument("--log-interval", type=int, default=10)
     parser.add_argument("--eval-interval", type=int, default=100)
     parser.add_argument("--checkpoint-interval", type=int, default=1_000)

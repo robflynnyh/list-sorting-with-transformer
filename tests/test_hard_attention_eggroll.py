@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -6,13 +8,17 @@ import torch
 
 from list_sorting_transformer.hard_attention_eggroll import (
     AntitheticRankOneNoise,
+    CurriculumState,
     HardAttentionEggrollConfig,
     RankOneFactors,
+    curriculum_is_complete,
     estimate_elite_centroid_directions,
+    initialize_curriculum_state,
     make_model,
     population_forward,
     run,
     sample_antithetic_rank_one_noise,
+    update_curriculum,
 )
 from list_sorting_transformer.data import make_pointer_next_batch
 from list_sorting_transformer.positions import sample_position_offsets
@@ -80,9 +86,12 @@ def test_model_uses_fixed_modular_positions_and_exact_top1() -> None:
     assert model.position_embedding.period == 3 * 5 * 7 * 11
 
 
-def test_factorized_population_matches_materialized_candidates() -> None:
+def assert_factorized_population_matches_materialized_candidates(
+    top_k: int | None,
+) -> None:
     config = small_config()
     model = make_model(config, device=torch.device("cpu"))
+    model.set_attention_top_k(top_k)
     data_generator = torch.Generator().manual_seed(31)
     batch = make_pointer_next_batch(
         config.batch_size,
@@ -128,6 +137,60 @@ def test_factorized_population_matches_materialized_candidates() -> None:
         rtol=1e-5,
         atol=2e-6,
     )
+
+
+def test_factorized_population_matches_materialized_top1_candidates() -> None:
+    assert_factorized_population_matches_materialized_candidates(1)
+
+
+def test_factorized_population_matches_materialized_top2_candidates() -> None:
+    assert_factorized_population_matches_materialized_candidates(2)
+
+
+def test_factorized_population_matches_materialized_dense_candidates() -> None:
+    assert_factorized_population_matches_materialized_candidates(None)
+
+
+def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
+    config = small_config(
+        curriculum=True,
+        curriculum_accuracy_threshold=0.70,
+        curriculum_success_checks=2,
+        curriculum_initial_top_k=3,
+    )
+    state = initialize_curriculum_state(config)
+
+    assert state == CurriculumState(
+        current_max_length=2,
+        attention_top_k=None,
+    )
+    assert update_curriculum(state, config, probe_accuracy=0.69) is None
+    assert state.success_streak == 0
+
+    expected_promotions = (
+        ("length", 3, None),
+        ("length", 4, None),
+        ("start_sparsity", 4, 3),
+        ("increase_sparsity", 4, 2),
+        ("increase_sparsity", 4, 1),
+    )
+    for promotion, expected_length, expected_top_k in expected_promotions:
+        assert update_curriculum(
+            state,
+            config,
+            probe_accuracy=0.70,
+        ) is None
+        assert update_curriculum(
+            state,
+            config,
+            probe_accuracy=0.80,
+        ) == promotion
+        assert state.current_max_length == expected_length
+        assert state.attention_top_k == expected_top_k
+
+    assert curriculum_is_complete(state, config)
+    assert state.promotion_count == len(expected_promotions)
+    assert update_curriculum(state, config, probe_accuracy=1.0) is None
 
 
 def test_elite_centroid_selects_one_sign_per_antithetic_pair() -> None:
@@ -183,6 +246,13 @@ def test_tiny_run_writes_metrics_and_checkpoint(tmp_path: Path) -> None:
     assert rows[1]["optimization/update_to_parameter_rms_ratio"] > 0
     assert checkpoint["experiment"] == "hard_attention_forward_eggroll"
     assert checkpoint["generation"] == 1
+    assert checkpoint["curriculum_state"] == {
+        "current_max_length": 4,
+        "attention_top_k": 1,
+        "success_streak": 0,
+        "promotion_count": 0,
+    }
+    assert "curriculum_generator_state" in checkpoint
 
 
 def test_tiny_elite_run_reports_selected_centroid(tmp_path: Path) -> None:

@@ -7,7 +7,9 @@ backward-rule or shortcut experiments.
 ## Model
 
 - Two-layer, four-head decoder Transformer.
-- Every head selects exactly one causal source token with hard top-1 attention.
+- The fixed setup uses exact top-1 causal attention. The curriculum setup
+  begins with dense attention, progressively restricts it to top-k softmax,
+  and finishes at exact top-1.
 - Split 64-dimensional content and 64-dimensional position inputs.
 - Absolute position is the concatenation of fixed Fourier residue codes for
   moduli `2,3,5,7,11,13,17,19`.
@@ -35,6 +37,21 @@ unique directions by default, and moves the center by `learning_rate` times
 the mean candidate displacement. Thus `--learning-rate 0.03` means a 3% move
 toward the selected elite centroid.
 
+## Performance-gated curriculum
+
+`--curriculum` enables two sequential curricula:
+
+1. Attention remains dense while the sampled training range grows from length
+   `2` to `2..20`, one maximum length at a time.
+2. At length 20, attention switches to top-20 softmax and then reduces `k` one
+   step at a time until top-1 becomes exact argmax attention.
+
+Each stage requires at least 70% accuracy on three consecutive fresh
+1,024-example probes at the current maximum length. Probes use independent
+data and random absolute offsets. The threshold, confirmation count, check
+interval, probe size, and initial `k` are configurable. Curriculum state and
+its random generator are included in every checkpoint.
+
 ## Run
 
 ```bash
@@ -60,4 +77,8 @@ Useful W&B metrics:
   parameter RMS.
 - `optimization/elite_positive_fraction`: fraction of selected unique elite
   directions using the positive antithetic sign.
+- `curriculum/current_max_length`: active upper training length.
+- `curriculum/attention_top_k`: active `k`, with zero denoting dense attention.
+- `curriculum/probe_accuracy`: fresh performance used for promotion.
+- `curriculum/promoted`: whether the current check advanced either curriculum.
 - `train/prediction_mode_fraction`: collapse diagnostic for center predictions.
