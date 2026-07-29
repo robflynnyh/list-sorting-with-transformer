@@ -57,6 +57,7 @@ class HardAttentionEggrollConfig:
     update_rule: str = "paper_standardized"
     elite_count: int = 8
     curriculum: bool = False
+    curriculum_progress_mode: str = "probe"
     curriculum_accuracy_threshold: float = 0.70
     curriculum_success_checks: int = 3
     curriculum_check_interval: int = 500
@@ -168,6 +169,13 @@ class HardAttentionEggrollConfig:
             raise ValueError(
                 "curriculum accuracy threshold must be in (0, 1]"
             )
+        if self.curriculum_progress_mode not in {
+            "probe",
+            "training_streak",
+        }:
+            raise ValueError(
+                "curriculum progress mode must be probe or training_streak"
+            )
 
 
 @dataclass
@@ -210,13 +218,13 @@ def update_curriculum(
     state: CurriculumState,
     config: HardAttentionEggrollConfig,
     *,
-    probe_accuracy: float,
+    criterion_accuracy: float,
 ) -> str | None:
     """Advance at most one length or sparsity stage."""
 
     if not config.curriculum or curriculum_is_complete(state, config):
         return None
-    if probe_accuracy < config.curriculum_accuracy_threshold:
+    if criterion_accuracy < config.curriculum_accuracy_threshold:
         state.success_streak = 0
         return None
     state.success_streak += 1
@@ -235,6 +243,20 @@ def update_curriculum(
         state.attention_top_k -= 1
         return "increase_sparsity"
     return None
+
+
+def curriculum_check_due(
+    config: HardAttentionEggrollConfig,
+    state: CurriculumState,
+    *,
+    generation: int,
+    batch_length: int,
+) -> bool:
+    if not config.curriculum or curriculum_is_complete(state, config):
+        return False
+    if config.curriculum_progress_mode == "probe":
+        return generation % config.curriculum_check_interval == 0
+    return batch_length == state.current_max_length
 
 
 class HardAttentionPointerTransformer(nn.Module):
@@ -1309,9 +1331,11 @@ def run(config: HardAttentionEggrollConfig) -> Path:
             name: gradient * gradient_scale
             for name, gradient in reward_gradients.items()
         }
-        curriculum_check = (
-            config.curriculum
-            and generation % config.curriculum_check_interval == 0
+        curriculum_check = curriculum_check_due(
+            config,
+            curriculum_state,
+            generation=generation,
+            batch_length=batch.length,
         )
         report_generation = (
             generation % config.log_interval == 0
@@ -1489,25 +1513,41 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                     flush=True,
                 )
             if curriculum_check:
-                probe_loss, probe_accuracy = evaluate_curriculum_probe(
-                    model,
-                    config,
-                    curriculum_state,
-                    generator=curriculum_generator,
-                    device=device,
+                uses_training_batch = (
+                    config.curriculum_progress_mode == "training_streak"
                 )
+                if uses_training_batch:
+                    criterion_loss = summary[
+                        "train/center_loss_after_update"
+                    ]
+                    criterion_accuracy = summary[
+                        "train/center_accuracy_after_update"
+                    ]
+                else:
+                    criterion_loss, criterion_accuracy = (
+                        evaluate_curriculum_probe(
+                            model,
+                            config,
+                            curriculum_state,
+                            generator=curriculum_generator,
+                            device=device,
+                        )
+                    )
                 promotion = update_curriculum(
                     curriculum_state,
                     config,
-                    probe_accuracy=probe_accuracy,
+                    criterion_accuracy=criterion_accuracy,
                 )
                 model.set_attention_top_k(
                     curriculum_state.attention_top_k
                 )
                 summary.update(
                     {
-                        "curriculum/probe_loss": probe_loss,
-                        "curriculum/probe_accuracy": probe_accuracy,
+                        "curriculum/criterion_loss": criterion_loss,
+                        "curriculum/criterion_accuracy": criterion_accuracy,
+                        "curriculum/criterion_is_training_batch": float(
+                            uses_training_batch
+                        ),
                         "curriculum/promoted": float(
                             promotion is not None
                         ),
@@ -1543,6 +1583,13 @@ def run(config: HardAttentionEggrollConfig) -> Path:
                         ),
                     }
                 )
+                if not uses_training_batch:
+                    summary.update(
+                        {
+                            "curriculum/probe_loss": criterion_loss,
+                            "curriculum/probe_accuracy": criterion_accuracy,
+                        }
+                    )
             with metrics_path.open("a") as metrics_file:
                 metrics_file.write(json.dumps(summary) + "\n")
             if wandb_run is not None:
@@ -1683,6 +1730,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--elite-count", type=int, default=8)
     parser.add_argument("--curriculum", action="store_true")
+    parser.add_argument(
+        "--curriculum-progress-mode",
+        choices=("probe", "training_streak"),
+        default=HardAttentionEggrollConfig.curriculum_progress_mode,
+    )
     parser.add_argument(
         "--curriculum-accuracy-threshold",
         type=float,

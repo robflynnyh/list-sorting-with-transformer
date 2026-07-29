@@ -12,6 +12,7 @@ from list_sorting_transformer.hard_attention_eggroll import (
     CurriculumState,
     HardAttentionEggrollConfig,
     RankOneFactors,
+    curriculum_check_due,
     curriculum_is_complete,
     estimate_elite_centroid_directions,
     evaluate_population,
@@ -314,7 +315,7 @@ def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
         current_max_length=2,
         attention_top_k=None,
     )
-    assert update_curriculum(state, config, probe_accuracy=0.69) is None
+    assert update_curriculum(state, config, criterion_accuracy=0.69) is None
     assert state.success_streak == 0
 
     expected_promotions = (
@@ -328,19 +329,47 @@ def test_curriculum_requires_repeated_success_and_advances_in_order() -> None:
         assert update_curriculum(
             state,
             config,
-            probe_accuracy=0.70,
+            criterion_accuracy=0.70,
         ) is None
         assert update_curriculum(
             state,
             config,
-            probe_accuracy=0.80,
+            criterion_accuracy=0.80,
         ) == promotion
         assert state.current_max_length == expected_length
         assert state.attention_top_k == expected_top_k
 
     assert curriculum_is_complete(state, config)
     assert state.promotion_count == len(expected_promotions)
-    assert update_curriculum(state, config, probe_accuracy=1.0) is None
+    assert update_curriculum(state, config, criterion_accuracy=1.0) is None
+
+
+def test_training_streak_only_checks_current_maximum_length() -> None:
+    config = small_config(
+        curriculum=True,
+        curriculum_progress_mode="training_streak",
+    )
+    state = initialize_curriculum_state(config)
+
+    assert curriculum_check_due(
+        config,
+        state,
+        generation=1,
+        batch_length=2,
+    )
+    state.current_max_length = 4
+    assert not curriculum_check_due(
+        config,
+        state,
+        generation=2,
+        batch_length=3,
+    )
+    assert curriculum_check_due(
+        config,
+        state,
+        generation=3,
+        batch_length=4,
+    )
 
 
 def test_elite_centroid_selects_one_sign_per_antithetic_pair() -> None:
@@ -403,6 +432,34 @@ def test_tiny_run_writes_metrics_and_checkpoint(tmp_path: Path) -> None:
         "promotion_count": 0,
     }
     assert "curriculum_generator_state" in checkpoint
+
+
+def test_tiny_training_streak_run_uses_training_batch_criterion(
+    tmp_path: Path,
+) -> None:
+    output_dir = run(
+        small_config(
+            run_name="tiny-training-streak",
+            output_dir=str(tmp_path),
+            population_size=2,
+            population_chunk_size=2,
+            batch_size=2,
+            eval_examples=2,
+            eval_batch_size=1,
+            curriculum=True,
+            curriculum_progress_mode="training_streak",
+            curriculum_success_checks=10,
+        )
+    )
+
+    final = json.loads(
+        (output_dir / "metrics.jsonl").read_text().splitlines()[-1]
+    )
+    assert final["curriculum/criterion_is_training_batch"] == 1
+    assert final["curriculum/criterion_accuracy"] == (
+        final["train/center_accuracy_after_update"]
+    )
+    assert "curriculum/probe_accuracy" not in final
 
 
 def test_tiny_elite_run_reports_selected_centroid(tmp_path: Path) -> None:

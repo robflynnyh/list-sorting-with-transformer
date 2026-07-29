@@ -62,6 +62,12 @@ data and random absolute offsets. The threshold, confirmation count, check
 interval, probe size, and initial `k` are configurable. Curriculum state and
 its random generator are included in every checkpoint.
 
+`--curriculum-progress-mode training_streak` instead promotes after consecutive
+successful post-update training batches at the current maximum length. Shorter
+randomly sampled batches are ignored rather than counted as successes or
+failures. This avoids the probe interval delay while retaining fresh data
+between every counted result.
+
 ## Run
 
 ```bash
@@ -103,5 +109,6 @@ Useful W&B metrics:
 - `curriculum/current_max_length`: active upper training length.
 - `curriculum/attention_top_k`: active `k`, with zero denoting dense attention.
 - `curriculum/probe_accuracy`: fresh performance used for promotion.
+- `curriculum/criterion_accuracy`: accuracy used by either promotion mode.
 - `curriculum/promoted`: whether the current check advanced either curriculum.
 - `train/prediction_mode_fraction`: collapse diagnostic for center predictions.
