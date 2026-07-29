@@ -572,20 +572,59 @@ def sample_top_k_indices(
 
     if not 1 <= top_k <= scores.shape[-1]:
         raise ValueError("top_k must fit within the score dimension")
-    random_shape = scores.shape
-    if share_antithetic_pairs:
-        if scores.shape[0] % 2:
-            raise ValueError("antithetic sampling requires an even population")
-        random_shape = (scores.shape[0] // 2, *scores.shape[1:])
-    uniforms = torch.rand(
-        random_shape,
-        device=scores.device,
-        dtype=torch.float32,
-    ).clamp_(min=1e-6, max=1 - 1e-6)
-    if share_antithetic_pairs:
-        uniforms = torch.cat((uniforms, uniforms), dim=0)
-    gumbel = -torch.log(-torch.log(uniforms))
-    return (scores.float() + gumbel).topk(top_k, dim=-1).indices
+    if share_antithetic_pairs and scores.shape[0] % 2:
+        raise ValueError("antithetic sampling requires an even population")
+
+    with torch.no_grad():
+        if top_k == 1:
+            cumulative = torch.softmax(
+                scores,
+                dim=-1,
+                dtype=torch.float32,
+            ).cumsum_(dim=-1)
+            cumulative[..., -1] = 1.0
+            random_shape = (*scores.shape[:-1], 1)
+            if share_antithetic_pairs:
+                pair_count = scores.shape[0] // 2
+                uniforms = torch.rand(
+                    (pair_count, *scores.shape[1:-1], 1),
+                    device=scores.device,
+                )
+                positive = torch.searchsorted(
+                    cumulative[:pair_count].contiguous(),
+                    uniforms,
+                )
+                negative = torch.searchsorted(
+                    cumulative[pair_count:].contiguous(),
+                    uniforms,
+                )
+                return torch.cat((positive, negative), dim=0)
+            uniforms = torch.rand(random_shape, device=scores.device)
+            return torch.searchsorted(cumulative.contiguous(), uniforms)
+
+        sampling_dtype = (
+            torch.float32
+            if scores.dtype == torch.float32
+            else torch.float16
+        )
+        random_shape = scores.shape
+        if share_antithetic_pairs:
+            random_shape = (scores.shape[0] // 2, *scores.shape[1:])
+        epsilon = torch.finfo(sampling_dtype).eps
+        gumbel = torch.rand(
+            random_shape,
+            device=scores.device,
+            dtype=sampling_dtype,
+        ).clamp_(min=epsilon, max=1 - epsilon)
+        gumbel.log_().neg_().log_().neg_()
+        perturbed = scores.to(dtype=sampling_dtype).clone()
+        if share_antithetic_pairs:
+            pair_count = scores.shape[0] // 2
+            perturbed[:pair_count].add_(gumbel)
+            perturbed[pair_count:].add_(gumbel)
+        else:
+            perturbed.add_(gumbel)
+        return perturbed.topk(top_k, dim=-1).indices
 
 
 class CausalSelfAttention(nn.Module):
