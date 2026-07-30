@@ -51,6 +51,7 @@ class SparseAttentionAdamConfig:
     entmax_alpha: float = 1.5
     scale_delta: float = 1.0
     scale_gamma_range: float = 2.0
+    scaling_mode: str = "adaptive"
     architecture: str = "standard"
     input_position_mode: str = "modular"
     value_input_mode: str = "embedding_plus_scalar"
@@ -143,14 +144,20 @@ class SparseAttentionAdamConfig:
             )
         if self.position_offset_min > self.position_offset_max:
             raise ValueError("position offset bounds are reversed")
-        if not 0 < self.alibi_heads < self.heads:
-            raise ValueError("NAPE requires both ALiBi and NoPE heads")
+        if not 0 <= self.alibi_heads <= self.heads:
+            raise ValueError("alibi_heads must be between zero and heads")
         if self.attention_normalizer not in {"entmax15", "softmax"}:
             raise ValueError(
                 "attention_normalizer must be entmax15 or softmax"
             )
         if self.entmax_alpha != 1.5:
             raise ValueError("this implementation supports entmax alpha=1.5")
+        if self.scaling_mode not in {"adaptive", "none"}:
+            raise ValueError("scaling_mode must be adaptive or none")
+        if self.scaling_mode == "adaptive" and self.alibi_heads == self.heads:
+            raise ValueError(
+                "adaptive scaling requires at least one NoPE head"
+            )
         if self.scale_delta < 0 or self.scale_gamma_range <= 0:
             raise ValueError("invalid adaptive-scaling configuration")
         if self.learning_rate <= 0 or self.weight_decay < 0:
@@ -256,19 +263,20 @@ class AdaptiveEntmaxSelfAttention(nn.Module):
         self.nope_heads = config.heads - config.alibi_heads
         self.head_dim = config.d_model // config.heads
         self.attention_normalizer = config.attention_normalizer
+        self.scaling_mode = config.scaling_mode
         self.scale_delta = config.scale_delta
         self.scale_gamma_range = config.scale_gamma_range
         self.qkv = nn.Linear(config.d_model, 3 * config.d_model, bias=False)
         self.output = nn.Linear(config.d_model, config.d_model, bias=False)
-        self.beta_projection = nn.Linear(
-            config.d_model,
-            self.nope_heads,
-            bias=True,
+        self.beta_projection = (
+            nn.Linear(config.d_model, self.nope_heads, bias=True)
+            if self.scaling_mode == "adaptive"
+            else None
         )
-        self.gamma_projection = nn.Linear(
-            config.d_model,
-            self.nope_heads,
-            bias=True,
+        self.gamma_projection = (
+            nn.Linear(config.d_model, self.nope_heads, bias=True)
+            if self.scaling_mode == "adaptive"
+            else None
         )
         self.register_buffer(
             "slopes",
@@ -330,26 +338,34 @@ class AdaptiveEntmaxSelfAttention(nn.Module):
         key = self._split_heads(key)
         value = self._split_heads(value)
 
-        beta = F.softplus(self.beta_projection(hidden)).transpose(1, 2)
-        gamma = self.scale_gamma_range * torch.tanh(
-            self.gamma_projection(hidden)
-        ).transpose(1, 2)
-        log_position = torch.arange(
-            2,
-            length + 2,
-            device=hidden.device,
-            dtype=torch.float32,
-        ).log()[None, None, :]
-        scaler = self.scale_delta + beta.float() * log_position.pow(
-            gamma.float()
-        )
-        query = torch.cat(
-            (
-                query[:, : self.alibi_heads],
-                query[:, self.alibi_heads :] * scaler.to(query.dtype).unsqueeze(-1),
-            ),
-            dim=1,
-        )
+        if self.scaling_mode == "adaptive":
+            assert self.beta_projection is not None
+            assert self.gamma_projection is not None
+            beta = F.softplus(self.beta_projection(hidden)).transpose(1, 2)
+            gamma = self.scale_gamma_range * torch.tanh(
+                self.gamma_projection(hidden)
+            ).transpose(1, 2)
+            log_position = torch.arange(
+                2,
+                length + 2,
+                device=hidden.device,
+                dtype=torch.float32,
+            ).log()[None, None, :]
+            scaler = self.scale_delta + beta.float() * log_position.pow(
+                gamma.float()
+            )
+            query = torch.cat(
+                (
+                    query[:, : self.alibi_heads],
+                    query[:, self.alibi_heads :]
+                    * scaler.to(query.dtype).unsqueeze(-1),
+                ),
+                dim=1,
+            )
+        else:
+            beta = hidden.new_zeros(())
+            gamma = hidden.new_zeros(())
+            scaler = hidden.new_ones(())
 
         scores = query @ key.transpose(-2, -1) / math.sqrt(self.head_dim)
         positions = torch.arange(length, device=hidden.device)
@@ -382,12 +398,16 @@ class AdaptiveEntmaxSelfAttention(nn.Module):
             self.last_metrics = {
                 "support_size": support.sum() / (batch * self.heads * length),
                 "support_fraction": support.sum() / (allowed * self.heads),
-                "alibi_support_size": per_head_support[
-                    : self.alibi_heads
-                ].mean(),
-                "nope_support_size": per_head_support[
-                    self.alibi_heads :
-                ].mean(),
+                "alibi_support_size": (
+                    per_head_support[: self.alibi_heads].mean()
+                    if self.alibi_heads
+                    else per_head_support.new_zeros(())
+                ),
+                "nope_support_size": (
+                    per_head_support[self.alibi_heads :].mean()
+                    if self.nope_heads
+                    else per_head_support.new_zeros(())
+                ),
                 "beta_mean": beta.mean(),
                 "gamma_mean": gamma.mean(),
                 "scale_mean": scaler.mean(),
@@ -1040,6 +1060,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--attention-normalizer",
         choices=("entmax15", "softmax"),
         default=SparseAttentionAdamConfig.attention_normalizer,
+    )
+    parser.add_argument(
+        "--scaling-mode",
+        choices=("adaptive", "none"),
+        default=SparseAttentionAdamConfig.scaling_mode,
     )
     parser.add_argument(
         "--architecture",

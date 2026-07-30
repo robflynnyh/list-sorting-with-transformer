@@ -97,6 +97,9 @@ at step 5,000 with seed 4:
 6. width 256 with four heads;
 7. width 128 with eight heads;
 8. dense softmax in place of entmax for the successful eight-head model.
+9. fixed softmax scaling, all-NoPE, and all-ALiBi controls;
+10. the original modular random-offset position encoding with and without
+    mixed ALiBi/NoPE heads.
 
 Results:
 
@@ -110,6 +113,11 @@ Results:
 | NAPE input, width 256, 8 standard heads | 100% | 100% | 100% | 100% | 98.4% |
 | NAPE input, width 128, 8 standard heads | 100% | 100% | 100% | 100% | 100% |
 | NAPE input, width 128, 8 standard heads, softmax | 100% | 100% | 100% | 100% | 100% |
+| NAPE input, width 128, 8 standard heads, softmax, no adaptive scaling | 100% | 100% | 100% | 100% | 100% |
+| NAPE input, width 128, 8 standard heads, all NoPE | 62.1% | 31.3% | 14.3% | 6.2% | 9.4% |
+| NAPE input, width 128, 8 standard heads, all ALiBi | 99.4% | 44.5% | 20.9% | 15.6% | 10.9% |
+| Original modular input, width 128, 8 heads, mixed ALiBi/NoPE | 100% | 100% | 100% | 98.4% | 100% |
+| Original modular input, width 128, 8 heads, all NoPE | 99.8% | 79.7% | 36.9% | 20.3% | 9.4% |
 | NAPE input, width 256, 8 Gemma2 heads | 100% | 100% | 100% | 100% | 100% |
 
 The decisive tested factor is eight attention heads, not increased model width
@@ -121,6 +129,22 @@ Replacing entmax with dense softmax leaves accuracy at 100% throughout, so
 sparse normalization provides no demonstrated accuracy or length-generalization
 benefit on this task. It may still have computational benefits with the paper's
 sparse kernel, which this local closed-form implementation does not use.
+
+Adaptive query scaling is also unnecessary: replacing it with ordinary
+`1/sqrt(head_dim)` softmax scaling retains 100% accuracy through length 2,000.
+The mixed NAPE head roles are important, however. Both the all-NoPE and
+all-ALiBi controls fail beyond the training range. This suggests that ALiBi
+heads provide relative-position routing while NoPE heads provide
+position-independent content routing; this interpretation is mechanistic
+inference from the ablations, not a direct measurement of individual-head
+algorithms.
+
+The original modular random-offset position encoding is compatible with the
+successful setup and nearly perfect when mixed ALiBi/NoPE heads are retained.
+When it is the only position signal, it improves substantially over the
+NAPE-input all-NoPE control at moderate lengths but still falls toward chance
+at extreme lengths. It therefore helps, but does not replace the mixed
+ALiBi/NoPE attention bias.
 
 Controls and their individual W&B runs are in:
 <https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation>.

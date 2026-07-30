@@ -248,3 +248,100 @@ def test_softmax_attention_is_dense_on_causally_allowed_positions() -> None:
         parameter.grad is None or torch.isfinite(parameter.grad).all()
         for parameter in model.parameters()
     )
+
+
+def test_softmax_without_scaling_has_unit_scale() -> None:
+    config = small_config(
+        attention_normalizer="softmax",
+        scaling_mode="none",
+    )
+    model = SparseAttentionPointerTransformer(config)
+    generator = torch.Generator().manual_seed(29)
+    batch = make_pointer_next_batch(
+        config.batch_size,
+        config.train_max_length,
+        generator=generator,
+        vocabulary=model.vocabulary,
+    )
+    offsets = make_position_offsets(
+        config,
+        config.batch_size,
+        generator=generator,
+        device=torch.device("cpu"),
+    )
+
+    model(batch.prompt_ids, offsets=offsets)
+    metrics = model.attention_metrics()
+
+    assert metrics["attention/scale_mean"] == 1.0
+    assert all(
+        block.attention.beta_projection is None
+        and block.attention.gamma_projection is None
+        for block in model.encoder.blocks
+    )
+
+
+def test_all_nope_heads_have_zero_alibi_slopes() -> None:
+    config = small_config(
+        alibi_heads=0,
+        attention_normalizer="softmax",
+        input_position_mode="nape_only",
+        value_input_mode="embedding",
+    )
+    model = SparseAttentionPointerTransformer(config)
+    generator = torch.Generator().manual_seed(31)
+    batch = make_pointer_next_batch(
+        config.batch_size,
+        config.train_max_length,
+        generator=generator,
+        vocabulary=model.vocabulary,
+    )
+    offsets = make_position_offsets(
+        config,
+        config.batch_size,
+        generator=generator,
+        device=torch.device("cpu"),
+    )
+
+    model(batch.prompt_ids, offsets=offsets)
+
+    assert all(
+        torch.equal(
+            block.attention.slopes,
+            torch.zeros_like(block.attention.slopes),
+        )
+        for block in model.encoder.blocks
+    )
+    assert model.attention_metrics()["attention/alibi_support_size"] == 0.0
+
+
+def test_all_alibi_heads_work_without_adaptive_scaling() -> None:
+    config = small_config(
+        alibi_heads=small_config().heads,
+        attention_normalizer="softmax",
+        scaling_mode="none",
+        input_position_mode="nape_only",
+        value_input_mode="embedding",
+    )
+    model = SparseAttentionPointerTransformer(config)
+    generator = torch.Generator().manual_seed(37)
+    batch = make_pointer_next_batch(
+        config.batch_size,
+        config.train_max_length,
+        generator=generator,
+        vocabulary=model.vocabulary,
+    )
+    offsets = make_position_offsets(
+        config,
+        config.batch_size,
+        generator=generator,
+        device=torch.device("cpu"),
+    )
+
+    model(batch.prompt_ids, offsets=offsets)
+
+    assert all(
+        bool(block.attention.slopes.gt(0).all())
+        for block in model.encoder.blocks
+    )
+    assert model.attention_metrics()["attention/nope_support_size"] == 0.0

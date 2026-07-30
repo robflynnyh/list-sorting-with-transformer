@@ -174,3 +174,130 @@ if [[ "${ABLATION_PHASE}" == "all" || "${ABLATION_PHASE}" == "third" ]]; then
     --optimizer-name adamw \
     --final-eval-lengths ""
 fi
+
+if [[ "${ABLATION_PHASE}" == "all" || "${ABLATION_PHASE}" == "fourth" ]]; then
+  # I: Keep NAPE but remove adaptive log-length query scaling.
+  run_variant ablate-i-width128-heads8-softmax-nape-no-scaling-seed4 \
+    --batch-size 128 \
+    --d-model 128 \
+    --heads 8 \
+    --alibi-heads 4 \
+    --attention-normalizer softmax \
+    --scaling-mode none \
+    --architecture standard \
+    --input-position-mode nape_only \
+    --value-input-mode embedding \
+    --warmup-steps 20000 \
+    --minimum-lr-ratio 0 \
+    --precision bfloat16-true \
+    --optimizer-name adamw \
+    --final-eval-lengths ""
+
+  # J: Retain adaptive scaling but remove all ALiBi heads.
+  run_variant ablate-j-width128-heads8-softmax-nope-adaptive-seed4 \
+    --batch-size 128 \
+    --d-model 128 \
+    --heads 8 \
+    --alibi-heads 0 \
+    --attention-normalizer softmax \
+    --scaling-mode adaptive \
+    --architecture standard \
+    --input-position-mode nape_only \
+    --value-input-mode embedding \
+    --warmup-steps 20000 \
+    --minimum-lr-ratio 0 \
+    --precision bfloat16-true \
+    --optimizer-name adamw \
+    --final-eval-lengths ""
+
+  # K: Restore the original modular split positions while retaining NAPE.
+  run_variant ablate-k-width128-heads8-softmax-modular-nape-adaptive-seed4 \
+    --batch-size 128 \
+    --d-model 128 \
+    --heads 8 \
+    --alibi-heads 4 \
+    --attention-normalizer softmax \
+    --scaling-mode adaptive \
+    --architecture standard \
+    --input-position-mode modular \
+    --value-input-mode embedding \
+    --warmup-steps 20000 \
+    --minimum-lr-ratio 0 \
+    --precision bfloat16-true \
+    --optimizer-name adamw \
+    --final-eval-lengths ""
+
+  # L: Use the original modular split positions without ALiBi.
+  run_variant ablate-l-width128-heads8-softmax-modular-nope-adaptive-seed4 \
+    --batch-size 128 \
+    --d-model 128 \
+    --heads 8 \
+    --alibi-heads 0 \
+    --attention-normalizer softmax \
+    --scaling-mode adaptive \
+    --architecture standard \
+    --input-position-mode modular \
+    --value-input-mode embedding \
+    --warmup-steps 20000 \
+    --minimum-lr-ratio 0 \
+    --precision bfloat16-true \
+    --optimizer-name adamw \
+    --final-eval-lengths ""
+fi
+
+if [[ "${ABLATION_PHASE}" == "all" || "${ABLATION_PHASE}" == "fifth" ]]; then
+  # M: Original modular/scalar inputs and recipe, with eight-head plain
+  # softmax and NAPE.
+  run_variant ablate-m-old-recipe-modular-heads8-softmax-nape-seed4 \
+    --batch-size 256 \
+    --d-model 128 \
+    --heads 8 \
+    --alibi-heads 4 \
+    --attention-normalizer softmax \
+    --scaling-mode none \
+    --architecture standard \
+    --input-position-mode modular \
+    --value-input-mode embedding_plus_scalar \
+    --warmup-steps 1000 \
+    --minimum-lr-ratio 0.1 \
+    --precision bfloat16 \
+    --optimizer-name adam \
+    --final-eval-lengths ""
+
+  # N: Remove ALiBi so the original modular encoding is the only position
+  # signal.
+  run_variant ablate-n-old-recipe-modular-heads8-softmax-nope-seed4 \
+    --batch-size 256 \
+    --d-model 128 \
+    --heads 8 \
+    --alibi-heads 0 \
+    --attention-normalizer softmax \
+    --scaling-mode none \
+    --architecture standard \
+    --input-position-mode modular \
+    --value-input-mode embedding_plus_scalar \
+    --warmup-steps 1000 \
+    --minimum-lr-ratio 0.1 \
+    --precision bfloat16 \
+    --optimizer-name adam \
+    --final-eval-lengths ""
+fi
+
+if [[ "${ABLATION_PHASE}" == "all" || "${ABLATION_PHASE}" == "sixth" ]]; then
+  # O: Test whether NoPE heads are needed once every head has ALiBi.
+  run_variant ablate-o-width128-heads8-softmax-all-alibi-no-scaling-seed4 \
+    --batch-size 128 \
+    --d-model 128 \
+    --heads 8 \
+    --alibi-heads 8 \
+    --attention-normalizer softmax \
+    --scaling-mode none \
+    --architecture standard \
+    --input-position-mode nape_only \
+    --value-input-mode embedding \
+    --warmup-steps 20000 \
+    --minimum-lr-ratio 0 \
+    --precision bfloat16-true \
+    --optimizer-name adamw \
+    --final-eval-lengths ""
+fi
