@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.data import (
+from list_sorting_transformer.core.data import (
     IGNORE_INDEX,
     make_quicksort_trace_batch,
 )
-from list_sorting_transformer.metrics import generated_quicksort_metrics
-from list_sorting_transformer.quicksort import generate_quicksort_trace
-from list_sorting_transformer.tokens import (
+from list_sorting_transformer.core.metrics import generated_quicksort_metrics
+from list_sorting_transformer.core.quicksort import generate_quicksort_trace
+from list_sorting_transformer.core.tokens import (
     COMMA,
     EOS,
     PAD,

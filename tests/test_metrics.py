@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.metrics import generated_sorting_metrics
-from list_sorting_transformer.tokens import SymbolVocabulary
+from list_sorting_transformer.core.metrics import generated_sorting_metrics
+from list_sorting_transformer.core.tokens import SymbolVocabulary
 
 
 def test_strict_metrics_separate_order_from_multiset_preservation() -> None:

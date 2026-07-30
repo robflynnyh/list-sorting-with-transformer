@@ -4,21 +4,21 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     ShortcutPointerVocabulary,
     evaluate_shortcut_batches,
     make_fitness_batches,
     make_shortcut_batch,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     initialize_forward_model,
 )
-from list_sorting_transformer.token_gradient_reversal import (
+from list_sorting_transformer.shortcut_learning.token_gradient_reversal import (
     forward_with_source_gradient_reversal,
     oracle_shortcut_selection,
 )
-from list_sorting_transformer.vectorized_reversal_population import (
+from list_sorting_transformer.shortcut_learning.vectorized_reversal_population import (
     functional_adam_step,
     train_vectorized_candidate_shard,
 )

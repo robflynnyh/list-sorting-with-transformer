@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.data import (
+from list_sorting_transformer.core.data import (
     IGNORE_INDEX,
     make_pointer_next_batch,
     make_pointer_pair_batch,
     make_pointer_value_batch,
     make_sorting_batch,
 )
-from list_sorting_transformer.metrics import (
+from list_sorting_transformer.core.metrics import (
     generated_pointer_next_metrics,
     generated_pointer_pair_metrics,
     generated_pointer_value_metrics,
 )
-from list_sorting_transformer.tokens import (
+from list_sorting_transformer.core.tokens import (
     BOS,
     COMMA,
     EOS,

@@ -12,11 +12,11 @@ from pathlib import Path
 import torch
 from torch import Tensor, nn
 
-from .data import PointerNextBatch, make_pointer_pair_batch
-from .evaluate import resolve_device
-from .model import ModelConfig, SplitInputDecoderTransformer
-from .positions import ModularPositionEmbedding
-from .tokens import SEP, PointerCompareVocabulary, VALUE_OFFSET
+from ..core.data import PointerNextBatch, make_pointer_pair_batch
+from ..core.evaluate import resolve_device
+from ..core.model import ModelConfig, SplitInputDecoderTransformer
+from ..core.positions import ModularPositionEmbedding
+from ..core.tokens import SEP, PointerCompareVocabulary, VALUE_OFFSET
 
 
 DEFAULT_POSITION_MODULI = (2, 3, 5, 7, 11, 13, 17, 19)

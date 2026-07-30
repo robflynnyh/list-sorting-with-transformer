@@ -12,8 +12,8 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from .evaluate import resolve_device
-from .maml_length_generalization import (
+from ..core.evaluate import resolve_device
+from ..length_generalisation.maml_length_generalization import (
     make_router,
     router_summary,
     second_order_attention_context,

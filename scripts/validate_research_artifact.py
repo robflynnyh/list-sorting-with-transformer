@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import subprocess
@@ -26,12 +27,16 @@ CRITICAL_DOCS = (
     ROOT / "docs" / "rasp_transfer_report.md",
     ROOT / "docs" / "language_model_transfer_report.md",
     ROOT / "experiments" / "README.md",
+    ROOT / "src" / "list_sorting_transformer" / "README.md",
     ROOT / "experiments" / "hard_attention_eggroll" / "README.md",
     ROOT / "experiments" / "sparse_attention_adam" / "README.md",
 )
 MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 CRITICAL_MARKER = re.compile(r"\b(?:TODO|TBD|FIXME):", re.IGNORECASE)
 REGISTRY_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+PROJECT_SCRIPT = re.compile(
+    r'^[A-Za-z0-9_-]+\s*=\s*"([A-Za-z0-9_.]+):([A-Za-z0-9_]+)"$'
+)
 
 
 def _relative(path: Path) -> str:
@@ -87,6 +92,7 @@ def validate_registry(registry: dict[str, Any]) -> list[str]:
         "training_domain",
         "evaluation_domain",
         "locations",
+        "source_packages",
         "artifact_roots",
         "evidence",
         "reproduce",
@@ -96,6 +102,12 @@ def validate_registry(registry: dict[str, Any]) -> list[str]:
     covered_directories: set[str] = set()
     covered_artifacts: set[str] = set()
     index_text = INDEX_PATH.read_text(encoding="utf-8")
+    source_packages = registry.get("source_packages")
+    if not isinstance(source_packages, dict) or not source_packages:
+        errors.append("registry source_packages must be a non-empty object")
+        source_packages = {}
+    else:
+        errors.extend(validate_source_layout(source_packages))
 
     for number, experiment in enumerate(experiments, start=1):
         missing = required - set(experiment)
@@ -141,6 +153,17 @@ def validate_registry(registry: dict[str, Any]) -> list[str]:
         else:
             covered_artifacts.update(artifact_roots)
 
+        experiment_sources = experiment["source_packages"]
+        if not isinstance(experiment_sources, list) or not experiment_sources:
+            errors.append(f"{label} source_packages must be a non-empty list")
+        else:
+            unknown_sources = set(experiment_sources) - set(source_packages)
+            if unknown_sources:
+                errors.append(
+                    f"{label} has unknown source packages: "
+                    + ", ".join(sorted(unknown_sources))
+                )
+
         reproduce = experiment["reproduce"]
         if not isinstance(reproduce, list) or not reproduce:
             errors.append(f"{label} reproduce must be a non-empty list")
@@ -170,6 +193,64 @@ def validate_registry(registry: dict[str, Any]) -> list[str]:
             "registry artifact roots are not tracked: "
             + ", ".join(sorted(extra_artifacts))
         )
+    return errors
+
+
+def validate_source_layout(source_packages: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    package_root = ROOT / "src" / "list_sorting_transformer"
+    actual_packages = {
+        path.name
+        for path in package_root.iterdir()
+        if path.is_dir() and not path.name.startswith((".", "__"))
+    }
+    declared_packages = set(source_packages)
+    if actual_packages != declared_packages:
+        missing = actual_packages - declared_packages
+        extra = declared_packages - actual_packages
+        if missing:
+            errors.append(
+                "unregistered source packages: " + ", ".join(sorted(missing))
+            )
+        if extra:
+            errors.append(
+                "missing declared source packages: " + ", ".join(sorted(extra))
+            )
+
+    root_modules = {
+        path.name
+        for path in package_root.glob("*.py")
+        if path.name != "__init__.py"
+    }
+    if root_modules:
+        errors.append(
+            "implementation modules must not live at package root: "
+            + ", ".join(sorted(root_modules))
+        )
+
+    for name, metadata in source_packages.items():
+        label = f"source package {name!r}"
+        if not isinstance(metadata, dict):
+            errors.append(f"{label} metadata must be an object")
+            continue
+        path_value = metadata.get("path")
+        role = metadata.get("role")
+        expected_path = f"src/list_sorting_transformer/{name}"
+        if path_value != expected_path:
+            errors.append(f"{label} path must be {expected_path}")
+            continue
+        package_path = ROOT / path_value
+        if not (package_path / "__init__.py").exists():
+            errors.append(f"{label} is missing __init__.py")
+        if not isinstance(role, str) or not role.strip():
+            errors.append(f"{label} must have a non-empty role")
+        modules = [
+            path
+            for path in package_path.glob("*.py")
+            if path.name != "__init__.py"
+        ]
+        if not modules:
+            errors.append(f"{label} contains no implementation modules")
     return errors
 
 
@@ -214,9 +295,59 @@ def validate_markdown() -> list[str]:
     return errors
 
 
+def module_path(module_name: str) -> Path | None:
+    relative = Path(*module_name.split("."))
+    module_file = ROOT / "src" / relative.with_suffix(".py")
+    if module_file.exists():
+        return module_file
+    package_file = ROOT / "src" / relative / "__init__.py"
+    return package_file if package_file.exists() else None
+
+
+def validate_console_scripts() -> list[str]:
+    errors: list[str] = []
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    in_scripts = False
+    script_count = 0
+    for raw_line in pyproject.splitlines():
+        line = raw_line.strip()
+        if line == "[project.scripts]":
+            in_scripts = True
+            continue
+        if in_scripts and line.startswith("["):
+            break
+        if not in_scripts or not line or line.startswith("#"):
+            continue
+        match = PROJECT_SCRIPT.fullmatch(line)
+        if match is None:
+            errors.append(f"invalid project script declaration: {line}")
+            continue
+        script_count += 1
+        module_name, callable_name = match.groups()
+        path = module_path(module_name)
+        if path is None:
+            errors.append(f"project script module does not exist: {module_name}")
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        top_level_names = {
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        if callable_name not in top_level_names:
+            errors.append(
+                f"project script callable does not exist: "
+                f"{module_name}:{callable_name}"
+            )
+    if script_count == 0:
+        errors.append("pyproject.toml defines no project scripts")
+    return errors
+
+
 def validate() -> list[str]:
     errors = validate_registry(load_registry())
     errors.extend(validate_markdown())
+    errors.extend(validate_console_scripts())
     return errors
 
 

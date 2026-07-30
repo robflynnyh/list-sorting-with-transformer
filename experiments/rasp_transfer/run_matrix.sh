@@ -39,7 +39,7 @@ for task in "${tasks[@]}"; do
             mkdir -p "$output_directory"
             with-gpu any --idle-seconds 1 -- \
                 env PYTHONPATH=src python -u -m \
-                list_sorting_transformer.rasp_transfer train \
+                list_sorting_transformer.transfer.rasp_transfer train \
                 --task "$task" \
                 --initialization "$initialization" \
                 --seed "$seed" \

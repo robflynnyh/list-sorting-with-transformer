@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 import torch
 
-from list_sorting_transformer.model import ModelConfig
-from list_sorting_transformer.pointer_position_sequence import (
+from list_sorting_transformer.core.model import ModelConfig
+from list_sorting_transformer.length_generalisation.pointer_position_sequence import (
     ModularPositionSequenceModel,
     PositionSequenceConfig,
     build_argument_parser,
@@ -13,7 +13,7 @@ from list_sorting_transformer.pointer_position_sequence import (
     selected_evaluation_lengths,
     sequence_loss_and_metrics,
 )
-from list_sorting_transformer.tokens import PointerNextVocabulary
+from list_sorting_transformer.core.tokens import PointerNextVocabulary
 
 
 def test_small_modular_bases_are_the_configuration_and_cli_defaults() -> None:

@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 import torch
 
-from list_sorting_transformer.tokens import SEP, PointerNextVocabulary
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.core.tokens import SEP, PointerNextVocabulary
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     AttentionRoutingRule,
     AttentionRoutingRuleConfig,
     BackwardRuleConfig,
@@ -27,7 +27,7 @@ from list_sorting_transformer.shortcut_credit import (
     sample_eggroll_direction,
     shortcut_loss,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     PlateauState,
     ShortcutCreditExperimentConfig,
     adaptive_commit_scale_grid,

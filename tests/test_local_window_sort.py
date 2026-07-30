@@ -2,24 +2,24 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.data import (
+from list_sorting_transformer.core.data import (
     IGNORE_INDEX,
     make_local_window_sort_batch,
 )
-from list_sorting_transformer.evaluation import (
+from list_sorting_transformer.core.evaluation import (
     generate_local_window_sort_rollouts,
 )
-from list_sorting_transformer.local_window_sort import (
+from list_sorting_transformer.core.local_window_sort import (
     LocalWindowSortMachine,
     LocalWindowSortRollout,
     LocalWindowSortTrace,
     LocalWindowTransition,
     generate_local_window_sort_trace,
 )
-from list_sorting_transformer.metrics import (
+from list_sorting_transformer.core.metrics import (
     generated_local_window_sort_metrics,
 )
-from list_sorting_transformer.tokens import LocalWindowSortVocabulary
+from list_sorting_transformer.core.tokens import LocalWindowSortVocabulary
 
 
 class ScriptedLocalWindowPolicy:

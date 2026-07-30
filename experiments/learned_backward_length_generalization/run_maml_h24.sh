@@ -12,7 +12,7 @@ export PYTHONPATH="${ROOT}/src:${PYTHONPATH:-}"
 export WANDB__SERVICE_WAIT="${WANDB__SERVICE_WAIT:-300}"
 
 exec "${WITH_GPU}" any -- env PYTHONPATH="${PYTHONPATH}" \
-  "${PYTHON_BIN}" -u -m list_sorting_transformer.maml_length_generalization \
+  "${PYTHON_BIN}" -u -m list_sorting_transformer.length_generalisation.maml_length_generalization \
   --run-name "${RUN_NAME}" \
   --output-dir "${OUTPUT_ROOT}" \
   --method router_maml \

@@ -11,12 +11,12 @@ from experiments.learned_backward_shortcuts.collapse_window_population import (
     parse_parameter_prefixes,
     restrict_direction,
 )
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     apply_eggroll_direction,
     clone_center_parameters,
     sample_eggroll_direction,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     load_checkpoint,
 )
 

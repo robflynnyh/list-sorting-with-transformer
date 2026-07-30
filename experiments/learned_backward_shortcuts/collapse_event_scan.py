@@ -12,16 +12,16 @@ from pathlib import Path
 
 import torch
 
-from list_sorting_transformer.shortcut_collapse_window import (
+from list_sorting_transformer.shortcut_learning.shortcut_collapse_window import (
     train_forward_step,
 )
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     ShortcutBatch,
     ShortcutPointerVocabulary,
     evaluate_shortcut_batches,
     make_fitness_batches,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     initialize_forward_model,
     load_checkpoint,

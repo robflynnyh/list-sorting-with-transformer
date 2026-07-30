@@ -3,15 +3,15 @@ from __future__ import annotations
 import torch
 import pytest
 
-from list_sorting_transformer.data import make_pointer_pair_batch
-from list_sorting_transformer.model import ModelConfig
-from list_sorting_transformer.residual_pointer_compare import (
+from list_sorting_transformer.core.data import make_pointer_pair_batch
+from list_sorting_transformer.core.model import ModelConfig
+from list_sorting_transformer.length_generalisation.residual_pointer_compare import (
     ResidualPointerCompareConfig,
     ResidualPointerCompareModel,
     learning_rate_at_step,
     residual_pointer_compare_loss,
 )
-from list_sorting_transformer.tokens import PointerCompareVocabulary
+from list_sorting_transformer.core.tokens import PointerCompareVocabulary
 
 
 def test_residual_pipeline_loss_trains_all_internal_operations() -> None:

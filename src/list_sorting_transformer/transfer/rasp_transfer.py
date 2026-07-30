@@ -14,16 +14,16 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from .compiled_pointer_compare import (
+from ..length_generalisation.compiled_pointer_compare import (
     DEFAULT_POSITION_MODULI,
     CompiledPointerCompareConfig,
     CompiledPointerCompareTransformer,
 )
-from .data import PointerNextBatch, make_pointer_pair_batch
-from .evaluate import resolve_device
-from .model import ModelConfig, SplitInputDecoderTransformer
-from .positions import ModularPositionEmbedding, sample_position_offsets
-from .tokens import BOS, SEP, VALUE_OFFSET, PointerCompareVocabulary
+from ..core.data import PointerNextBatch, make_pointer_pair_batch
+from ..core.evaluate import resolve_device
+from ..core.model import ModelConfig, SplitInputDecoderTransformer
+from ..core.positions import ModularPositionEmbedding, sample_position_offsets
+from ..core.tokens import BOS, SEP, VALUE_OFFSET, PointerCompareVocabulary
 
 
 TASKS = (

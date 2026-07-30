@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from list_sorting_transformer.maml_length_generalization import (
+from list_sorting_transformer.length_generalisation.maml_length_generalization import (
     MAMLLengthConfig,
     load_ordinary_reference,
     make_meta_batches,
@@ -19,8 +19,8 @@ from list_sorting_transformer.maml_length_generalization import (
     run,
     select_meta_parameters,
 )
-from list_sorting_transformer.shortcut_credit import make_clean_pointer_batch
-from list_sorting_transformer.tokens import PointerNextVocabulary
+from list_sorting_transformer.shortcut_learning.shortcut_credit import make_clean_pointer_batch
+from list_sorting_transformer.core.tokens import PointerNextVocabulary
 
 
 def test_one_step_maml_keeps_virtual_weights_temporary() -> None:

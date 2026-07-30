@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.compiled_pointer_compare import (
+from list_sorting_transformer.length_generalisation.compiled_pointer_compare import (
     CompiledPointerCompareConfig,
     CompiledPointerCompareTransformer,
     evaluate_compiled_model,
 )
-from list_sorting_transformer.model import SplitInputDecoderTransformer
-from list_sorting_transformer.tokens import PointerCompareVocabulary
+from list_sorting_transformer.core.model import SplitInputDecoderTransformer
+from list_sorting_transformer.core.tokens import PointerCompareVocabulary
 
 
 def compiled_model() -> CompiledPointerCompareTransformer:

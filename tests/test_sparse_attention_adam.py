@@ -3,9 +3,9 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
-from list_sorting_transformer.data import make_pointer_next_batch
-from list_sorting_transformer.positions import sample_position_offsets
-from list_sorting_transformer.sparse_attention_adam import (
+from list_sorting_transformer.core.data import make_pointer_next_batch
+from list_sorting_transformer.core.positions import sample_position_offsets
+from list_sorting_transformer.length_generalisation.sparse_attention_adam import (
     AdaptiveEntmaxSelfAttention,
     PaperMatchedDecoder,
     PaperMatchedRMSNorm,

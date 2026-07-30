@@ -11,13 +11,13 @@ from typing import Any
 
 import torch
 
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     ShortcutPointerVocabulary,
     evaluate_shortcut_batches,
     make_fitness_batches,
     shortcut_loss,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     initialize_forward_model,
     load_checkpoint,

@@ -9,6 +9,25 @@ Accuracy values are exact-match fractions unless stated otherwise. `L20`
 means list length 20. Status labels follow the definitions in the
 [root README](../README.md#start-here).
 
+## Source Ownership
+
+`experiments/` contains launch policy, configurations, progress logs, and
+result evidence. Reusable implementation is grouped under
+`src/list_sorting_transformer/`:
+
+| Source package | Experiment families |
+| --- | --- |
+| `core` | All families; shared task generation, models, evaluation, and baseline sorting |
+| `length_generalisation` | Pointer-position ablations, modular pipeline, hard/sparse attention, compiled pointer routing, and length MAML |
+| `shortcut_learning` | Evolved shortcut credit, collapse routing, oracle reversal, learned selectors, shortcut MAML, and shared learned-credit machinery used by length experiments |
+| `transfer` | RASP-style downstream transfer and byte language-model transfer |
+
+Each entry in
+[`experiments/registry.json`](../experiments/registry.json) declares its exact
+`source_packages`. The [source README](../src/list_sorting_transformer/README.md)
+lists module responsibilities. The artifact validator rejects unowned packages
+and implementation modules placed directly at the package root.
+
 ## Length Generalisation
 
 <a id="exp-core-sorting-baselines"></a>
@@ -194,7 +213,7 @@ this task. It does not solve how to discover the intervention.
 | Train / eval | Random-position shortcut data; masked and incorrect-hint held-out data |
 | Result | At horizon 24, suppression-only routing reached 98.8% masked and 91.4% incorrect-hint accuracy in one seed; signed routing was worse |
 | Evidence | [MAML shortcut log](../experiments/learned_backward_shortcuts/MAML_PROGRESS.md#eight-step-lookahead-follow-up), [suppression W&B](https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/74p2kcpy), [signed W&B](https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/mwrdb7b6) |
-| Reproduce | `python -m list_sorting_transformer.maml_shortcut_experiment --help` |
+| Reproduce | `python -m list_sorting_transformer.shortcut_learning.maml_shortcut_experiment --help` |
 
 ## Cross-Track Transfer
 
@@ -228,6 +247,8 @@ this task. It does not solve how to discover the intervention.
 
 - every top-level tracked `experiments/` directory is covered by the registry;
 - every top-level tracked `artifacts/` entry is assigned to an experiment;
+- every experiment declares its source packages and every implementation
+  module belongs to a registered package;
 - every registered local evidence path exists;
 - every registry ID has a section on this page;
 - required documentation links resolve;

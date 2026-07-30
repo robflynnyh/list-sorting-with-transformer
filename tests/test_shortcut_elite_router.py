@@ -8,8 +8,8 @@ from experiments.learned_backward_shortcuts.elite_router_checkpoint import (
     elite_parameter_delta,
     parse_indices,
 )
-from list_sorting_transformer.shortcut_credit import EggrollDirection
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import EggrollDirection
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
 )
 

@@ -14,10 +14,10 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from .data import PointerNextBatch, make_pointer_pair_batch, sample_length
-from .evaluate import resolve_device
-from .evaluation import autocast_context
-from .model import ModelConfig, SplitInputDecoderTransformer
+from ..core.data import PointerNextBatch, make_pointer_pair_batch, sample_length
+from ..core.evaluate import resolve_device
+from ..core.evaluation import autocast_context
+from ..core.model import ModelConfig, SplitInputDecoderTransformer
 from .pointer_next_value_from_position import (
     ModularNextValueFromPositionModel,
     NextValueFromPositionConfig,
@@ -33,8 +33,8 @@ from .pointer_position_sequence import (
     selected_evaluation_lengths,
 )
 from .pointer_value_from_position import target_token_ids
-from .positions import sample_position_offsets
-from .tokens import (
+from ..core.positions import sample_position_offsets
+from ..core.tokens import (
     POINTER_COMPARE_ACTIONS,
     PointerCompareVocabulary,
 )

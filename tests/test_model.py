@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.data import make_sorting_batch
-from list_sorting_transformer.evaluation import output_cross_entropy
-from list_sorting_transformer.model import (
+from list_sorting_transformer.core.data import make_sorting_batch
+from list_sorting_transformer.core.evaluation import output_cross_entropy
+from list_sorting_transformer.core.model import (
     DecoderTransformer,
     ModelConfig,
     _RoutedAttentionBackward,
@@ -12,8 +12,8 @@ from list_sorting_transformer.model import (
     routed_scaled_dot_product_attention,
     signed_routed_scaled_dot_product_attention,
 )
-from list_sorting_transformer.recurrent import LSTMConfig, LSTMSorter
-from list_sorting_transformer.tokens import SymbolVocabulary
+from list_sorting_transformer.core.recurrent import LSTMConfig, LSTMSorter
+from list_sorting_transformer.core.tokens import SymbolVocabulary
 
 
 def small_config(

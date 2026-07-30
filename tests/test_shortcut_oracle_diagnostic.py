@@ -5,7 +5,7 @@ import torch
 from experiments.learned_backward_shortcuts.oracle_route_diagnostic import (
     UniformAttentionRouter,
 )
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     AttentionRoutingRuleConfig,
 )
 

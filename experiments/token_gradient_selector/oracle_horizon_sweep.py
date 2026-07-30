@@ -10,19 +10,19 @@ from pathlib import Path
 
 import torch
 
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     ShortcutPointerVocabulary,
     evaluate_shortcut_batches,
     make_fitness_batches,
     shortcut_loss,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     initialize_forward_model,
     make_inner_batches,
     make_mode_batches,
 )
-from list_sorting_transformer.token_gradient_reversal import (
+from list_sorting_transformer.shortcut_learning.token_gradient_reversal import (
     REVERSAL_SCOPES,
     oracle_reversal_shortcut_loss,
 )

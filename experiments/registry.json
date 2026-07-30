@@ -12,6 +12,24 @@
     "shortcut_learning",
     "cross_track"
   ],
+  "source_packages": {
+    "core": {
+      "path": "src/list_sorting_transformer/core",
+      "role": "Shared tasks, models, data, evaluation, metrics, and baseline CLIs."
+    },
+    "length_generalisation": {
+      "path": "src/list_sorting_transformer/length_generalisation",
+      "role": "Pointer pipelines, sparse and hard attention, compiled routing, and length MAML."
+    },
+    "shortcut_learning": {
+      "path": "src/list_sorting_transformer/shortcut_learning",
+      "role": "Learned backward rules, selectors, collapse diagnostics, and shortcut MAML."
+    },
+    "transfer": {
+      "path": "src/list_sorting_transformer/transfer",
+      "role": "Compiled-circuit transfer to downstream puzzles and language modelling."
+    }
+  },
   "experiments": [
     {
       "id": "core-sorting-baselines",
@@ -22,6 +40,9 @@
       "evaluation_domain": "Length sweeps recorded in the committed metrics and plots.",
       "locations": [
         "docs/core-sequence-tasks.md"
+      ],
+      "source_packages": [
+        "core"
       ],
       "artifact_roots": [
         "alphabet_alternating_seed7",
@@ -53,6 +74,9 @@
       "locations": [
         "docs/core-sequence-tasks.md"
       ],
+      "source_packages": [
+        "core"
+      ],
       "artifact_roots": [
         "quicksort_trace_numbers_seed7_accum2",
         "pointer_quicksort_numbers_seed7_accum2",
@@ -80,6 +104,10 @@
         "artifacts/pointer_next_position_ablation/README.md",
         "docs/core-sequence-tasks.md"
       ],
+      "source_packages": [
+        "core",
+        "length_generalisation"
+      ],
       "artifact_roots": [
         "pointer_next_position_ablation",
         "pointer_position_sinusoidal_mse_seed7",
@@ -106,6 +134,10 @@
       "evaluation_domain": "Stage-specific evaluations through length 400 or 2,048.",
       "locations": [
         "docs/core-sequence-tasks.md"
+      ],
+      "source_packages": [
+        "core",
+        "length_generalisation"
       ],
       "artifact_roots": [
         "pointer_value_nocurr_gn0_10k_seed7",
@@ -135,6 +167,11 @@
         "experiments/rasp_transfer",
         "docs/rasp_transfer_report.md"
       ],
+      "source_packages": [
+        "core",
+        "length_generalisation",
+        "transfer"
+      ],
       "artifact_roots": [],
       "evidence": [
         "experiments/rasp_transfer/results/summary.json",
@@ -158,6 +195,11 @@
         "experiments/language_model_transfer",
         "docs/language_model_transfer_report.md"
       ],
+      "source_packages": [
+        "core",
+        "length_generalisation",
+        "transfer"
+      ],
       "artifact_roots": [],
       "evidence": [
         "experiments/language_model_transfer/results/summary.json",
@@ -178,6 +220,10 @@
       "evaluation_domain": "Checkpoint sweeps through length 5,000.",
       "locations": [
         "experiments/hard_attention_eggroll"
+      ],
+      "source_packages": [
+        "core",
+        "length_generalisation"
       ],
       "artifact_roots": [],
       "evidence": [
@@ -203,6 +249,10 @@
       "locations": [
         "experiments/sparse_attention_adam"
       ],
+      "source_packages": [
+        "core",
+        "length_generalisation"
+      ],
       "artifact_roots": [],
       "evidence": [
         "experiments/sparse_attention_adam/README.md",
@@ -226,6 +276,11 @@
       "evaluation_domain": "Fixed ranking and acceptance sets at length 50; length 400 reporting-only.",
       "locations": [
         "experiments/learned_backward_length_generalization"
+      ],
+      "source_packages": [
+        "core",
+        "length_generalisation",
+        "shortcut_learning"
       ],
       "artifact_roots": [],
       "evidence": [
@@ -251,6 +306,11 @@
       "locations": [
         "experiments/maml_length_generalization"
       ],
+      "source_packages": [
+        "core",
+        "length_generalisation",
+        "shortcut_learning"
+      ],
       "artifact_roots": [],
       "evidence": [
         "experiments/maml_length_generalization/PROGRESS.md"
@@ -274,6 +334,10 @@
       "evaluation_domain": "A fixed clean fitness set for evolution and fresh masked/incorrect-hint sets for reporting.",
       "locations": [
         "experiments/learned_backward_shortcuts"
+      ],
+      "source_packages": [
+        "core",
+        "shortcut_learning"
       ],
       "artifact_roots": [],
       "evidence": [
@@ -300,6 +364,10 @@
       "locations": [
         "experiments/learned_backward_shortcuts"
       ],
+      "source_packages": [
+        "core",
+        "shortcut_learning"
+      ],
       "artifact_roots": [],
       "evidence": [
         "experiments/learned_backward_shortcuts/results/collapse_window_multi_seed_summary.json",
@@ -322,6 +390,10 @@
       "locations": [
         "experiments/token_gradient_selector"
       ],
+      "source_packages": [
+        "core",
+        "shortcut_learning"
+      ],
       "artifact_roots": [],
       "evidence": [
         "experiments/token_gradient_selector/results/oracle_scope_summary.json",
@@ -341,6 +413,10 @@
       "evaluation_domain": "Fixed and fresh masked/incorrect-hint evaluations.",
       "locations": [
         "experiments/token_gradient_selector"
+      ],
+      "source_packages": [
+        "core",
+        "shortcut_learning"
       ],
       "artifact_roots": [],
       "evidence": [
@@ -362,6 +438,11 @@
       "locations": [
         "experiments/learned_backward_shortcuts"
       ],
+      "source_packages": [
+        "core",
+        "length_generalisation",
+        "shortcut_learning"
+      ],
       "artifact_roots": [],
       "evidence": [
         "experiments/learned_backward_shortcuts/MAML_PROGRESS.md"
@@ -371,7 +452,7 @@
         "https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/mwrdb7b6"
       ],
       "reproduce": [
-        "python -m list_sorting_transformer.maml_shortcut_experiment --help"
+        "python -m list_sorting_transformer.shortcut_learning.maml_shortcut_experiment --help"
       ],
       "summary": "Longer lookahead produced a strong single-seed shortcut result, but the method was less effective and less robust than the evolutionary rule."
     }

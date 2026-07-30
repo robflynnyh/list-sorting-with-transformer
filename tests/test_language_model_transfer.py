@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from list_sorting_transformer.language_model_transfer import (
+from list_sorting_transformer.transfer.language_model_transfer import (
     LanguageModelTransferConfig,
     build_language_model,
     evaluation_batch_size,

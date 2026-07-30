@@ -4,11 +4,11 @@ from pathlib import Path
 
 import torch
 
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     AttentionRoutingRule,
     AttentionRoutingRuleConfig,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     PlateauState,
     load_checkpoint,
 )

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.data import make_pointer_value_batch
-from list_sorting_transformer.model import ModelConfig
-from list_sorting_transformer.pointer_position_sequence import (
+from list_sorting_transformer.core.data import make_pointer_value_batch
+from list_sorting_transformer.core.model import ModelConfig
+from list_sorting_transformer.length_generalisation.pointer_position_sequence import (
     ModularPositionSequenceModel,
 )
-from list_sorting_transformer.pointer_value_from_position import (
+from list_sorting_transformer.length_generalisation.pointer_value_from_position import (
     ModularPositionValueModel,
     PositionValueConfig,
     generated_trace_metrics,
@@ -15,7 +15,7 @@ from list_sorting_transformer.pointer_value_from_position import (
     position_value_loss_and_metrics,
     target_token_ids,
 )
-from list_sorting_transformer.tokens import VALUE_OFFSET, PointerNextVocabulary
+from list_sorting_transformer.core.tokens import VALUE_OFFSET, PointerNextVocabulary
 
 
 def small_model() -> ModularPositionValueModel:

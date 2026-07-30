@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.data import make_pointer_next_batch
-from list_sorting_transformer.hard_attention_eggroll import (
+from list_sorting_transformer.core.data import make_pointer_next_batch
+from list_sorting_transformer.length_generalisation.hard_attention_eggroll import (
     HardAttentionEggrollConfig,
     make_model,
 )
-from list_sorting_transformer.hard_attention_sweep import (
+from list_sorting_transformer.length_generalisation.hard_attention_sweep import (
     checkpoint_axis_labels,
     exact_top1_logits,
     resolved_batch_size,
 )
-from list_sorting_transformer.positions import sample_position_offsets
+from list_sorting_transformer.core.positions import sample_position_offsets
 
 
 def small_config() -> HardAttentionEggrollConfig:

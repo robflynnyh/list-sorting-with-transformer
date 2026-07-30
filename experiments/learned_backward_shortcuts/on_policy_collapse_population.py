@@ -17,11 +17,11 @@ from experiments.learned_backward_shortcuts.collapse_window_population import (
     parse_parameter_prefixes,
     restrict_direction,
 )
-from list_sorting_transformer.shortcut_collapse_window import (
+from list_sorting_transformer.shortcut_learning.shortcut_collapse_window import (
     optimizer_for_model,
     train_forward_step,
 )
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     BackwardRule,
     EggrollDirection,
     ShortcutBatch,
@@ -33,7 +33,7 @@ from list_sorting_transformer.shortcut_credit import (
     move_eggroll_direction,
     sample_eggroll_direction,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     initialize_backward_rule,
     initialize_forward_model,

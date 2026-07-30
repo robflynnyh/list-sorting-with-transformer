@@ -18,11 +18,11 @@ from .compiled_pointer_compare import (
     DEFAULT_POSITION_MODULI,
     _set_modular_fourier_codebooks,
 )
-from .data import PointerNextBatch, make_pointer_next_batch
-from .evaluate import resolve_device
-from .model import DecoderTransformer, ModelConfig, SplitInputDecoderTransformer
-from .positions import ModularPositionEmbedding, sample_position_offsets
-from .tokens import PointerNextVocabulary
+from ..core.data import PointerNextBatch, make_pointer_next_batch
+from ..core.evaluate import resolve_device
+from ..core.model import DecoderTransformer, ModelConfig, SplitInputDecoderTransformer
+from ..core.positions import ModularPositionEmbedding, sample_position_offsets
+from ..core.tokens import PointerNextVocabulary
 
 
 @dataclass(frozen=True)

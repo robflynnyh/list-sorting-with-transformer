@@ -9,15 +9,15 @@ from pathlib import Path
 
 import torch
 
-from list_sorting_transformer.shortcut_collapse_window import (
+from list_sorting_transformer.shortcut_learning.shortcut_collapse_window import (
     load_collapse_window,
     replay_collapse_window,
 )
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     ShortcutPointerVocabulary,
     make_fitness_batches,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     load_checkpoint,
     parse_fitness_checkpoints,

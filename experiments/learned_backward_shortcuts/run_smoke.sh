@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python -m list_sorting_transformer.shortcut_credit_experiment \
+python -m list_sorting_transformer.shortcut_learning.shortcut_credit_experiment \
   --run-name learned-backward-shortcuts-smoke \
   --generations 2 \
   --population-size 4 \

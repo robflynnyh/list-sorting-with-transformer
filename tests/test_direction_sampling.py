@@ -7,16 +7,16 @@ from pathlib import Path
 import pytest
 import torch
 
-from list_sorting_transformer.direction_sampling import (
+from list_sorting_transformer.shortcut_learning.direction_sampling import (
     sample_function_diverse_directions,
     select_diverse_signatures,
 )
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     AttentionRoutingRule,
     ShortcutPointerVocabulary,
     make_shortcut_batch,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     initialize_fresh_backward_rule,
     run,

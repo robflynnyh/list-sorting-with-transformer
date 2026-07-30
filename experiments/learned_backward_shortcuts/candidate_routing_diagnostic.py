@@ -9,7 +9,7 @@ from typing import Sequence
 
 import torch
 
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     AttentionRoutingRule,
     ShortcutPointerVocabulary,
     apply_eggroll_direction,
@@ -17,10 +17,10 @@ from list_sorting_transformer.shortcut_credit import (
     make_shortcut_batch,
     sample_eggroll_direction,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
 )
-from list_sorting_transformer.shortcut_credit_routing_plot import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_routing_plot import (
     load_attention_router,
     plot_routing_roles,
     position_matched_role_gates,

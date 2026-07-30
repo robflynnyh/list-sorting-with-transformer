@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.experiment import (
+from list_sorting_transformer.core.experiment import (
     TrainConfig,
     curriculum_max_length_at_step,
     initialize_from_checkpoint,
@@ -10,9 +10,9 @@ from list_sorting_transformer.experiment import (
     learning_rate_at_step,
     sample_training_length,
 )
-from list_sorting_transformer.model import DecoderTransformer, ModelConfig
-from list_sorting_transformer.pointer_position_probe import PointerPositionProbe
-from list_sorting_transformer.tokens import PointerNextVocabulary
+from list_sorting_transformer.core.model import DecoderTransformer, ModelConfig
+from list_sorting_transformer.length_generalisation.pointer_position_probe import PointerPositionProbe
+from list_sorting_transformer.core.tokens import PointerNextVocabulary
 
 
 def small_transformer() -> DecoderTransformer:

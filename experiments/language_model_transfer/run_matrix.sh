@@ -24,7 +24,7 @@ for seed in ${SEEDS}; do
     mkdir -p "${output_directory}"
     "${WITH_GPU}" "${GPU_POOL}" -- \
       env PYTHONPATH="${ROOT}/src" \
-      python -m list_sorting_transformer.language_model_transfer run \
+      python -m list_sorting_transformer.transfer.language_model_transfer run \
         --initialization "${initialization}" \
         --seed "${seed}" \
         --steps "${STEPS}" \
@@ -46,6 +46,6 @@ if [[ "${status}" -ne 0 ]]; then
 fi
 
 PYTHONPATH="${ROOT}/src" \
-python -m list_sorting_transformer.language_model_transfer summarize \
+python -m list_sorting_transformer.transfer.language_model_transfer summarize \
   --input-root "${ARTIFACT_ROOT}" \
   --output-directory "${RESULT_ROOT}"

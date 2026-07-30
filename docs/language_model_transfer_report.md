@@ -395,7 +395,7 @@ bash experiments/language_model_transfer/run_matrix.sh
 Regenerate the aggregate JSON and plots:
 
 ```bash
-PYTHONPATH=src python -m list_sorting_transformer.language_model_transfer \
+PYTHONPATH=src python -m list_sorting_transformer.transfer.language_model_transfer \
   summarize \
   --input-root artifacts/language_model_transfer \
   --output-directory experiments/language_model_transfer/results
@@ -404,7 +404,7 @@ PYTHONPATH=src python -m list_sorting_transformer.language_model_transfer \
 Re-evaluate one saved checkpoint without training:
 
 ```bash
-PYTHONPATH=src python -m list_sorting_transformer.language_model_transfer \
+PYTHONPATH=src python -m list_sorting_transformer.transfer.language_model_transfer \
   evaluate-checkpoint \
   --checkpoint artifacts/language_model_transfer/random_seed7/checkpoint.pt \
   --lengths 256,512,1024,2048 \

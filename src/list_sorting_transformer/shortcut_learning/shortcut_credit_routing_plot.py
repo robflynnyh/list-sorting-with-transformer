@@ -20,7 +20,7 @@ from .shortcut_credit import (
     ShortcutPointerVocabulary,
     make_shortcut_batch,
 )
-from .tokens import SEP
+from ..core.tokens import SEP
 
 
 ROLE_LABELS = (

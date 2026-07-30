@@ -1,6 +1,6 @@
-"""Decoder-only Transformer experiments for list sorting."""
+"""Length-generalisation and shortcut-learning research components."""
 
-from .adjacent_sort import (
+from .core.adjacent_sort import (
     AdjacentSortMachine,
     AdjacentSortRollout,
     AdjacentSortTrace,
@@ -12,7 +12,7 @@ from .adjacent_sort import (
     replay_adjacent_sort_transcript,
     replay_auto_advance_sort_transcript,
 )
-from .data import (
+from .core.data import (
     AdjacentSortBatch,
     LocalWindowSortBatch,
     PointerNextBatch,
@@ -27,7 +27,7 @@ from .data import (
     make_pointer_quicksort_batch,
     make_sorting_batch,
 )
-from .local_window_sort import (
+from .core.local_window_sort import (
     WINDOW_TOKEN_LENGTH,
     WINDOW_TOOL_EVENTS,
     LocalWindowSortMachine,
@@ -36,7 +36,7 @@ from .local_window_sort import (
     LocalWindowTransition,
     generate_local_window_sort_trace,
 )
-from .metrics import (
+from .core.metrics import (
     generated_adjacent_no_tool_metrics,
     generated_adjacent_sort_metrics,
     generated_auto_advance_no_tool_metrics,
@@ -50,8 +50,8 @@ from .metrics import (
     generated_sorting_metrics,
     masked_token_accuracy,
 )
-from .model import DecoderTransformer, ModelConfig
-from .pointer_quicksort import (
+from .core.model import DecoderTransformer, ModelConfig
+from .core.pointer_quicksort import (
     PointerQuicksortMachine,
     PointerQuicksortRollout,
     PointerQuicksortTrace,
@@ -59,8 +59,8 @@ from .pointer_quicksort import (
     generate_pointer_quicksort_trace,
     replay_pointer_quicksort_transcript,
 )
-from .recurrent import LSTMConfig, LSTMSorter
-from .tokens import (
+from .core.recurrent import LSTMConfig, LSTMSorter
+from .core.tokens import (
     LOCAL_WINDOW_PAIR_ENCODINGS,
     VOCAB_SIZE,
     AdjacentSortVocabulary,

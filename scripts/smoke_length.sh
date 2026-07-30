@@ -11,7 +11,7 @@ cd "${ROOT}"
 
 exec "${WITH_GPU}" "${GPU_POOL}" -- \
   env PYTHONPATH="${ROOT}/src" \
-  "${PYTHON_BIN}" -u -m list_sorting_transformer.sparse_attention_adam \
+  "${PYTHON_BIN}" -u -m list_sorting_transformer.length_generalisation.sparse_attention_adam \
   --run-name research-artifact-length-smoke \
   --output-dir "${OUTPUT_DIR}" \
   --steps 2 \

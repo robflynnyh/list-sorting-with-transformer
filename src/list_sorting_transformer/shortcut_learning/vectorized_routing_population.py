@@ -28,7 +28,7 @@ from .shortcut_credit_experiment import (
     make_experiment_vocabulary,
     parse_fitness_checkpoints,
 )
-from .tokens import VALUE_OFFSET, PointerNextVocabulary
+from ..core.tokens import VALUE_OFFSET, PointerNextVocabulary
 from .vectorized_reversal_population import functional_adam_step
 
 if TYPE_CHECKING:

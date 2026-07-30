@@ -15,15 +15,15 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from .compiled_pointer_compare import (
+from ..length_generalisation.compiled_pointer_compare import (
     DEFAULT_POSITION_MODULI,
     CompiledPointerCompareConfig,
     CompiledPointerCompareTransformer,
     _set_modular_fourier_codebooks,
 )
-from .evaluate import resolve_device
-from .model import ModelConfig, SplitInputDecoderTransformer
-from .positions import ModularPositionEmbedding
+from ..core.evaluate import resolve_device
+from ..core.model import ModelConfig, SplitInputDecoderTransformer
+from ..core.positions import ModularPositionEmbedding
 
 
 INITIALIZATIONS = (
