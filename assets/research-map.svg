@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">Research map for length generalisation and shortcut learning</title>
+  <desc id="desc">Two experimental tracks share sequence tasks and evaluation discipline. The length track studies representations, routing, and transfer. The shortcut track studies modified backward credit and learned selectors.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#354052"/>
+    </marker>
+    <style>
+      .bg { fill: #f7f8fa; }
+      .shared { fill: #ffffff; stroke: #354052; stroke-width: 2; }
+      .length { fill: #dcefe6; stroke: #237a57; stroke-width: 2; }
+      .shortcut { fill: #f8e3d7; stroke: #b4532a; stroke-width: 2; }
+      .label { font: 600 23px sans-serif; fill: #18212f; }
+      .body { font: 18px sans-serif; fill: #273447; }
+      .small { font: 16px sans-serif; fill: #475569; }
+      .line { stroke: #354052; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1200" height="520"/>
+  <rect class="shared" x="390" y="28" width="420" height="92" rx="6"/>
+  <text class="label" x="600" y="64" text-anchor="middle">Shared test bed</text>
+  <text class="body" x="600" y="94" text-anchor="middle">sorting, pointer retrieval, modular positions</text>
+
+  <path class="line" d="M520 120 L315 176"/>
+  <path class="line" d="M680 120 L885 176"/>
+
+  <rect class="length" x="55" y="180" width="500" height="255" rx="6"/>
+  <text class="label" x="305" y="220" text-anchor="middle">Length generalisation</text>
+  <text class="body" x="85" y="263">Representations and traces</text>
+  <text class="body" x="85" y="300">Compiled and learned routing</text>
+  <text class="body" x="85" y="337">Sparse / hard attention</text>
+  <text class="body" x="85" y="374">Transfer and longer-context evaluation</text>
+  <text class="small" x="85" y="410">Question: does the learned computation survive scale?</text>
+
+  <rect class="shortcut" x="645" y="180" width="500" height="255" rx="6"/>
+  <text class="label" x="895" y="220" text-anchor="middle">Shortcut learning</text>
+  <text class="body" x="675" y="263">Fixed scarce clean fitness data</text>
+  <text class="body" x="675" y="300">Evolved backward attention rules</text>
+  <text class="body" x="675" y="337">Oracle and learned token selectors</text>
+  <text class="body" x="675" y="374">MAML and collapse-window diagnostics</text>
+  <text class="small" x="675" y="410">Question: can credit favor the intended rule?</text>
+
+  <path class="line" d="M305 435 L510 478"/>
+  <path class="line" d="M895 435 L690 478"/>
+  <rect class="shared" x="390" y="458" width="420" height="48" rx="6"/>
+  <text class="body" x="600" y="489" text-anchor="middle">exact metrics, controls, provenance, bounded reproduction</text>
+</svg>

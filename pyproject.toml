@@ -1,7 +1,7 @@
 [project]
-name = "list-sorting-with-transformer"
+name = "length-generalisation-and-shortcut-learning"
 version = "0.1.0"
-description = "A decoder-only Transformer benchmark for sorting digit lists."
+description = "Reproducible experiments in sequence-length generalisation and shortcut-resistant credit assignment."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
