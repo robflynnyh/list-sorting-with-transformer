@@ -259,7 +259,8 @@
         "experiments/sparse_attention_adam/results/key_difference_ablation_summary.json",
         "experiments/sparse_attention_adam/results/alibi_nope_mechanism.json",
         "experiments/sparse_attention_adam/results/alibi_nope_head_ablation.svg",
-        "experiments/sparse_attention_adam/results/pointer_compare_summary.json"
+        "experiments/sparse_attention_adam/results/pointer_compare_summary.json",
+        "experiments/sparse_attention_adam/results/pointer_trace_bubble_sort_summary.json"
       ],
       "wandb": [
         "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation",
@@ -273,9 +274,10 @@
         "bash experiments/sparse_attention_adam/run_pointer_pair_trace_alibi_nope.sh",
         "bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh",
         "ATTENTION_NORMALIZER=entmax15 bash experiments/sparse_attention_adam/run_pointer_pair_trace_alibi_nope.sh",
-        "ATTENTION_NORMALIZER=entmax15 bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh"
+        "ATTENTION_NORMALIZER=entmax15 bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh",
+        "bash experiments/sparse_attention_adam/run_pointer_trace_bubble_sort.sh"
       ],
-      "summary": "Dense softmax and fixed scaling are sufficient for pointer-next. On matched 20,000-step autoregressive traces, entmax reached 100% exact accuracy through sampled length 5,000 with and without a final KEEP/SWAP target; softmax reached 10.9% and 46.9%, respectively."
+      "summary": "Dense softmax and fixed scaling are sufficient for pointer-next. On matched 20,000-step autoregressive traces, entmax reached 100% exact accuracy through sampled length 5,000. A fixed external bubble-sort controller composed the pair-plus-action checkpoint into exact sorting on all 16 sampled length-100 lists across 79,200 correct local traces."
     },
     {
       "id": "learned-backward-length",

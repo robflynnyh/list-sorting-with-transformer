@@ -263,6 +263,41 @@ and [entmax pair + action](https://wandb.ai/wobrob101/list-sorting-pointer-compa
 Exact metrics, sample counts, and checkpoint hashes are in
 [`results/pointer_compare_summary.json`](results/pointer_compare_summary.json).
 
+### Full bubble-sort composition
+
+The 20,000-step entmax pair + action checkpoint was composed with a fixed
+external bubble-sort controller. Before every comparison, the controller
+builds a fresh full-list prompt with the current pointer. The model
+autoregressively emits the marked value, following value, and `KEEP` or
+`SWAP`; the controller applies that action and advances to the next comparison.
+It runs exactly \(N-1\) shrinking passes and does not provide early stopping.
+
+| Length | Lists | Comparisons per list | Total traces | Sorted exactly | Every trace exact |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 | 64 | 1 | 64 | 100% | 100% |
+| 3 | 64 | 3 | 192 | 100% | 100% |
+| 5 | 64 | 10 | 640 | 100% | 100% |
+| 10 | 64 | 45 | 2,880 | 100% | 100% |
+| 20 | 64 | 190 | 12,160 | 100% | 100% |
+| 40 | 64 | 780 | 49,920 | 100% | 100% |
+| 100 | 16 | 4,950 | 79,200 | 100% | 100% |
+
+At length 100, all 79,200 sequential decisions and all 237,600 generated
+trace tokens were correct, so all 16 final lists were exactly sorted. This
+demonstrates composition into a complete sorting procedure for the tested
+0-9 symbol lists. The loop schedule, pointer movement, and stopping condition
+remain external; this is not evidence that the model learned loop control.
+It is also a single-checkpoint evaluation with only 16 length-100 lists.
+
+Run the evaluation with:
+
+```bash
+bash experiments/sparse_attention_adam/run_pointer_trace_bubble_sort.sh
+```
+
+The fixed seed, per-pass metrics, throughput, and checkpoint hash are in
+[`results/pointer_trace_bubble_sort_summary.json`](results/pointer_trace_bubble_sort_summary.json).
+
 Controls and their individual W&B runs are in:
 <https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation>.
 
