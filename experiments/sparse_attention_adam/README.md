@@ -146,6 +146,64 @@ NAPE-input all-NoPE control at moderate lengths but still falls toward chance
 at extreme lengths. It therefore helps, but does not replace the mixed
 ALiBi/NoPE attention bias.
 
+## Measured ALiBi/NoPE circuit
+
+The earlier role interpretation has now been tested directly on the successful
+fixed-scaling softmax checkpoint `nxfdvxfw` at step 5,000. The analysis
+reconstructs the model's attention exactly, records the source-token role
+selected by every head, and reruns fixed evaluation sets while zeroing selected
+head outputs. The reconstruction changed no logits.
+
+The head-group interventions give a clean layerwise decomposition:
+
+| Removed head outputs | L20 | L100 | L400 |
+| --- | ---: | ---: | ---: |
+| None | 100% | 100% | 100% |
+| Layer 1 ALiBi heads | 18.8% | 10.2% | 13.3% |
+| Layer 1 NoPE heads | 100% | 100% | 100% |
+| Layer 2 ALiBi heads | 100% | 100% | 100% |
+| Layer 2 NoPE heads | 14.1% | 10.9% | 8.6% |
+
+The attention maps explain this causal split:
+
+1. In layer 1, zero-indexed ALiBi head 3 routes from `<PTR>` into the target-value
+   position. Across L20, L100, and L400, `<PTR>` is its target-query argmax on
+   78.1--81.2% of examples and receives approximately 25.4--26.0% attention
+   mass. ALiBi head 0 simultaneously keeps the target value itself as argmax
+   on 100% of examples with approximately 56--57% mass. Zeroing head 3 alone
+   reduces L400 accuracy to 49.2%; zeroing all four layer-1 ALiBi heads reduces
+   it to 13.3%.
+2. In layer 2, every NoPE head selects the target-value position as the final
+   separator query's argmax on 100% of examples at every measured length.
+   Their target mass at L400 is 95.7%, 95.1%, 35.1%, and 63.1% for heads 4--7.
+   The heads are individually redundant, but removing all four reduces L400
+   accuracy to 8.6%.
+
+The learned solution is therefore a local-then-global circuit: layer-1 ALiBi
+heads combine the nearby pointer marker with the target token, and layer-2
+NoPE heads retrieve that marked target from the final separator without a
+distance penalty. This is direct evidence for the layerwise circuit in this
+checkpoint, not evidence that every mixed ALiBi/NoPE model must use the same
+algorithm. The model and all intervention results remain single-seed.
+
+![Accuracy loss after attention-head ablations](results/alibi_nope_head_ablation.svg)
+
+The full per-head attention-role distributions, ablations, evaluation seeds,
+checkpoint SHA-256, and W&B URL are in
+[`results/alibi_nope_mechanism.json`](results/alibi_nope_mechanism.json).
+Reproduce the analysis with:
+
+```bash
+bash experiments/sparse_attention_adam/run_alibi_nope_mechanism.sh
+```
+
+If the local checkpoint has been removed, first regenerate ablation I:
+
+```bash
+ABLATION_PHASE=fourth \
+  bash experiments/sparse_attention_adam/run_key_difference_ablations.sh
+```
+
 Controls and their individual W&B runs are in:
 <https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation>.
 

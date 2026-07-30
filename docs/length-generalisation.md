@@ -72,8 +72,18 @@ in the tested architecture. Mixed ALiBi/NoPE heads work while all-ALiBi and
 all-NoPE controls fail OOD. Standard softmax scaling is sufficient.
 
 These are architecture ablations from one seed. The result does not establish
-that mixed heads are necessary for sorting generally, and the proposed
-division of positional and content roles remains an interpretation.
+that mixed heads are necessary for sorting generally.
+
+Direct analysis of the successful fixed-scaling softmax checkpoint supports a
+specific local-then-global circuit. Removing the first layer's ALiBi heads
+reduces L400 accuracy from 100% to 13.3%, while removing its NoPE heads has no
+effect. In the second layer the result reverses: removing ALiBi heads has no
+effect, while removing NoPE heads reduces accuracy to 8.6%. At the target
+query, a first-layer ALiBi head selects `<PTR>` on 78.1% of L400 examples. At
+the final separator, all four second-layer NoPE heads select the target token
+on 100% of examples. See the
+[mechanistic analysis](../experiments/sparse_attention_adam/README.md#measured-alibinope-circuit).
+The result remains single-seed and checkpoint-specific.
 
 ### Optimizing a longer-length objective is not yet enough
 

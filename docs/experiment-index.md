@@ -112,12 +112,12 @@ seed replication.
 | Status | Preliminary |
 | Task | Pointer-next with ASEntmax, dense softmax, and positional-head ablations |
 | Train / eval | L2-20 training; recurring evaluations through L2,000 |
-| Result | Eight mixed ALiBi/NoPE heads reached 100% at sampled L2,000 with either entmax or softmax; removing adaptive scaling did not hurt; all-NoPE and all-ALiBi failed OOD |
-| Evidence | [Ablation table](../experiments/sparse_attention_adam/README.md#key-difference-ablation), [machine-readable summary](../experiments/sparse_attention_adam/results/key_difference_ablation_summary.json), [W&B project](https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation) |
-| Reproduce | `bash experiments/sparse_attention_adam/run_key_difference_ablations.sh` |
+| Result | Eight mixed ALiBi/NoPE heads reached 100% at sampled L2,000 with either entmax or softmax; removing adaptive scaling did not hurt; direct interventions show layer-1 ALiBi routing followed by layer-2 NoPE retrieval |
+| Evidence | [Ablation and mechanism report](../experiments/sparse_attention_adam/README.md#measured-alibinope-circuit), [ablation summary](../experiments/sparse_attention_adam/results/key_difference_ablation_summary.json), [mechanism JSON](../experiments/sparse_attention_adam/results/alibi_nope_mechanism.json), [W&B project](https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation) |
+| Reproduce | `bash experiments/sparse_attention_adam/run_key_difference_ablations.sh`; `bash experiments/sparse_attention_adam/run_alibi_nope_mechanism.sh` |
 
 Sparse normalization has no demonstrated accuracy benefit on this pointer task.
-The mixed-head interpretation remains mechanistic inference.
+The measured circuit remains a single-checkpoint, single-seed result.
 
 <a id="exp-learned-backward-length"></a>
 ### Evolved backward rules for length

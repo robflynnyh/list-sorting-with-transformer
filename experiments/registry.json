@@ -256,16 +256,19 @@
       "artifact_roots": [],
       "evidence": [
         "experiments/sparse_attention_adam/README.md",
-        "experiments/sparse_attention_adam/results/key_difference_ablation_summary.json"
+        "experiments/sparse_attention_adam/results/key_difference_ablation_summary.json",
+        "experiments/sparse_attention_adam/results/alibi_nope_mechanism.json",
+        "experiments/sparse_attention_adam/results/alibi_nope_head_ablation.svg"
       ],
       "wandb": [
         "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation"
       ],
       "reproduce": [
         "bash experiments/sparse_attention_adam/run_pointer_next.sh",
-        "bash experiments/sparse_attention_adam/run_key_difference_ablations.sh"
+        "bash experiments/sparse_attention_adam/run_key_difference_ablations.sh",
+        "bash experiments/sparse_attention_adam/run_alibi_nope_mechanism.sh"
       ],
-      "summary": "Dense softmax and fixed scaling are sufficient in the successful eight-head mixed ALiBi/NoPE model; either homogeneous head type fails OOD."
+      "summary": "Dense softmax and fixed scaling are sufficient in the successful eight-head model; intervention analysis finds layer-1 ALiBi routing followed by layer-2 NoPE retrieval."
     },
     {
       "id": "learned-backward-length",
