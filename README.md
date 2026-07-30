@@ -29,6 +29,8 @@ not called confirmed merely because one W&B curve looked promising.
   evaluation metrics.
 - [Adding an experiment](docs/adding-experiments.md): required structure and
   provenance.
+- [Source layout](src/list_sorting_transformer/README.md): implementation
+  ownership and its relationship to experiment families.
 - [Archive map](docs/archive.md): superseded and abandoned directions that
   remain useful as negative evidence.
 
@@ -66,7 +68,11 @@ algorithm implemented by each head.
 ## Repository Layout
 
 ```text
-src/list_sorting_transformer/   shared models, tasks, optimizers, and evaluators
+src/list_sorting_transformer/
+  core/                         shared tasks, models, data, and evaluation
+  length_generalisation/        pointer pipelines and length methods
+  shortcut_learning/            learned credit and shortcut methods
+  transfer/                     compiled-circuit downstream studies
 experiments/                    launchers, progress logs, and committed evidence
 experiments/registry.json       machine-readable experiment inventory
 docs/                           track narratives, reports, metrics, and archive map
@@ -133,7 +139,7 @@ before running them.
   explicitly defines them as a fitness or meta-training distribution.
 - Single-seed findings remain preliminary regardless of their accuracy.
 - New experiments must be registered before their results are presented as part
-  of the artifact.
+  of the artifact, including the source packages they use.
 
 ## Scope
 

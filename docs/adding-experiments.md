@@ -7,7 +7,8 @@ run script and progress log.
 
 1. Put the launcher and family-specific notes under
    `experiments/<family>/`.
-2. Put reusable implementation in `src/list_sorting_transformer/`.
+2. Put reusable implementation in the matching source package:
+   `core`, `length_generalisation`, `shortcut_learning`, or `transfer`.
 3. Write large outputs and checkpoints under `artifacts/<family>/`; keep them
    untracked.
 4. Commit only compact evidence needed to support a claim: aggregate JSON,
@@ -25,6 +26,7 @@ Every entry must provide:
 - one of the registered tracks and statuses;
 - the scientific question;
 - training and evaluation domains;
+- the registered `source_packages` used by the experiment;
 - local locations and evidence paths;
 - reproduction commands;
 - a narrow result summary.
@@ -71,5 +73,6 @@ git diff --check
 ```
 
 The registry validator rejects missing evidence, undocumented experiment
-directories or tracked artifact roots, broken local documentation links, and
-critical unresolved TODO markers.
+directories or tracked artifact roots, unowned source modules, root-level
+implementation modules, broken local documentation links, and critical
+unresolved TODO markers.

@@ -114,7 +114,7 @@ Before interpreting learned-backward results:
 ### 2026-07-26: scalar CPU smoke
 
 - Command: `PYTHONPATH=src python -m
-  list_sorting_transformer.shortcut_credit_experiment` with two generations,
+  list_sorting_transformer.shortcut_learning.shortcut_credit_experiment` with two generations,
   four candidates, horizon two, width 32, and 16 fitness examples.
 - Result: completed both generations, wrote metrics and resumable checkpoints,
   and exercised the real custom-backward hook and EGGROLL update.
@@ -1510,7 +1510,7 @@ The tracked matched-control plot is regenerated from the live JSONL metrics:
 
 ```bash
 PYTHONPATH=src python -m \
-  list_sorting_transformer.shortcut_credit_compare_plot \
+  list_sorting_transformer.shortcut_learning.shortcut_credit_compare_plot \
   --matched-controls \
   artifacts/learned_backward_shortcuts/attention-router-random-list-h160-p64-s021-outer0007-candidate-heldout-resume20-seed7/metrics.jsonl \
   --output \

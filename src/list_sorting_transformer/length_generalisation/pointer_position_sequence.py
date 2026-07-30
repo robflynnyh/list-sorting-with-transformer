@@ -15,13 +15,13 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from .data import make_pointer_next_batch, sample_length
-from .evaluate import resolve_device
-from .evaluation import autocast_context
-from .model import DecoderTransformer, ModelConfig, SplitInputDecoderTransformer
+from ..core.data import make_pointer_next_batch, sample_length
+from ..core.evaluate import resolve_device
+from ..core.evaluation import autocast_context
+from ..core.model import DecoderTransformer, ModelConfig, SplitInputDecoderTransformer
 from .pointer_position_probe import aggregate_length_ranges
-from .positions import ModularPositionEmbedding, sample_position_offsets
-from .tokens import PAD, PointerNextVocabulary
+from ..core.positions import ModularPositionEmbedding, sample_position_offsets
+from ..core.tokens import PAD, PointerNextVocabulary
 
 
 @dataclass(frozen=True)

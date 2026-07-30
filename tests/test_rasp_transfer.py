@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.data import make_pointer_pair_batch
-from list_sorting_transformer.rasp_transfer import (
+from list_sorting_transformer.core.data import make_pointer_pair_batch
+from list_sorting_transformer.transfer.rasp_transfer import (
     ROUND_CLOSE,
     ROUND_OPEN,
     SQUARE_CLOSE,
@@ -14,7 +14,7 @@ from list_sorting_transformer.rasp_transfer import (
     make_dyck_2_completion_batch,
     task_targets,
 )
-from list_sorting_transformer.tokens import VALUE_OFFSET, PointerCompareVocabulary
+from list_sorting_transformer.core.tokens import VALUE_OFFSET, PointerCompareVocabulary
 
 
 def test_transfer_targets_use_the_marked_pair() -> None:

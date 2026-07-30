@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 import torch
 
-from list_sorting_transformer.data import make_pointer_pair_batch
-from list_sorting_transformer.model import ModelConfig
-from list_sorting_transformer.pointer_next_value_from_position import (
+from list_sorting_transformer.core.data import make_pointer_pair_batch
+from list_sorting_transformer.core.model import ModelConfig
+from list_sorting_transformer.length_generalisation.pointer_next_value_from_position import (
     ModularNextValueFromPositionModel,
     NextValueFromPositionConfig,
     generated_stage_five_metrics,
@@ -15,13 +15,13 @@ from list_sorting_transformer.pointer_next_value_from_position import (
     target_next_value_token_ids,
     update_ema_model,
 )
-from list_sorting_transformer.pointer_next_value_position import (
+from list_sorting_transformer.length_generalisation.pointer_next_value_position import (
     ModularNextValuePositionModel,
 )
-from list_sorting_transformer.pointer_value_from_position import (
+from list_sorting_transformer.length_generalisation.pointer_value_from_position import (
     target_token_ids,
 )
-from list_sorting_transformer.tokens import VALUE_OFFSET, PointerNextVocabulary
+from list_sorting_transformer.core.tokens import VALUE_OFFSET, PointerNextVocabulary
 
 
 def small_model() -> ModularNextValueFromPositionModel:

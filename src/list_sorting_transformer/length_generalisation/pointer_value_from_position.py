@@ -14,10 +14,10 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from .data import PointerNextBatch, make_pointer_value_batch, sample_length
-from .evaluate import resolve_device
-from .evaluation import autocast_context
-from .model import ModelConfig
+from ..core.data import PointerNextBatch, make_pointer_value_batch, sample_length
+from ..core.evaluate import resolve_device
+from ..core.evaluation import autocast_context
+from ..core.model import ModelConfig
 from .pointer_position_probe import aggregate_length_ranges
 from .pointer_position_sequence import (
     ModularPositionSequenceModel,
@@ -28,8 +28,8 @@ from .pointer_position_sequence import (
     selected_evaluation_lengths,
     sequence_loss_and_metrics,
 )
-from .positions import sample_position_offsets
-from .tokens import PointerNextVocabulary
+from ..core.positions import sample_position_offsets
+from ..core.tokens import PointerNextVocabulary
 
 
 @dataclass(frozen=True)

@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 import pytest
 
-from list_sorting_transformer.pointer_position_probe import (
+from list_sorting_transformer.length_generalisation.pointer_position_probe import (
     PointerPositionConfig,
     PointerPositionProbe,
     build_argument_parser,
@@ -16,8 +16,8 @@ from list_sorting_transformer.pointer_position_probe import (
     sample_position_offsets,
     sample_training_length,
 )
-from list_sorting_transformer.model import ModelConfig
-from list_sorting_transformer.tokens import PointerNextVocabulary
+from list_sorting_transformer.core.model import ModelConfig
+from list_sorting_transformer.core.tokens import PointerNextVocabulary
 
 
 def test_small_modular_bases_are_the_configuration_and_cli_defaults() -> None:

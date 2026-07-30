@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from list_sorting_transformer.shortcut_credit import EggrollDirection
+from list_sorting_transformer.shortcut_learning.shortcut_credit import EggrollDirection
 
 
 MODULE_PATH = (

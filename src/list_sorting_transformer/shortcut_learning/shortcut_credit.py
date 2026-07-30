@@ -14,8 +14,8 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 from torch.nn.utils.rnn import pad_sequence
 
-from .model import DecoderTransformer, ModelConfig
-from .tokens import BOS, COMMA, PAD, SEP, VALUE_OFFSET, PointerNextVocabulary
+from ..core.model import DecoderTransformer, ModelConfig
+from ..core.tokens import BOS, COMMA, PAD, SEP, VALUE_OFFSET, PointerNextVocabulary
 
 
 LeakMode = Literal["correct", "masked", "incorrect", "clean"]

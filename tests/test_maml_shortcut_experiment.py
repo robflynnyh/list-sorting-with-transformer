@@ -6,15 +6,15 @@ from pathlib import Path
 import pytest
 import torch
 
-from list_sorting_transformer.maml_shortcut_experiment import (
+from list_sorting_transformer.shortcut_learning.maml_shortcut_experiment import (
     MAMLShortcutConfig,
     make_fitness_pairs,
     make_model,
     router_lookahead_objective,
     run,
 )
-from list_sorting_transformer.maml_length_generalization import make_router
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.length_generalisation.maml_length_generalization import make_router
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     ShortcutPointerVocabulary,
     make_shortcut_batch,
 )

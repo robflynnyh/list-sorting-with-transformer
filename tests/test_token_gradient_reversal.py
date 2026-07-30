@@ -4,17 +4,17 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from list_sorting_transformer.model import (
+from list_sorting_transformer.core.model import (
     ModelConfig,
     source_reversed_scaled_dot_product_attention,
 )
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     ShortcutDecoderTransformer,
     ShortcutPointerVocabulary,
     make_shortcut_batch,
     shortcut_loss,
 )
-from list_sorting_transformer.token_gradient_reversal import (
+from list_sorting_transformer.shortcut_learning.token_gradient_reversal import (
     forward_with_source_gradient_reversal,
     oracle_reversal_shortcut_loss,
     oracle_shortcut_selection,

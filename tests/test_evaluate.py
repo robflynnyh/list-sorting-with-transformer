@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from list_sorting_transformer.evaluate import parse_lengths
+from list_sorting_transformer.core.evaluate import parse_lengths
 
 
 def test_parse_lengths_supports_ranges_and_lists() -> None:

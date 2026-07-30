@@ -8,7 +8,7 @@ from unittest.mock import patch
 import torch
 import torch.nn.functional as F
 
-from list_sorting_transformer.hard_attention_eggroll import (
+from list_sorting_transformer.length_generalisation.hard_attention_eggroll import (
     AntitheticRankOneNoise,
     CurriculumState,
     HardAttentionEggrollConfig,
@@ -34,9 +34,9 @@ from list_sorting_transformer.hard_attention_eggroll import (
     synchronize_curriculum_criterion,
     update_curriculum,
 )
-from list_sorting_transformer.data import make_pointer_next_batch
-from list_sorting_transformer.model import sample_top_k_indices
-from list_sorting_transformer.positions import sample_position_offsets
+from list_sorting_transformer.core.data import make_pointer_next_batch
+from list_sorting_transformer.core.model import sample_top_k_indices
+from list_sorting_transformer.core.positions import sample_position_offsets
 
 
 def small_config(**overrides: object) -> HardAttentionEggrollConfig:
@@ -156,7 +156,7 @@ def test_sampled_sparse_attention_uses_argmax_in_eval() -> None:
     hidden = torch.randn(2, 5, model.config.d_model)
 
     with patch(
-        "list_sorting_transformer.model.sample_top_k_indices",
+        "list_sorting_transformer.core.model.sample_top_k_indices",
         wraps=sample_top_k_indices,
     ) as sampled:
         attention.train()
@@ -607,7 +607,7 @@ def test_head_pruning_selects_least_harmful_combination() -> None:
 
     model.train()
     with patch(
-        "list_sorting_transformer.hard_attention_eggroll."
+        "list_sorting_transformer.length_generalisation.hard_attention_eggroll."
         "evaluate_pointer_batch",
         side_effect=candidate_score,
     ):
@@ -667,11 +667,11 @@ def test_curriculum_criterion_uses_rank_zero_values() -> None:
 
     with (
         patch(
-            "list_sorting_transformer.hard_attention_eggroll.dist.is_initialized",
+            "list_sorting_transformer.length_generalisation.hard_attention_eggroll.dist.is_initialized",
             return_value=True,
         ),
         patch(
-            "list_sorting_transformer.hard_attention_eggroll.dist.broadcast",
+            "list_sorting_transformer.length_generalisation.hard_attention_eggroll.dist.broadcast",
             side_effect=fake_broadcast,
         ),
     ):

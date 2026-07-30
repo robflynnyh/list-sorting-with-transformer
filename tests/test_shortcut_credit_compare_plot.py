@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from list_sorting_transformer.shortcut_credit_compare_plot import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_compare_plot import (
     load_metrics,
     parse_series,
     plot_center_comparison,

@@ -21,15 +21,15 @@ from .compiled_pointer_compare import (
     DEFAULT_POSITION_MODULI,
     _set_modular_fourier_codebooks,
 )
-from .data import PointerNextBatch, make_pointer_next_batch
-from .evaluate import resolve_device
-from .model import (
+from ..core.data import PointerNextBatch, make_pointer_next_batch
+from ..core.evaluate import resolve_device
+from ..core.model import (
     ModelConfig,
     SplitInputDecoderTransformer,
     sample_top_k_indices,
 )
-from .positions import ModularPositionEmbedding, sample_position_offsets
-from .tokens import VALUE_OFFSET, PointerNextVocabulary
+from ..core.positions import ModularPositionEmbedding, sample_position_offsets
+from ..core.tokens import VALUE_OFFSET, PointerNextVocabulary
 
 
 @dataclass(frozen=True)

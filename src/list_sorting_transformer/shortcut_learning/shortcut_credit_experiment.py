@@ -16,7 +16,7 @@ import torch
 from torch import Tensor
 
 from .direction_sampling import sample_function_diverse_directions
-from .evaluate import resolve_device
+from ..core.evaluate import resolve_device
 from .shortcut_credit import (
     AttentionRoutingRule,
     AttentionRoutingRuleConfig,
@@ -42,7 +42,7 @@ from .shortcut_credit import (
     sample_eggroll_direction,
     shortcut_loss,
 )
-from .tokens import PointerNextVocabulary
+from ..core.tokens import PointerNextVocabulary
 
 
 @dataclass(frozen=True)

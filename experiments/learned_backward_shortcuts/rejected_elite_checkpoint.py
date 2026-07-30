@@ -8,7 +8,7 @@ from pathlib import Path
 
 import torch
 
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     PlateauState,
     ShortcutCreditExperimentConfig,
     update_elite_search_state,

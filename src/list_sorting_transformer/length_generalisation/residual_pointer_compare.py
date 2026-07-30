@@ -19,11 +19,11 @@ from .compiled_pointer_compare import (
     DEFAULT_POSITION_MODULI,
     target_action_classes,
 )
-from .data import PointerNextBatch, make_pointer_pair_batch
-from .evaluate import resolve_device
-from .model import ModelConfig, SplitInputDecoderTransformer
-from .positions import ModularPositionEmbedding, sample_position_offsets
-from .tokens import PointerCompareVocabulary, VALUE_OFFSET
+from ..core.data import PointerNextBatch, make_pointer_pair_batch
+from ..core.evaluate import resolve_device
+from ..core.model import ModelConfig, SplitInputDecoderTransformer
+from ..core.positions import ModularPositionEmbedding, sample_position_offsets
+from ..core.tokens import PointerCompareVocabulary, VALUE_OFFSET
 
 
 @dataclass(frozen=True)

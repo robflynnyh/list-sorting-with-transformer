@@ -2,24 +2,24 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.data import (
+from list_sorting_transformer.core.data import (
     IGNORE_INDEX,
     make_pointer_quicksort_batch,
 )
-from list_sorting_transformer.evaluation import (
+from list_sorting_transformer.core.evaluation import (
     generate_pointer_quicksort_rollouts,
 )
-from list_sorting_transformer.metrics import (
+from list_sorting_transformer.core.metrics import (
     generated_pointer_no_tool_metrics,
     generated_pointer_quicksort_metrics,
 )
-from list_sorting_transformer.pointer_quicksort import (
+from list_sorting_transformer.core.pointer_quicksort import (
     PointerQuicksortMachine,
     execute_pointer_quicksort_actions,
     generate_pointer_quicksort_trace,
     replay_pointer_quicksort_transcript,
 )
-from list_sorting_transformer.tokens import (
+from list_sorting_transformer.core.tokens import (
     VALUE_OFFSET,
     PointerQuicksortVocabulary,
 )

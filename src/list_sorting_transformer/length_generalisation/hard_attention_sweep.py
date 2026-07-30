@@ -20,7 +20,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from .data import make_pointer_next_batch
+from ..core.data import make_pointer_next_batch
 from .hard_attention_eggroll import (
     HardAttentionEggrollConfig,
     HardAttentionPointerTransformer,
@@ -28,7 +28,7 @@ from .hard_attention_eggroll import (
     pointer_targets,
     restore_curriculum_state,
 )
-from .positions import sample_position_offsets
+from ..core.positions import sample_position_offsets
 
 
 DEFAULT_LENGTHS = (

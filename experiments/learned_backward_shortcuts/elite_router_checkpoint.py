@@ -10,18 +10,18 @@ from typing import Sequence
 import torch
 from torch import Tensor
 
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     AttentionRoutingRule,
     EggrollDirection,
     clone_center_parameters,
     sample_eggroll_direction,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     PlateauState,
     ShortcutCreditExperimentConfig,
     update_elite_search_state,
 )
-from list_sorting_transformer.shortcut_credit_routing_plot import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_routing_plot import (
     load_attention_router,
 )
 

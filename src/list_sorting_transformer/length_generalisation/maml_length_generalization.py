@@ -15,9 +15,9 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.func import functional_call
 
-from .evaluate import resolve_device
-from .router_lookahead import router_lookahead_objective
-from .shortcut_credit import (
+from ..core.evaluate import resolve_device
+from ..shortcut_learning.router_lookahead import router_lookahead_objective
+from ..shortcut_learning.shortcut_credit import (
     AttentionRoutingRule,
     AttentionRoutingRuleConfig,
     ShortcutBatch,
@@ -26,7 +26,7 @@ from .shortcut_credit import (
     make_clean_pointer_batch,
     make_forward_model_config,
 )
-from .tokens import PointerNextVocabulary
+from ..core.tokens import PointerNextVocabulary
 
 
 @dataclass(frozen=True)

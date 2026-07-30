@@ -22,7 +22,7 @@ from .shortcut_credit_experiment import (
 from .token_gradient_reversal import (
     forward_with_source_gradient_reversal,
 )
-from .tokens import VALUE_OFFSET
+from ..core.tokens import VALUE_OFFSET
 
 
 @dataclass(frozen=True)

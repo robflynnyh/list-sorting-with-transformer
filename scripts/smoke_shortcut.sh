@@ -11,7 +11,7 @@ cd "${ROOT}"
 
 exec "${WITH_GPU}" "${GPU_POOL}" -- \
   env PYTHONPATH="${ROOT}/src" \
-  "${PYTHON_BIN}" -u -m list_sorting_transformer.shortcut_credit_experiment \
+  "${PYTHON_BIN}" -u -m list_sorting_transformer.shortcut_learning.shortcut_credit_experiment \
   --run-name research-artifact-shortcut-smoke \
   --output-dir "${OUTPUT_DIR}" \
   --generations 2 \

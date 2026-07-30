@@ -12,7 +12,7 @@ cd "${ROOT}"
 export PYTHONPATH="${ROOT}/src:${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 export WANDB__SERVICE_WAIT="${WANDB__SERVICE_WAIT:-300}"
 
-exec "${PYTHON_BIN}" -u -m list_sorting_transformer.shortcut_credit_experiment \
+exec "${PYTHON_BIN}" -u -m list_sorting_transformer.shortcut_learning.shortcut_credit_experiment \
   --run-name "${RUN_NAME}" \
   --output-dir "${OUTPUT_ROOT}" \
   --generations 200 \

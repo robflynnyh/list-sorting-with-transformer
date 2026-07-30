@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from list_sorting_transformer.adjacent_sort import (
+from list_sorting_transformer.core.adjacent_sort import (
     AdjacentSortMachine,
     AutoAdvanceSortMachine,
     execute_adjacent_sort_actions,
@@ -12,22 +12,22 @@ from list_sorting_transformer.adjacent_sort import (
     replay_adjacent_sort_transcript,
     replay_auto_advance_sort_transcript,
 )
-from list_sorting_transformer.data import (
+from list_sorting_transformer.core.data import (
     IGNORE_INDEX,
     make_adjacent_sort_batch,
     make_auto_advance_sort_batch,
 )
-from list_sorting_transformer.evaluation import (
+from list_sorting_transformer.core.evaluation import (
     generate_adjacent_sort_rollouts,
     generate_auto_advance_sort_rollouts,
 )
-from list_sorting_transformer.metrics import (
+from list_sorting_transformer.core.metrics import (
     generated_adjacent_no_tool_metrics,
     generated_adjacent_sort_metrics,
     generated_auto_advance_no_tool_metrics,
     generated_auto_advance_sort_metrics,
 )
-from list_sorting_transformer.tokens import (
+from list_sorting_transformer.core.tokens import (
     VALUE_OFFSET,
     AdjacentSortVocabulary,
     AutoAdvanceSortVocabulary,

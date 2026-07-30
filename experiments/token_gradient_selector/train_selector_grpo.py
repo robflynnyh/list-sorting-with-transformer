@@ -14,23 +14,23 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     ShortcutBatch,
     ShortcutMetrics,
     ShortcutPointerVocabulary,
     evaluate_shortcut_batches,
     make_fitness_batches,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     initialize_forward_model,
     make_inner_batches,
     make_mode_batches,
 )
-from list_sorting_transformer.token_gradient_reversal import (
+from list_sorting_transformer.shortcut_learning.token_gradient_reversal import (
     forward_with_source_gradient_reversal,
 )
-from list_sorting_transformer.token_gradient_selector import (
+from list_sorting_transformer.shortcut_learning.token_gradient_selector import (
     SelectorTrajectory,
     TokenGradientSelector,
     TokenGradientSelectorConfig,
@@ -39,7 +39,7 @@ from list_sorting_transformer.token_gradient_selector import (
     selector_probability_statistics,
     standardize_group_rewards,
 )
-from list_sorting_transformer.vectorized_reversal_population import (
+from list_sorting_transformer.shortcut_learning.vectorized_reversal_population import (
     train_vectorized_candidate_chunks,
 )
 

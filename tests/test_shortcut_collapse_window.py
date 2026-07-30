@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 import torch
 
-from list_sorting_transformer.shortcut_collapse_window import (
+from list_sorting_transformer.shortcut_learning.shortcut_collapse_window import (
     capture_collapse_window,
     clone_state_tree,
     load_collapse_window,
@@ -11,11 +11,11 @@ from list_sorting_transformer.shortcut_collapse_window import (
     save_collapse_window,
     slice_collapse_window,
 )
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     ShortcutPointerVocabulary,
     make_fitness_batches,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     initialize_fresh_backward_rule,
 )

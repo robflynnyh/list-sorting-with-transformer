@@ -36,3 +36,27 @@ def test_registry_has_both_research_tracks_and_all_status_classes() -> None:
     assert "length_generalisation" in tracks
     assert "shortcut_learning" in tracks
     assert {"confirmed", "preliminary", "negative", "inconclusive", "archived"} <= statuses
+
+
+def test_registry_owns_every_source_package() -> None:
+    validator = load_validator()
+    registry = validator.load_registry()
+    source_packages = set(registry["source_packages"])
+    experiment_sources = {
+        source
+        for experiment in registry["experiments"]
+        for source in experiment["source_packages"]
+    }
+
+    assert source_packages == {
+        "core",
+        "length_generalisation",
+        "shortcut_learning",
+        "transfer",
+    }
+    assert experiment_sources == source_packages
+
+
+def test_console_scripts_resolve_after_source_reorganization() -> None:
+    validator = load_validator()
+    assert validator.validate_console_scripts() == []

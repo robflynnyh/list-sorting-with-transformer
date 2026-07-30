@@ -12,7 +12,7 @@ export PYTHONPATH="${ROOT}/src:${PYTHONPATH:-}"
 export WANDB__SERVICE_WAIT="${WANDB__SERVICE_WAIT:-300}"
 
 exec "${WITH_GPU}" any --num 3 -- env PYTHONPATH="${PYTHONPATH}" \
-  "${PYTHON_BIN}" -u -m list_sorting_transformer.shortcut_credit_experiment \
+  "${PYTHON_BIN}" -u -m list_sorting_transformer.shortcut_learning.shortcut_credit_experiment \
   --run-name "${RUN_NAME}" \
   --output-dir "${OUTPUT_ROOT}" \
   --generations 10000 \

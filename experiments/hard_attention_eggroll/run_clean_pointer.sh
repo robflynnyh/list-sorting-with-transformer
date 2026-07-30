@@ -53,7 +53,7 @@ ARGS=(
 if [[ "${GPU_COUNT}" == "1" ]]; then
   exec "${WITH_GPU}" "${GPU_POOL}" -- env PYTHONPATH="${ROOT}/src" \
     "${PYTHON_BIN}" -u \
-    -m list_sorting_transformer.hard_attention_eggroll \
+    -m list_sorting_transformer.length_generalisation.hard_attention_eggroll \
     "${ARGS[@]}"
 fi
 
@@ -62,5 +62,5 @@ exec "${WITH_GPU}" "${GPU_POOL}" --num "${GPU_COUNT}" -- \
   "${PYTHON_BIN}" -u -m torch.distributed.run \
   --standalone \
   --nproc-per-node "${GPU_COUNT}" \
-  -m list_sorting_transformer.hard_attention_eggroll \
+  -m list_sorting_transformer.length_generalisation.hard_attention_eggroll \
   "${ARGS[@]}"

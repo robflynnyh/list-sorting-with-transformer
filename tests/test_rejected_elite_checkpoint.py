@@ -1,7 +1,7 @@
 from experiments.learned_backward_shortcuts.rejected_elite_checkpoint import (
     corrected_rejection_state,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
 )
 

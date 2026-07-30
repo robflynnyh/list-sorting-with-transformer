@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 from torch import Tensor
 
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     AttentionRoutingRule,
     AttentionRoutingRuleConfig,
     ShortcutPointerVocabulary,
@@ -18,7 +18,7 @@ from list_sorting_transformer.shortcut_credit import (
     make_fitness_batches,
     shortcut_loss,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     initialize_forward_model,
     make_inner_batches,

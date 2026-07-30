@@ -47,7 +47,7 @@ run_variant() {
   shift
   env PYTHONPATH="${ROOT}/src" \
     "${PYTHON_BIN}" -u \
-    -m list_sorting_transformer.sparse_attention_adam \
+    -m list_sorting_transformer.length_generalisation.sparse_attention_adam \
     --run-name "${run_name}" \
     "${COMMON_ARGS[@]}" \
     "$@"

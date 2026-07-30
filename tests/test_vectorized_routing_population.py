@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     AttentionRoutingRule,
     ShortcutPointerVocabulary,
     apply_eggroll_direction,
@@ -16,7 +16,7 @@ from list_sorting_transformer.shortcut_credit import (
     sample_eggroll_direction,
     shortcut_loss,
 )
-from list_sorting_transformer.shortcut_credit_experiment import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_experiment import (
     ShortcutCreditExperimentConfig,
     initialize_forward_model,
     initialize_fresh_backward_rule,
@@ -25,7 +25,7 @@ from list_sorting_transformer.shortcut_credit_experiment import (
     probe_longer_horizon,
     run,
 )
-from list_sorting_transformer.vectorized_routing_population import (
+from list_sorting_transformer.shortcut_learning.vectorized_routing_population import (
     stack_candidate_rule_parameters,
     train_vectorized_routing_population,
 )

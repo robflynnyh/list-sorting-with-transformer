@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 import torch
 
-from list_sorting_transformer.data import make_pointer_pair_batch
-from list_sorting_transformer.model import ModelConfig
-from list_sorting_transformer.pointer_compare_values import (
+from list_sorting_transformer.core.data import make_pointer_pair_batch
+from list_sorting_transformer.core.model import ModelConfig
+from list_sorting_transformer.length_generalisation.pointer_compare_values import (
     ModularPointerCompareModel,
     PointerCompareConfig,
     action_logit_distillation_scale_at_step,
@@ -15,10 +15,10 @@ from list_sorting_transformer.pointer_compare_values import (
     stage_five_parameter_anchor_loss,
     target_action_classes,
 )
-from list_sorting_transformer.pointer_next_value_from_position import (
+from list_sorting_transformer.length_generalisation.pointer_next_value_from_position import (
     ModularNextValueFromPositionModel,
 )
-from list_sorting_transformer.tokens import (
+from list_sorting_transformer.core.tokens import (
     PointerCompareVocabulary,
     PointerNextVocabulary,
 )

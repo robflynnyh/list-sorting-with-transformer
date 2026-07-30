@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from list_sorting_transformer.shortcut_credit_plot import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_plot import (
     load_chained_metrics,
     plot_chained_metrics,
 )

@@ -23,7 +23,7 @@ cd "${ROOT}"
 export PYTHONPATH="${ROOT}/src:${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 export WANDB__SERVICE_WAIT="${WANDB__SERVICE_WAIT:-300}"
 
-exec "${PYTHON_BIN}" -m list_sorting_transformer.maml_length_generalization \
+exec "${PYTHON_BIN}" -m list_sorting_transformer.length_generalisation.maml_length_generalization \
   --run-name "${RUN_NAME}" \
   --output-dir "${OUTPUT_ROOT}" \
   --method "${METHOD}" \

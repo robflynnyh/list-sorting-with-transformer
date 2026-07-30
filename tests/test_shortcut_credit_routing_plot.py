@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 import torch
 
-from list_sorting_transformer.shortcut_credit import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit import (
     ShortcutPointerVocabulary,
     make_shortcut_batch,
 )
-from list_sorting_transformer.shortcut_credit_routing_plot import (
+from list_sorting_transformer.shortcut_learning.shortcut_credit_routing_plot import (
     ROLE_LABELS,
     parse_checkpoint,
     plot_routing_roles,
