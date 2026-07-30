@@ -123,6 +123,44 @@ experiments/hard_attention_eggroll/run_grouped_population.sh
 `POPULATION_SIZE`, `UNIQUE_EXAMPLES`, `POPULATION_CHUNK_SIZE`,
 `POPULATION_PRECISION`, and `LEARNING_RATE` are environment overrides.
 
+## Checkpoint length sweep
+
+The checkpoint sweep evaluates exact top-1 routing from length 2 through 5,000.
+It uses a chunked attention forward pass to bound score-matrix memory while
+preserving exact parity with the normal model path. The y-axis labels mark
+head-pruning events in the checkpoint lineage.
+
+![Checkpoint length-generalization sweep](results/eggroll_checkpoint_length_sweep.png)
+
+The corresponding machine-readable results are in
+[`results/eggroll_checkpoint_length_sweep.csv`](results/eggroll_checkpoint_length_sweep.csv).
+The key pruning and recovery checkpoints were:
+
+| Generation | Active heads | L400 | L1,000 | L2,000 | L5,000 |
+|---:|---:|---:|---:|---:|---:|
+| 8,000 | 4 | 63.7% | 50.0% | 34.4% | 20.3% |
+| 8,361 | 3 | 81.2% | 67.2% | 51.6% | 35.9% |
+| 8,589 | 2 | 93.0% | 90.6% | 64.1% | 68.8% |
+| 8,743 | 1 | 61.7% | 53.1% | 32.8% | 48.4% |
+| 9,000 | 1 | 97.3% | 93.8% | 90.6% | 84.4% |
+| 10,000 | 1 | 99.6% | 100.0% | 92.2% | 95.3% |
+
+The immediate one-head pruning step causes a temporary collapse, but continued
+EGGROLL optimization recovers both in-domain behavior and long-length
+generalization. Lengths at or above 600 use 64 fixed examples, so individual
+long-length cells have more sampling noise than the 256-example shorter cells.
+
+Regenerate the CSV and blog figures with:
+
+```bash
+sort-hard-attention-sweep \
+  --checkpoint-dir artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7 \
+  --extra-checkpoint artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt \
+  --output-csv experiments/hard_attention_eggroll/results/eggroll_checkpoint_length_sweep.csv \
+  --output-png experiments/hard_attention_eggroll/results/eggroll_checkpoint_length_sweep.png \
+  --output-svg experiments/hard_attention_eggroll/results/eggroll_checkpoint_length_sweep.svg
+```
+
 Useful W&B metrics:
 
 - `eval/length_N/accuracy`: center-model accuracy at each fixed test length.

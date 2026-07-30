@@ -11,6 +11,7 @@ from list_sorting_transformer.sparse_attention_adam import (
     SparseAttentionPointerTransformer,
     entmax15,
     evaluation_batch_size,
+    make_evaluation_data,
     pointer_targets,
 )
 
@@ -61,6 +62,31 @@ def test_entmax15_is_normalized_sparse_and_differentiable() -> None:
     assert bool(torch.isfinite(scores.grad).all())
 
 
+def test_entmax15_backward_is_finite_at_quantized_support_boundary() -> None:
+    scores = torch.tensor(
+        [
+            [
+                0.34375,
+                0.1953125,
+                -0.85546875,
+                -1.3046875,
+                -0.333984375,
+                0.62890625,
+                -0.6953125,
+                -1.359375,
+            ]
+        ],
+        requires_grad=True,
+    )
+    gradient = torch.arange(scores.shape[-1], dtype=scores.dtype)
+
+    probabilities = entmax15(scores)
+    (probabilities * gradient).sum().backward()
+
+    assert scores.grad is not None
+    assert bool(torch.isfinite(scores.grad).all())
+
+
 def test_nape_split_and_adaptive_scalers_receive_gradients() -> None:
     config = small_config()
     model = SparseAttentionPointerTransformer(config)
@@ -104,3 +130,25 @@ def test_evaluation_batch_size_respects_attention_budget() -> None:
     )
     assert evaluation_batch_size(config, prompt_length=10) == 32
     assert evaluation_batch_size(config, prompt_length=100) == 1
+
+
+def test_long_recurring_evaluations_use_smaller_fixed_sets() -> None:
+    config = small_config(
+        eval_lengths=(2, 4, 8),
+        final_eval_lengths=(12,),
+        eval_examples=7,
+        long_eval_examples=3,
+        long_eval_min_length=8,
+    )
+
+    data = make_evaluation_data(
+        config,
+        lengths=config.eval_lengths,
+        examples=config.eval_examples,
+        long_examples=config.long_eval_examples,
+        long_min_length=config.long_eval_min_length,
+    )
+
+    assert data[2][0].values.shape[0] == 7
+    assert data[4][0].values.shape[0] == 7
+    assert data[8][0].values.shape[0] == 3

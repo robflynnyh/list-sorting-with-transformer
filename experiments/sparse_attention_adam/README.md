@@ -17,8 +17,10 @@ Sparse Attention* (ICLR 2026).
 
 The task model remains a two-layer, four-head, `d_model=128` SwiGLU
 Transformer. Training samples list lengths uniformly from 2 through 20.
-Evaluation reports lengths 2, 5, 10, 20, 40, 100, and 400 throughout training,
-then lengths 1,000 and 2,000 at the end.
+Evaluation reports lengths 2, 5, 10, 20, 40, 100, 400, 1,000, and 2,000
+throughout training, then length 5,000 at the end. The recurring 1,000- and
+2,000-token evaluations use 64 fixed examples instead of 512 because this
+attention implementation materializes its sparse score matrix before entmax.
 
 ## Run
 
@@ -40,7 +42,13 @@ Useful W&B metrics:
 - `attention/alibi_support_size` and `attention/nope_support_size`: support
   sizes for the two NAPE head groups.
 - `attention/beta_mean`, `attention/gamma_mean`, and `attention/scale_mean`:
-  diagnostics for adaptive length scaling.
+diagnostics for adaptive length scaling.
+
+The local entmax implementation uses the exact analytic Jacobian in backward.
+Differentiating through the closed-form support threshold directly can produce
+NaN gradients when quantized bf16 scores land exactly on a support boundary.
+Training also fails immediately on any future non-finite gradient rather than
+writing corrupted checkpoints.
 
 Paper: <https://arxiv.org/abs/2506.16640>
 

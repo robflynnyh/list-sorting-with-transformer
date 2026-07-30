@@ -33,9 +33,11 @@ class SparseAttentionAdamConfig:
     batch_size: int = 256
     train_min_length: int = 2
     train_max_length: int = 20
-    eval_lengths: tuple[int, ...] = (2, 5, 10, 20, 40, 100, 400)
-    final_eval_lengths: tuple[int, ...] = (1_000, 2_000)
+    eval_lengths: tuple[int, ...] = (2, 5, 10, 20, 40, 100, 400, 1_000, 2_000)
+    final_eval_lengths: tuple[int, ...] = (5_000,)
     eval_examples: int = 512
+    long_eval_examples: int = 64
+    long_eval_min_length: int = 1_000
     final_eval_examples: int = 64
     eval_batch_size: int = 128
     eval_attention_element_budget: int = 128_000_000
@@ -77,6 +79,8 @@ class SparseAttentionAdamConfig:
             self.train_min_length,
             self.train_max_length,
             self.eval_examples,
+            self.long_eval_examples,
+            self.long_eval_min_length,
             self.final_eval_examples,
             self.eval_batch_size,
             self.eval_attention_element_budget,
@@ -133,11 +137,9 @@ class SparseAttentionAdamConfig:
             raise ValueError("precision must be float32 or bfloat16")
 
 
-def entmax15(scores: Tensor, *, dim: int = -1) -> Tensor:
-    """Compute exact 1.5-entmax using its closed-form threshold."""
+def _entmax15_probabilities(scores: Tensor) -> Tensor:
+    """Compute exact 1.5-entmax probabilities along the final dimension."""
 
-    if dim not in {-1, scores.ndim - 1}:
-        raise ValueError("entmax15 currently supports the final dimension only")
     scores = scores / 2
     scores = scores - scores.max(dim=-1, keepdim=True).values
     sorted_scores = scores.sort(dim=-1, descending=True).values
@@ -163,6 +165,35 @@ def entmax15(scores: Tensor, *, dim: int = -1) -> Tensor:
     return probabilities / probabilities.sum(dim=-1, keepdim=True).clamp_min(
         torch.finfo(probabilities.dtype).tiny
     )
+
+
+class _Entmax15Function(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx: Any, scores: Tensor) -> Tensor:
+        probabilities = _entmax15_probabilities(scores)
+        ctx.save_for_backward(probabilities)
+        return probabilities
+
+    @staticmethod
+    def backward(ctx: Any, gradient: Tensor) -> tuple[Tensor]:
+        (probabilities,) = ctx.saved_tensors
+        density = probabilities.sqrt()
+        density_sum = density.sum(dim=-1, keepdim=True).clamp_min(
+            torch.finfo(density.dtype).tiny
+        )
+        mean_gradient = (gradient * density).sum(
+            dim=-1,
+            keepdim=True,
+        ) / density_sum
+        return (density * (gradient - mean_gradient),)
+
+
+def entmax15(scores: Tensor, *, dim: int = -1) -> Tensor:
+    """Compute exact 1.5-entmax with its finite analytic backward pass."""
+
+    if dim not in {-1, scores.ndim - 1}:
+        raise ValueError("entmax15 currently supports the final dimension only")
+    return _Entmax15Function.apply(scores)
 
 
 def nape_slopes(
@@ -408,14 +439,20 @@ def make_evaluation_data(
     *,
     lengths: tuple[int, ...],
     examples: int,
+    long_examples: int | None = None,
+    long_min_length: int | None = None,
 ) -> dict[int, tuple[PointerNextBatch, Tensor]]:
-    generator = torch.Generator().manual_seed(
-        config.seed + 30_000 + max(lengths)
-    )
+    generator = torch.Generator().manual_seed(config.seed + 30_400)
     return {
         length: (
             make_pointer_next_batch(
-                examples,
+                (
+                    long_examples
+                    if long_examples is not None
+                    and long_min_length is not None
+                    and length >= long_min_length
+                    else examples
+                ),
                 length,
                 generator=generator,
                 vocabulary=PointerNextVocabulary(
@@ -424,7 +461,13 @@ def make_evaluation_data(
                 ),
             ),
             sample_position_offsets(
-                examples,
+                (
+                    long_examples
+                    if long_examples is not None
+                    and long_min_length is not None
+                    and length >= long_min_length
+                    else examples
+                ),
                 minimum=config.position_offset_min,
                 maximum=config.position_offset_max,
                 generator=generator,
@@ -590,6 +633,8 @@ def run(config: SparseAttentionAdamConfig) -> Path:
         config,
         lengths=config.eval_lengths,
         examples=config.eval_examples,
+        long_examples=config.long_eval_examples,
+        long_min_length=config.long_eval_min_length,
     )
     final_evaluation_data = make_evaluation_data(
         config,
@@ -658,6 +703,7 @@ def run(config: SparseAttentionAdamConfig) -> Path:
         gradient_norm = nn.utils.clip_grad_norm_(
             model.parameters(),
             config.gradient_clip,
+            error_if_nonfinite=True,
         )
         optimizer.step()
 
@@ -767,6 +813,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--eval-examples",
         type=int,
         default=SparseAttentionAdamConfig.eval_examples,
+    )
+    parser.add_argument(
+        "--long-eval-examples",
+        type=int,
+        default=SparseAttentionAdamConfig.long_eval_examples,
+    )
+    parser.add_argument(
+        "--long-eval-min-length",
+        type=int,
+        default=SparseAttentionAdamConfig.long_eval_min_length,
     )
     parser.add_argument(
         "--final-eval-examples",

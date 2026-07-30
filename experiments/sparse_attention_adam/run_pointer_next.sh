@@ -22,9 +22,11 @@ exec "${WITH_GPU}" "${GPU_POOL}" -- \
   --batch-size 256 \
   --train-min-length 2 \
   --train-max-length 20 \
-  --eval-lengths 2,5,10,20,40,100,400 \
-  --final-eval-lengths 1000,2000 \
+  --eval-lengths 2,5,10,20,40,100,400,1000,2000 \
+  --final-eval-lengths 5000 \
   --eval-examples 512 \
+  --long-eval-examples 64 \
+  --long-eval-min-length 1000 \
   --final-eval-examples 64 \
   --learning-rate 4e-4 \
   --weight-decay 0 \
