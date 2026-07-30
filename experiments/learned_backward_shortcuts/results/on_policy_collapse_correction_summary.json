@@ -1,0 +1,77 @@
+{
+  "status": "rejected",
+  "reason": "The update changed the training trajectory and regressed an on-policy ranking event and a held-out event.",
+  "source_checkpoint": "/exp/exp4/acp21rjf/.scratch/list-sorting-collapse/state_conditioned/source_zero_conditioned.pt",
+  "candidate_checkpoint": "/exp/exp4/acp21rjf/.scratch/list-sorting-collapse/state_conditioned/trimmed_weighted_gen1/lr00002.pt",
+  "candidate_population_size": 64,
+  "candidate_outer_learning_rate": 0.0002,
+  "saved_slice_changes": [
+    0.0,
+    0.01171875,
+    0.109375,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "on_policy_events": [
+    {
+      "seed": 57155105,
+      "split": "ranking",
+      "centre_minimum_accuracy": 0.6796875,
+      "candidate_minimum_accuracy": 0.69921875,
+      "change": 0.01953125
+    },
+    {
+      "seed": 7700511,
+      "split": "ranking",
+      "centre_minimum_accuracy": 0.38671875,
+      "candidate_minimum_accuracy": 0.7265625,
+      "change": 0.33984375
+    },
+    {
+      "seed": 67172112,
+      "split": "ranking",
+      "centre_minimum_accuracy": 0.41015625,
+      "candidate_minimum_accuracy": 0.39453125,
+      "change": -0.015625
+    },
+    {
+      "seed": 67122077,
+      "split": "ranking",
+      "centre_minimum_accuracy": 0.6171875,
+      "candidate_minimum_accuracy": 0.6171875,
+      "change": 0.0
+    },
+    {
+      "seed": 67112070,
+      "split": "ranking",
+      "centre_minimum_accuracy": 0.74609375,
+      "candidate_minimum_accuracy": 0.74609375,
+      "change": 0.0
+    },
+    {
+      "seed": 67222147,
+      "split": "ranking",
+      "centre_minimum_accuracy": 0.58203125,
+      "candidate_minimum_accuracy": 0.578125,
+      "change": -0.00390625
+    },
+    {
+      "seed": 67062035,
+      "split": "holdout",
+      "centre_minimum_accuracy": 0.10546875,
+      "candidate_minimum_accuracy": 0.12109375,
+      "change": 0.015625
+    },
+    {
+      "seed": 67132084,
+      "split": "holdout",
+      "centre_minimum_accuracy": 0.73046875,
+      "candidate_minimum_accuracy": 0.578125,
+      "change": -0.15234375
+    }
+  ],
+  "coarse_scan": "/exp/exp4/acp21rjf/.scratch/list-sorting-collapse/state_conditioned/on_policy_gen1_scan8",
+  "dense_scan": "/exp/exp4/acp21rjf/.scratch/list-sorting-collapse/state_conditioned/on_policy_gen1_windows",
+  "acceptance_requirement": "Replay from initialization with identical batches and dense evaluation around known collapses."
+}

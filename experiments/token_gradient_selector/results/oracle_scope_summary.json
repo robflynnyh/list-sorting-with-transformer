@@ -1,0 +1,76 @@
+{
+  "status": "oracle_gate_passed",
+  "accepted_scope": "attention_scores",
+  "reversal_scale": 1.0,
+  "suffix": [
+    {
+      "condition": "ordinary",
+      "seed": 7,
+      "step_320_clean_accuracy": 0.083984375,
+      "step_3000_clean_accuracy": 0.0859375,
+      "step_3000_correct_accuracy": 1.0
+    },
+    {
+      "condition": "ordinary",
+      "seed": 13,
+      "step_320_clean_accuracy": 0.09375,
+      "step_3000_clean_accuracy": 0.095703125,
+      "step_3000_correct_accuracy": 1.0
+    },
+    {
+      "condition": "attention_scores",
+      "seed": 7,
+      "step_320_clean_accuracy": 1.0,
+      "step_3000_clean_accuracy": 1.0,
+      "step_3000_correct_accuracy": 1.0
+    },
+    {
+      "condition": "attention_scores",
+      "seed": 13,
+      "step_320_clean_accuracy": 1.0,
+      "step_3000_clean_accuracy": 1.0,
+      "step_3000_correct_accuracy": 1.0
+    },
+    {
+      "condition": "qkv",
+      "seed": 7,
+      "step_320_clean_accuracy": 0.21875,
+      "step_3000_clean_accuracy": 0.103515625,
+      "step_3000_correct_accuracy": 0.1171875
+    },
+    {
+      "condition": "complete_attention",
+      "seed": 7,
+      "step_320_clean_accuracy": 0.103515625,
+      "step_3000_clean_accuracy": 0.099609375,
+      "step_3000_correct_accuracy": 0.109375
+    }
+  ],
+  "random_list": [
+    {
+      "condition": "ordinary",
+      "seed": 7,
+      "step_320_clean_accuracy": 0.138671875,
+      "best_clean_accuracy": 0.201171875,
+      "step_3000_clean_accuracy": 0.125,
+      "step_3000_correct_accuracy": 1.0
+    },
+    {
+      "condition": "attention_scores",
+      "seed": 7,
+      "step_320_clean_accuracy": 0.95703125,
+      "best_clean_accuracy": 0.95703125,
+      "step_3000_clean_accuracy": 0.935546875,
+      "step_3000_correct_accuracy": 1.0
+    },
+    {
+      "condition": "attention_scores",
+      "seed": 13,
+      "step_320_clean_accuracy": 0.9375,
+      "best_clean_accuracy": 0.953125,
+      "step_3000_clean_accuracy": 0.953125,
+      "step_3000_correct_accuracy": 1.0
+    }
+  ],
+  "raw_outputs": "/exp/exp4/acp21rjf/.scratch/list-sorting-token-reversal/oracle_scope"
+}

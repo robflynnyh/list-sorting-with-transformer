@@ -1,0 +1,13 @@
+{
+  "comparison/a_accuracy_win_fraction": 0.0,
+  "comparison/accuracy_tie_fraction": 1.0,
+  "comparison/b_accuracy_win_fraction": 0.0,
+  "comparison/b_loss_win_fraction": 0.5,
+  "mean/checkpoint_a/clean_loss": 0.2772656886627374,
+  "mean/checkpoint_a/min_mode_accuracy": 0.953125,
+  "mean/checkpoint_b/clean_loss": 0.26715571788190573,
+  "mean/checkpoint_b/min_mode_accuracy": 0.953125,
+  "mean/comparison/a_minus_b_clean_loss": 0.010109970780831645,
+  "mean/comparison/b_minus_a_min_accuracy": 0.0,
+  "replicates": 4.0
+}

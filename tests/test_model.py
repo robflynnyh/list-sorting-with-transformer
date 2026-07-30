@@ -4,7 +4,14 @@ import torch
 
 from list_sorting_transformer.data import make_sorting_batch
 from list_sorting_transformer.evaluation import output_cross_entropy
-from list_sorting_transformer.model import DecoderTransformer, ModelConfig
+from list_sorting_transformer.model import (
+    DecoderTransformer,
+    ModelConfig,
+    _RoutedAttentionBackward,
+    _routed_attention_weights,
+    routed_scaled_dot_product_attention,
+    signed_routed_scaled_dot_product_attention,
+)
 from list_sorting_transformer.recurrent import LSTMConfig, LSTMSorter
 from list_sorting_transformer.tokens import SymbolVocabulary
 
@@ -30,6 +37,190 @@ def small_config(
 def test_default_layers_interleave_rotary_and_nope() -> None:
     model = DecoderTransformer(small_config())
     assert model.layer_position_modes == ("rotary", "none", "rotary", "none")
+
+
+def test_functional_routed_attention_matches_legacy_backward() -> None:
+    torch.manual_seed(31)
+    query = torch.randn(2, 2, 5, 4, requires_grad=True)
+    key = torch.randn(2, 2, 5, 4, requires_grad=True)
+    value = torch.randn(2, 2, 5, 4, requires_grad=True)
+    gate = torch.rand(2, 2, 5, 5).mul(0.8).add(0.2)
+    upstream = torch.randn_like(query)
+
+    routed, _ = routed_scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        backward_gate=gate,
+        is_causal=True,
+    )
+    functional_gradients = torch.autograd.grad(
+        (routed * upstream).sum(),
+        (query, key, value),
+    )
+
+    legacy_query = query.detach().clone().requires_grad_()
+    legacy_key = key.detach().clone().requires_grad_()
+    legacy_value = value.detach().clone().requires_grad_()
+    attended = torch.nn.functional.scaled_dot_product_attention(
+        legacy_query,
+        legacy_key,
+        legacy_value,
+        dropout_p=0.0,
+        is_causal=True,
+    )
+    routed_weights = _routed_attention_weights(
+        legacy_query.detach(),
+        legacy_key.detach(),
+        backward_gate=gate,
+        attention_mask=None,
+        is_causal=True,
+    )
+    legacy = _RoutedAttentionBackward.apply(
+        attended.detach(),
+        legacy_query,
+        legacy_key,
+        legacy_value,
+        routed_weights,
+    )
+    legacy_gradients = torch.autograd.grad(
+        (legacy * upstream).sum(),
+        (legacy_query, legacy_key, legacy_value),
+    )
+
+    torch.testing.assert_close(routed, attended, rtol=0, atol=0)
+    for functional, expected in zip(
+        functional_gradients,
+        legacy_gradients,
+    ):
+        torch.testing.assert_close(
+            functional,
+            expected,
+            rtol=2e-5,
+            atol=2e-6,
+        )
+
+
+def test_signed_routing_preserves_forward_and_matches_signed_credit() -> None:
+    torch.manual_seed(37)
+    query = torch.randn(2, 2, 5, 4, requires_grad=True)
+    key = torch.randn(2, 2, 5, 4, requires_grad=True)
+    value = torch.randn(2, 2, 5, 4, requires_grad=True)
+    multipliers = torch.rand(2, 2, 5, 5).mul(2).sub(1)
+    upstream = torch.randn_like(query)
+
+    routed, _ = signed_routed_scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        backward_multipliers=multipliers,
+        is_causal=True,
+    )
+    routed_gradients = torch.autograd.grad(
+        (routed * upstream).sum(),
+        (query, key, value),
+    )
+
+    expected_query = query.detach().clone().requires_grad_()
+    expected_key = key.detach().clone().requires_grad_()
+    expected_value = value.detach().clone().requires_grad_()
+    scores = (
+        expected_query @ expected_key.transpose(-2, -1)
+        / expected_query.shape[-1] ** 0.5
+    )
+    causal = torch.ones(5, 5, dtype=torch.bool).tril()
+    weights = scores.masked_fill(~causal, float("-inf")).softmax(dim=-1)
+    signed_surrogate = (weights * multipliers) @ expected_value
+    expected_gradients = torch.autograd.grad(
+        (signed_surrogate * upstream).sum(),
+        (expected_query, expected_key, expected_value),
+    )
+    ordinary = torch.nn.functional.scaled_dot_product_attention(
+        query.detach(),
+        key.detach(),
+        value.detach(),
+        dropout_p=0.0,
+        is_causal=True,
+    )
+
+    torch.testing.assert_close(routed, ordinary, rtol=0, atol=0)
+    for actual, expected in zip(routed_gradients, expected_gradients):
+        torch.testing.assert_close(actual, expected, rtol=2e-5, atol=2e-6)
+
+
+def test_signed_unit_credit_matches_ordinary_attention_gradients() -> None:
+    torch.manual_seed(41)
+    ordinary_tensors = [
+        torch.randn(2, 2, 4, 6, requires_grad=True)
+        for _ in range(3)
+    ]
+    signed_tensors = [
+        tensor.detach().clone().requires_grad_()
+        for tensor in ordinary_tensors
+    ]
+    upstream = torch.randn_like(ordinary_tensors[0])
+
+    ordinary = torch.nn.functional.scaled_dot_product_attention(
+        *ordinary_tensors,
+        dropout_p=0.0,
+        is_causal=True,
+    )
+    signed, _ = signed_routed_scaled_dot_product_attention(
+        *signed_tensors,
+        backward_multipliers=torch.ones(2, 2, 4, 4),
+        is_causal=True,
+    )
+    ordinary.backward(upstream)
+    signed.backward(upstream)
+
+    torch.testing.assert_close(signed, ordinary, rtol=0, atol=0)
+    for ordinary_tensor, signed_tensor in zip(
+        ordinary_tensors,
+        signed_tensors,
+    ):
+        torch.testing.assert_close(
+            signed_tensor.grad,
+            ordinary_tensor.grad,
+            rtol=2e-5,
+            atol=2e-6,
+        )
+
+
+def test_manual_attention_matches_sdpa_for_vectorized_routing() -> None:
+    torch.manual_seed(43)
+    tensors = [
+        torch.randn(2, 2, 5, 4, requires_grad=True)
+        for _ in range(3)
+    ]
+    manual_tensors = [
+        tensor.detach().clone().requires_grad_()
+        for tensor in tensors
+    ]
+    multipliers = torch.rand(2, 2, 5, 5).mul(2).sub(1)
+    upstream = torch.randn_like(tensors[0])
+
+    sdpa, _ = signed_routed_scaled_dot_product_attention(
+        *tensors,
+        backward_multipliers=multipliers,
+        is_causal=True,
+    )
+    manual, _ = signed_routed_scaled_dot_product_attention(
+        *manual_tensors,
+        backward_multipliers=multipliers,
+        is_causal=True,
+        manual_attention=True,
+    )
+    sdpa.backward(upstream)
+    manual.backward(upstream)
+
+    torch.testing.assert_close(manual, sdpa, rtol=2e-5, atol=2e-6)
+    for sdpa_tensor, manual_tensor in zip(tensors, manual_tensors):
+        torch.testing.assert_close(
+            manual_tensor.grad,
+            sdpa_tensor.grad,
+            rtol=2e-5,
+            atol=2e-6,
+        )
 
 
 def test_value_rotary_mode_is_reported_for_rotary_layers() -> None:

@@ -1,0 +1,14 @@
+{
+  "generation": 41,
+  "center_fitness": 2.4910803884267807,
+  "proposal_fitness": 0.7403814792633057,
+  "proposal_fitness_minus_center": -1.750698909163475,
+  "update_accepted": false,
+  "actual_update_rms": 0.0,
+  "search_sigma": 0.21,
+  "next_search_sigma": 0.105,
+  "center_min_accuracy": 0.94140625,
+  "heldout_center_min_accuracy": 0.91796875,
+  "ordinary_min_accuracy": 0.2265625,
+  "heldout_ordinary_min_accuracy": 0.21484375
+}

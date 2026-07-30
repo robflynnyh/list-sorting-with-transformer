@@ -1,0 +1,379 @@
+{
+  "schema_version": 1,
+  "statuses": [
+    "confirmed",
+    "preliminary",
+    "negative",
+    "inconclusive",
+    "archived"
+  ],
+  "tracks": [
+    "length_generalisation",
+    "shortcut_learning",
+    "cross_track"
+  ],
+  "experiments": [
+    {
+      "id": "core-sorting-baselines",
+      "track": "length_generalisation",
+      "status": "archived",
+      "question": "How do direct Transformer and LSTM sorting baselines change outside the length-2-to-20 training range?",
+      "training_domain": "Online lists of length 2-20.",
+      "evaluation_domain": "Length sweeps recorded in the committed metrics and plots.",
+      "locations": [
+        "docs/core-sequence-tasks.md"
+      ],
+      "artifact_roots": [
+        "alphabet_alternating_seed7",
+        "numbers_alternating_seed7",
+        "lstm_alphabet_seed7",
+        "lstm_numbers_seed7",
+        "learning_dynamics.png",
+        "representation_comparison.png"
+      ],
+      "evidence": [
+        "artifacts/alphabet_alternating_seed7/metrics.json",
+        "artifacts/numbers_alternating_seed7/metrics.json",
+        "artifacts/lstm_alphabet_seed7/metrics.json",
+        "artifacts/lstm_numbers_seed7/metrics.json"
+      ],
+      "reproduce": [
+        "sort-transformer-train --help",
+        "sort-transformer-compare --help"
+      ],
+      "summary": "Useful original baselines, retained as historical context rather than a current headline result."
+    },
+    {
+      "id": "algorithm-trace-representations",
+      "track": "length_generalisation",
+      "status": "archived",
+      "question": "Do textual quicksort traces or executor-assisted traces make list sorting generalise in length?",
+      "training_domain": "Online sorting traces generated from lists of length 2-20.",
+      "evaluation_domain": "Longer list lengths recorded in committed metrics.",
+      "locations": [
+        "docs/core-sequence-tasks.md"
+      ],
+      "artifact_roots": [
+        "quicksort_trace_numbers_seed7_accum2",
+        "pointer_quicksort_numbers_seed7_accum2",
+        "pointer_quicksort_no_tool_numbers_seed7_accum2"
+      ],
+      "evidence": [
+        "artifacts/quicksort_trace_numbers_seed7_accum2/metrics.json",
+        "artifacts/pointer_quicksort_numbers_seed7_accum2/metrics.json",
+        "artifacts/pointer_quicksort_no_tool_numbers_seed7_accum2/metrics.json"
+      ],
+      "reproduce": [
+        "sort-transformer-train --task quicksort_trace --help",
+        "sort-pointer-trace 3,1,2"
+      ],
+      "summary": "Representation studies motivated the smaller pointer diagnostics. They are no longer the preferred experimental interface."
+    },
+    {
+      "id": "pointer-position-ablation",
+      "track": "length_generalisation",
+      "status": "preliminary",
+      "question": "Which positional-attention pattern lets a causal Transformer retrieve the value after a pointer at unseen positions?",
+      "training_domain": "Pointer-next lists of length 2-20.",
+      "evaluation_domain": "Fixed evaluations from length 20 through 400.",
+      "locations": [
+        "artifacts/pointer_next_position_ablation/README.md",
+        "docs/core-sequence-tasks.md"
+      ],
+      "artifact_roots": [
+        "pointer_next_position_ablation",
+        "pointer_position_sinusoidal_mse_seed7",
+        "pointer_position_random_offset_mse_seed7",
+        "pointer_position_random_offset_pointer_ce_seed7",
+        "pointer_position_pointer_ce_curriculum_noise_seed7",
+        "pointer_position_pointer_ce_curriculum_noise_constant_lr_seed7"
+      ],
+      "evidence": [
+        "artifacts/pointer_next_position_ablation/summary.json",
+        "artifacts/pointer_next_position_ablation/position_ablation_exact_match.png"
+      ],
+      "reproduce": [
+        "sort-pointer-position-probe --help"
+      ],
+      "summary": "Alternating RoPE/NoPE was much stronger than all-RoPE or all-NoPE in one controlled seed; rotating values failed."
+    },
+    {
+      "id": "modular-pointer-pipeline",
+      "track": "length_generalisation",
+      "status": "preliminary",
+      "question": "Can pointer retrieval and comparison be learned as an autoregressive sequence of modular position operations?",
+      "training_domain": "Pipeline stages trained on list lengths 2-20.",
+      "evaluation_domain": "Stage-specific evaluations through length 400 or 2,048.",
+      "locations": [
+        "docs/core-sequence-tasks.md"
+      ],
+      "artifact_roots": [
+        "pointer_value_nocurr_gn0_10k_seed7",
+        "pointer_pair_from_value_gn0_2000_seed7"
+      ],
+      "evidence": [
+        "artifacts/pointer_value_nocurr_gn0_10k_seed7/eval_high_lengths_to_1000.json",
+        "artifacts/pointer_pair_from_value_gn0_2000_seed7/eval_high_lengths_to_1000.json"
+      ],
+      "reproduce": [
+        "sort-pointer-position-sequence --help",
+        "sort-pointer-value-from-position --help",
+        "sort-pointer-next-value-position --help",
+        "sort-pointer-next-value-from-position --help",
+        "sort-pointer-compare-values --help"
+      ],
+      "summary": "The staged curriculum isolates routing operations and gives strong single-seed transfer, but later stages remain less stable and are not a general sorting solution."
+    },
+    {
+      "id": "rasp-transfer",
+      "track": "cross_track",
+      "status": "confirmed",
+      "question": "Does an exactly compiled routing circuit transfer better than random initialization?",
+      "training_domain": "Four downstream tasks at lengths 2-20, three matched seeds.",
+      "evaluation_domain": "Lengths 20, 40, 100, 200, and 400.",
+      "locations": [
+        "experiments/rasp_transfer",
+        "docs/rasp_transfer_report.md"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/rasp_transfer/results/summary.json",
+        "docs/assets/rasp_transfer_learning_curves.png",
+        "docs/assets/rasp_transfer_length_generalization.png"
+      ],
+      "reproduce": [
+        "bash experiments/rasp_transfer/run_matrix.sh",
+        "sort-rasp-transfer summarize --input-root artifacts/rasp_transfer --output-json experiments/rasp_transfer/results/summary.json --plot-directory docs/assets"
+      ],
+      "summary": "Compiled-prefix transfer helps tasks that reuse locate-and-retrieve operations, but not the unrelated Dyck-2 task."
+    },
+    {
+      "id": "language-model-transfer",
+      "track": "cross_track",
+      "status": "negative",
+      "question": "Do compiled routing blocks improve byte language modelling or context-length extrapolation?",
+      "training_domain": "Three paired seeds, 5,000 updates, 256-byte contexts from a fixed Pile slice.",
+      "evaluation_domain": "Validation contexts of 256, 512, 1,024, and 2,048 bytes.",
+      "locations": [
+        "experiments/language_model_transfer",
+        "docs/language_model_transfer_report.md"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/language_model_transfer/results/summary.json",
+        "docs/assets/language_model_transfer_learning_curves.png",
+        "docs/assets/language_model_transfer_length_generalization.png"
+      ],
+      "reproduce": [
+        "bash experiments/language_model_transfer/run_matrix.sh"
+      ],
+      "summary": "Random initialization beats trainable and frozen compiled-middle variants in-domain and at every longer tested context."
+    },
+    {
+      "id": "hard-attention-eggroll",
+      "track": "length_generalisation",
+      "status": "preliminary",
+      "question": "Can forward-only EGGROLL learn a minimal top-1 attention routing algorithm that extrapolates in length?",
+      "training_domain": "Performance curriculum from length 2 to 20, then top-k and head-pruning curricula.",
+      "evaluation_domain": "Checkpoint sweeps through length 5,000.",
+      "locations": [
+        "experiments/hard_attention_eggroll"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/hard_attention_eggroll/results/eggroll_checkpoint_length_sweep.csv",
+        "experiments/hard_attention_eggroll/results/eggroll_checkpoint_length_sweep.png"
+      ],
+      "wandb": [
+        "https://wandb.ai/wobrob101/list-sorting-hard-attention-eggroll/runs/wwv04wzb"
+      ],
+      "reproduce": [
+        "bash experiments/hard_attention_eggroll/run_clean_pointer.sh",
+        "bash experiments/hard_attention_eggroll/run_grouped_population.sh"
+      ],
+      "summary": "One seed recovered strong long-length accuracy after pruning to one deterministic top-1 head per layer."
+    },
+    {
+      "id": "sparse-attention-adam",
+      "track": "length_generalisation",
+      "status": "preliminary",
+      "question": "Are sparse normalization, adaptive scaling, or mixed positional head roles responsible for pointer-next length extrapolation?",
+      "training_domain": "Pointer-next lists of length 2-20, one seed per ablation.",
+      "evaluation_domain": "Recurring evaluations through length 2,000 and selected final evaluations at 5,000.",
+      "locations": [
+        "experiments/sparse_attention_adam"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/sparse_attention_adam/README.md",
+        "experiments/sparse_attention_adam/results/key_difference_ablation_summary.json"
+      ],
+      "wandb": [
+        "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation"
+      ],
+      "reproduce": [
+        "bash experiments/sparse_attention_adam/run_pointer_next.sh",
+        "bash experiments/sparse_attention_adam/run_key_difference_ablations.sh"
+      ],
+      "summary": "Dense softmax and fixed scaling are sufficient in the successful eight-head mixed ALiBi/NoPE model; either homogeneous head type fails OOD."
+    },
+    {
+      "id": "learned-backward-length",
+      "track": "length_generalisation",
+      "status": "inconclusive",
+      "question": "Can an evolved attention-gradient router selected at length 50 improve length-400 generalisation?",
+      "training_domain": "Pointer-next task-model trajectories at lengths 2-20.",
+      "evaluation_domain": "Fixed ranking and acceptance sets at length 50; length 400 reporting-only.",
+      "locations": [
+        "experiments/learned_backward_length_generalization"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/learned_backward_length_generalization/PROGRESS.md"
+      ],
+      "wandb": [
+        "https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/ksbfapf2",
+        "https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/x67kp718"
+      ],
+      "reproduce": [
+        "bash experiments/learned_backward_length_generalization/run_controller.sh",
+        "bash experiments/learned_backward_length_generalization/run_successive_halving.sh"
+      ],
+      "summary": "No stable length-400 advantage was established; optimization cost, collapse, and weak ranking-to-heldout transfer remain confounded."
+    },
+    {
+      "id": "maml-length",
+      "track": "length_generalisation",
+      "status": "negative",
+      "question": "Can differentiating through short-task updates improve longer-length pointer solutions?",
+      "training_domain": "Persistent pointer-next models trained at lengths 2-20 with one-step or horizon-24 meta updates.",
+      "evaluation_domain": "Meta objectives around length 50 and reporting at length 400.",
+      "locations": [
+        "experiments/maml_length_generalization"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/maml_length_generalization/PROGRESS.md"
+      ],
+      "wandb": [
+        "https://wandb.ai/wobrob101/list-sorting-maml/runs/hh138504",
+        "https://wandb.ai/wobrob101/list-sorting-maml/runs/y989nxya"
+      ],
+      "reproduce": [
+        "bash experiments/maml_length_generalization/run.sh",
+        "bash experiments/learned_backward_length_generalization/run_maml_h24.sh"
+      ],
+      "summary": "Several variants learned the length-50 objective but did not provide a stable length-400 advantage; horizon-24 routing collapsed toward broad suppression."
+    },
+    {
+      "id": "evolved-shortcut-credit",
+      "track": "shortcut_learning",
+      "status": "confirmed",
+      "question": "Can scarce fixed clean fitness data evolve a backward rule that learns the intended pointer function from unlimited shortcut-containing training data?",
+      "training_domain": "Random-position shortcut examples resampled online; forward models reset across evolutionary trajectories.",
+      "evaluation_domain": "A fixed clean fitness set for evolution and fresh masked/incorrect-hint sets for reporting.",
+      "locations": [
+        "experiments/learned_backward_shortcuts"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/learned_backward_shortcuts/results/random_elite_g49_h320_replications_summary.json",
+        "experiments/learned_backward_shortcuts/results/masked_horizon_sweep_summary.json",
+        "experiments/learned_backward_shortcuts/PROGRESS.md"
+      ],
+      "wandb": [
+        "https://wandb.ai/wobrob101/list-sorting-learned-backward"
+      ],
+      "reproduce": [
+        "bash experiments/learned_backward_shortcuts/run_deterministic_controller.sh",
+        "python experiments/learned_backward_shortcuts/fixed_rule_horizon_sweep.py --help"
+      ],
+      "summary": "A selected backward rule transfers across fresh forward-model trajectories on the same shortcut task and strongly outperforms ordinary backpropagation."
+    },
+    {
+      "id": "shortcut-collapse-routing",
+      "track": "shortcut_learning",
+      "status": "inconclusive",
+      "question": "Can evolution repair the later trajectory regions where an initially robust shortcut rule collapses?",
+      "training_domain": "Saved collapse windows and on-policy trajectories from the random-position shortcut task.",
+      "evaluation_domain": "Seed-disjoint windows plus complete held-out trajectories.",
+      "locations": [
+        "experiments/learned_backward_shortcuts"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/learned_backward_shortcuts/results/collapse_window_multi_seed_summary.json",
+        "experiments/learned_backward_shortcuts/results/on_policy_collapse_correction_summary.json",
+        "experiments/learned_backward_shortcuts/results/trimmed_collapse_evolution_summary.json"
+      ],
+      "reproduce": [
+        "python experiments/learned_backward_shortcuts/collapse_window_population.py --help",
+        "python experiments/learned_backward_shortcuts/replay_collapse_window.py --help"
+      ],
+      "summary": "Candidates improved selected windows but did not pass the complete on-policy acceptance gate; state-conditioned follow-ups were rejected."
+    },
+    {
+      "id": "oracle-gradient-reversal",
+      "track": "shortcut_learning",
+      "status": "confirmed",
+      "question": "Is modifying backward credit on attention scores sufficient in principle to prevent the explicit shortcut?",
+      "training_domain": "Shortcut-containing data with known leak-token locations.",
+      "evaluation_domain": "Fixed and fresh clean, masked-hint, incorrect-hint, and correct-hint examples.",
+      "locations": [
+        "experiments/token_gradient_selector"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/token_gradient_selector/results/oracle_scope_summary.json",
+        "experiments/token_gradient_selector/results/random_oracle_optimization_summary.json"
+      ],
+      "reproduce": [
+        "python experiments/token_gradient_selector/oracle_horizon_sweep.py --help"
+      ],
+      "summary": "Oracle attention-score reversal solves both suffix and random-position variants; broader QKV or complete-attention reversal does not."
+    },
+    {
+      "id": "learned-token-selector",
+      "track": "shortcut_learning",
+      "status": "negative",
+      "question": "Can a learned binary token policy discover where attention-score gradients should be reversed?",
+      "training_domain": "Group-reward evolutionary or GRPO-style training on shortcut examples.",
+      "evaluation_domain": "Fixed and fresh masked/incorrect-hint evaluations.",
+      "locations": [
+        "experiments/token_gradient_selector"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/token_gradient_selector/results/sparse_selector_diagnostics.json",
+        "experiments/token_gradient_selector/PROGRESS.md"
+      ],
+      "reproduce": [
+        "python experiments/token_gradient_selector/train_selector_grpo.py --help"
+      ],
+      "summary": "The learned selector did not improve held-out clean accuracy despite the successful oracle mechanism."
+    },
+    {
+      "id": "maml-shortcut-router",
+      "track": "shortcut_learning",
+      "status": "preliminary",
+      "question": "Can a persistent attention-gradient router be meta-learned through short shortcut-training trajectories?",
+      "training_domain": "Random-position shortcut examples with persistent forward model and router.",
+      "evaluation_domain": "Masked and incorrect-hint held-out data after one-, eight-, or 24-step lookahead.",
+      "locations": [
+        "experiments/learned_backward_shortcuts"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/learned_backward_shortcuts/MAML_PROGRESS.md"
+      ],
+      "wandb": [
+        "https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/74p2kcpy",
+        "https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/mwrdb7b6"
+      ],
+      "reproduce": [
+        "python -m list_sorting_transformer.maml_shortcut_experiment --help"
+      ],
+      "summary": "Longer lookahead produced a strong single-seed shortcut result, but the method was less effective and less robust than the evolutionary rule."
+    }
+  ]
+}

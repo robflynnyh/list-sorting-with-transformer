@@ -1,0 +1,104 @@
+[
+  {
+    "label": "generation 20 robust",
+    "checkpoint": "artifacts/learned_backward_shortcuts/attention-router-random-list-h160-p64-s021-outer0007-heldout-resume10-seed7/checkpoint_000020.pt",
+    "generation": 20,
+    "candidate_index": 41,
+    "roles": {
+      "hint": 0.9244552850723267,
+      "leak marker": 0.9999995231628418,
+      "separator": 0.1838674545288086,
+      "pointer": 0.7688605189323425,
+      "pointer value": 0.9216599464416504,
+      "target value": 0.9260113835334778,
+      "query self": 0.11099325120449066,
+      "all query sources": 0.8522595167160034
+    },
+    "position_matched_roles": {
+      "hint": 0.9250709414482117,
+      "leak marker": 0.9232490658760071,
+      "pointer": 0.8837903738021851,
+      "pointer value": 0.9413864016532898,
+      "target value": 0.9260258674621582
+    },
+    "structure": {
+      "gate mean": 0.39112576842308044,
+      "gate std": 0.40320301055908203,
+      "gate p10": 0.006784459576010704,
+      "gate p50": 0.19452500343322754,
+      "gate p90": 0.9999999403953552,
+      "position profile std": 0.2938151955604553,
+      "input-conditioned rms": 0.27612555027008057,
+      "per-example mean std": 0.11454952508211136,
+      "final-query source std": 0.33777743577957153
+    }
+  },
+  {
+    "label": "generation 30 robust",
+    "checkpoint": "artifacts/learned_backward_shortcuts/attention-router-random-list-h160-p64-s021-outer0007-candidate-heldout-resume20-seed7/checkpoint_000030.pt",
+    "generation": 30,
+    "candidate_index": 23,
+    "roles": {
+      "hint": 0.8836393356323242,
+      "leak marker": 0.8686032891273499,
+      "separator": 0.4099298417568207,
+      "pointer": 0.9122623205184937,
+      "pointer value": 0.8740039467811584,
+      "target value": 0.8640663027763367,
+      "query self": 0.1675116866827011,
+      "all query sources": 0.8137022256851196
+    },
+    "position_matched_roles": {
+      "hint": 0.8808660507202148,
+      "leak marker": 0.8510695695877075,
+      "pointer": 0.8356804847717285,
+      "pointer value": 0.8698947429656982,
+      "target value": 0.8616424202919006
+    },
+    "structure": {
+      "gate mean": 0.6036118268966675,
+      "gate std": 0.4135703444480896,
+      "gate p10": 0.014953596517443657,
+      "gate p50": 0.8388532400131226,
+      "gate p90": 0.9999346733093262,
+      "position profile std": 0.39305269718170166,
+      "input-conditioned rms": 0.1286468356847763,
+      "per-example mean std": 0.023869473487138748,
+      "final-query source std": 0.2855280637741089
+    }
+  },
+  {
+    "label": "generation 40 robust",
+    "checkpoint": "artifacts/learned_backward_shortcuts/attention-router-random-list-h160-p64-s021-outer0007-candidate-heldout-resume20-seed7/checkpoint_000040.pt",
+    "generation": 40,
+    "candidate_index": 36,
+    "roles": {
+      "hint": 0.6185004711151123,
+      "leak marker": 0.6426429152488708,
+      "separator": 0.49417927861213684,
+      "pointer": 0.6755460500717163,
+      "pointer value": 0.6555290222167969,
+      "target value": 0.6244555711746216,
+      "query self": 0.6707204580307007,
+      "all query sources": 0.6449562311172485
+    },
+    "position_matched_roles": {
+      "hint": 0.6340481638908386,
+      "leak marker": 0.6469146013259888,
+      "pointer": 0.6800171136856079,
+      "pointer value": 0.6628305315971375,
+      "target value": 0.6277118921279907
+    },
+    "structure": {
+      "gate mean": 0.8012056946754456,
+      "gate std": 0.2667335271835327,
+      "gate p10": 0.36047929525375366,
+      "gate p50": 0.9334832429885864,
+      "gate p90": 0.9991878867149353,
+      "position profile std": 0.25371620059013367,
+      "input-conditioned rms": 0.08230962604284286,
+      "per-example mean std": 0.00867160502821207,
+      "final-query source std": 0.2419450879096985
+    }
+  }
+]

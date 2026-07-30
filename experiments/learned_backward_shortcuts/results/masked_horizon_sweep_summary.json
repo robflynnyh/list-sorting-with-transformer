@@ -1,0 +1,47 @@
+{
+  "horizons": {
+    "1280": {
+      "mean/clean_loss": 0.2589943887593108,
+      "mean/correct_leak_accuracy": 0.9828125,
+      "mean/incorrect_accuracy": 0.929296875,
+      "mean/masked_accuracy": 0.9802734375,
+      "mean/min_mode_accuracy": 0.928125
+    },
+    "160": {
+      "mean/clean_loss": 2.114243509620428,
+      "mean/correct_leak_accuracy": 0.392578125,
+      "mean/incorrect_accuracy": 0.2302734375,
+      "mean/masked_accuracy": 0.24609375,
+      "mean/min_mode_accuracy": 0.223046875
+    },
+    "2000": {
+      "mean/clean_loss": 0.2064939766743919,
+      "mean/correct_leak_accuracy": 1.0,
+      "mean/incorrect_accuracy": 0.9494140625,
+      "mean/masked_accuracy": 1.0,
+      "mean/min_mode_accuracy": 0.9494140625
+    },
+    "3000": {
+      "mean/clean_loss": 0.2216030928379041,
+      "mean/correct_leak_accuracy": 1.0,
+      "mean/incorrect_accuracy": 0.95078125,
+      "mean/masked_accuracy": 1.0,
+      "mean/min_mode_accuracy": 0.95078125
+    },
+    "320": {
+      "mean/clean_loss": 0.23310582202393562,
+      "mean/correct_leak_accuracy": 1.0,
+      "mean/incorrect_accuracy": 0.94296875,
+      "mean/masked_accuracy": 0.99921875,
+      "mean/min_mode_accuracy": 0.94296875
+    },
+    "640": {
+      "mean/clean_loss": 0.18330866238102317,
+      "mean/correct_leak_accuracy": 1.0,
+      "mean/incorrect_accuracy": 0.9435546875,
+      "mean/masked_accuracy": 1.0,
+      "mean/min_mode_accuracy": 0.9435546875
+    }
+  },
+  "replicates": 20
+}

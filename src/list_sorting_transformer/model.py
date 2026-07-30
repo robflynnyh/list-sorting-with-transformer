@@ -14,6 +14,476 @@ from .tokens import EOS, PAD, VALUE_OFFSET
 KeyValueCache = tuple[Tensor, Tensor]
 
 
+class _RoutedAttentionBackward(torch.autograd.Function):
+    """Keep the normal forward output but use routed attention in backward."""
+
+    @staticmethod
+    def forward(
+        ctx: object,
+        attended: Tensor,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        routed_weights: Tensor,
+    ) -> Tensor:
+        ctx.save_for_backward(query, key, value, routed_weights)
+        return attended
+
+    @staticmethod
+    def backward(
+        ctx: object,
+        output_gradient: Tensor,
+    ) -> tuple[
+        None,
+        Tensor,
+        Tensor,
+        Tensor,
+        None,
+        None,
+        None,
+    ]:
+        query, key, value, routed_weights = ctx.saved_tensors
+        scale = query.shape[-1] ** -0.5
+
+        value_gradient = routed_weights.transpose(-2, -1) @ output_gradient
+        weight_gradient = output_gradient @ value.transpose(-2, -1)
+        score_gradient = routed_weights * (
+            weight_gradient
+            - (weight_gradient * routed_weights).sum(dim=-1, keepdim=True)
+        )
+        query_gradient = (score_gradient @ key) * scale
+        key_gradient = (
+            score_gradient.transpose(-2, -1) @ query
+        ) * scale
+        return (
+            None,
+            query_gradient,
+            key_gradient,
+            value_gradient,
+            None,
+        )
+
+
+class _SourceReversedAttentionBackward(torch.autograd.Function):
+    """Keep attention forward exact while reversing selected source credit."""
+
+    @staticmethod
+    def forward(
+        ctx: object,
+        attended: Tensor,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        weights: Tensor,
+        source_multipliers: Tensor,
+        reverse_score_credit: bool,
+        reverse_value_credit: bool,
+        attention_penalty_strength: float,
+    ) -> Tensor:
+        ctx.reverse_score_credit = reverse_score_credit
+        ctx.reverse_value_credit = reverse_value_credit
+        ctx.attention_penalty_strength = attention_penalty_strength
+        ctx.save_for_backward(
+            query,
+            key,
+            value,
+            weights,
+            source_multipliers,
+        )
+        return attended
+
+    @staticmethod
+    def backward(
+        ctx: object,
+        output_gradient: Tensor,
+    ) -> tuple[
+        None,
+        Tensor,
+        Tensor,
+        Tensor,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]:
+        (
+            query,
+            key,
+            value,
+            weights,
+            source_multipliers,
+        ) = ctx.saved_tensors
+        scale = query.shape[-1] ** -0.5
+        edge_multipliers = source_multipliers[:, None, None, :]
+
+        value_gradient = (
+            (weights * edge_multipliers)
+            if ctx.reverse_value_credit
+            else weights
+        ).transpose(-2, -1) @ output_gradient
+        weight_gradient = output_gradient @ value.transpose(-2, -1)
+        if ctx.reverse_score_credit:
+            weight_gradient = weight_gradient * edge_multipliers
+        score_gradient = weights * (
+            weight_gradient
+            - (weight_gradient * weights).sum(dim=-1, keepdim=True)
+        )
+        if ctx.attention_penalty_strength:
+            selected_sources = source_multipliers.lt(0).to(weights.dtype)
+            penalty_weight_gradient = (
+                selected_sources[:, None, None, :]
+                * ctx.attention_penalty_strength
+                / (
+                    weights.shape[0]
+                    * weights.shape[1]
+                    * weights.shape[2]
+                )
+            )
+            score_gradient = score_gradient + weights * (
+                penalty_weight_gradient
+                - (
+                    penalty_weight_gradient * weights
+                ).sum(dim=-1, keepdim=True)
+            )
+        query_gradient = (score_gradient @ key) * scale
+        key_gradient = (
+            score_gradient.transpose(-2, -1) @ query
+        ) * scale
+        return (
+            None,
+            query_gradient,
+            key_gradient,
+            value_gradient,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+
+
+class _RoutedLinearBackward(torch.autograd.Function):
+    """Keep a linear forward exact while changing its parameter credit."""
+
+    @staticmethod
+    def forward(
+        ctx: object,
+        input: Tensor,
+        routed_input: Tensor,
+        weight: Tensor,
+        bias: Tensor | None,
+    ) -> Tensor:
+        ctx.has_bias = bias is not None
+        ctx.save_for_backward(routed_input, weight)
+        return F.linear(input, weight, bias)
+
+    @staticmethod
+    def backward(
+        ctx: object,
+        output_gradient: Tensor,
+    ) -> tuple[Tensor, None, Tensor, Tensor | None]:
+        routed_input, weight = ctx.saved_tensors
+        input_gradient = output_gradient @ weight
+        flattened_output = output_gradient.reshape(
+            -1, output_gradient.shape[-1]
+        )
+        flattened_input = routed_input.reshape(-1, routed_input.shape[-1])
+        weight_gradient = flattened_output.T @ flattened_input
+        bias_gradient = (
+            flattened_output.sum(dim=0) if ctx.has_bias else None
+        )
+        return input_gradient, None, weight_gradient, bias_gradient
+
+
+def _attention_weights(
+    query: Tensor,
+    key: Tensor,
+    *,
+    attention_mask: Tensor | None,
+    is_causal: bool,
+) -> Tensor:
+    scores = query @ key.transpose(-2, -1) / query.shape[-1] ** 0.5
+    if is_causal:
+        query_length = query.shape[-2]
+        key_length = key.shape[-2]
+        causal_mask = torch.ones(
+            query_length,
+            key_length,
+            dtype=torch.bool,
+            device=query.device,
+        ).tril(diagonal=key_length - query_length)
+        scores = scores.masked_fill(~causal_mask, float("-inf"))
+    if attention_mask is not None:
+        scores = scores.masked_fill(~attention_mask, float("-inf"))
+
+    return scores.softmax(dim=-1)
+
+
+def _routed_attention_weights(
+    query: Tensor,
+    key: Tensor,
+    *,
+    backward_gate: Tensor,
+    attention_mask: Tensor | None,
+    is_causal: bool,
+) -> Tensor:
+    weights = _attention_weights(
+        query,
+        key,
+        attention_mask=attention_mask,
+        is_causal=is_causal,
+    )
+    routed_weights = weights * backward_gate.to(
+        device=weights.device,
+        dtype=weights.dtype,
+    )
+    return routed_weights / routed_weights.sum(
+        dim=-1,
+        keepdim=True,
+    ).clamp_min(torch.finfo(routed_weights.dtype).tiny)
+
+
+def routed_scaled_dot_product_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    *,
+    backward_gate: Tensor,
+    attention_mask: Tensor | None = None,
+    is_causal: bool = False,
+    manual_attention: bool = False,
+) -> tuple[Tensor, Tensor]:
+    """Run normal attention forward with a suppress-only backward routing map."""
+
+    if backward_gate.shape != (
+        query.shape[0],
+        query.shape[1],
+        query.shape[-2],
+        key.shape[-2],
+    ):
+        raise ValueError("backward gate must match the attention map")
+    weights = _attention_weights(
+        query,
+        key,
+        attention_mask=attention_mask,
+        is_causal=is_causal,
+    )
+    attended = (
+        weights @ value
+        if manual_attention
+        else F.scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=attention_mask,
+            dropout_p=0.0,
+            is_causal=is_causal,
+        )
+    )
+    routed_weights = weights * backward_gate.to(
+        device=weights.device,
+        dtype=weights.dtype,
+    )
+    routed_weights = routed_weights / routed_weights.sum(
+        dim=-1,
+        keepdim=True,
+    ).clamp_min(torch.finfo(routed_weights.dtype).tiny)
+    routed_surrogate = routed_weights @ value
+    routed = (
+        attended.detach()
+        + (routed_surrogate - routed_surrogate.detach())
+    )
+    manually_routed_attended = (
+        routed_weights.detach() @ value.detach()
+    )
+    routed_attended = torch.where(
+        backward_gate.eq(1).all(),
+        attended.detach(),
+        manually_routed_attended,
+    )
+    return routed, routed_attended
+
+
+def signed_routed_scaled_dot_product_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    *,
+    backward_multipliers: Tensor,
+    attention_mask: Tensor | None = None,
+    is_causal: bool = False,
+    manual_attention: bool = False,
+) -> tuple[Tensor, Tensor]:
+    """Run exact attention forward with signed per-edge backward credit."""
+
+    if backward_multipliers.shape != (
+        query.shape[0],
+        query.shape[1],
+        query.shape[-2],
+        key.shape[-2],
+    ):
+        raise ValueError("backward multipliers must match the attention map")
+    weights = _attention_weights(
+        query,
+        key,
+        attention_mask=attention_mask,
+        is_causal=is_causal,
+    )
+    attended = (
+        weights @ value
+        if manual_attention
+        else F.scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=attention_mask,
+            dropout_p=0.0,
+            is_causal=is_causal,
+        )
+    )
+    multipliers = backward_multipliers.to(
+        device=weights.device,
+        dtype=weights.dtype,
+    )
+    score_surrogate = (weights * multipliers) @ value.detach()
+    value_surrogate = (weights.detach() * multipliers) @ value
+    backward_surrogate = score_surrogate + value_surrogate
+    routed = (
+        attended.detach()
+        + (backward_surrogate - backward_surrogate.detach())
+    )
+    routed_attended = (
+        weights.detach() * multipliers
+    ) @ value.detach()
+    return routed, routed_attended
+
+
+def source_reversed_scaled_dot_product_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    *,
+    source_multipliers: Tensor,
+    reverse_score_credit: bool = True,
+    reverse_value_credit: bool = True,
+    attention_penalty_strength: float = 0.0,
+    attention_mask: Tensor | None = None,
+    is_causal: bool = False,
+) -> tuple[Tensor, Tensor]:
+    """Run exact attention forward with per-source backward multipliers."""
+
+    expected_shape = (query.shape[0], key.shape[-2])
+    if source_multipliers.shape != expected_shape:
+        raise ValueError(
+            "source multipliers must have shape [batch, key_time]"
+        )
+    if attention_penalty_strength < 0:
+        raise ValueError("attention penalty strength must be nonnegative")
+
+    attended = F.scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attention_mask,
+        dropout_p=0.0,
+        is_causal=is_causal,
+    )
+    scores = query.detach() @ key.detach().transpose(
+        -2, -1
+    ) / query.shape[-1] ** 0.5
+    if is_causal:
+        query_length = query.shape[-2]
+        key_length = key.shape[-2]
+        causal_mask = torch.ones(
+            query_length,
+            key_length,
+            dtype=torch.bool,
+            device=query.device,
+        ).tril(diagonal=key_length - query_length)
+        scores = scores.masked_fill(~causal_mask, float("-inf"))
+    if attention_mask is not None:
+        scores = scores.masked_fill(~attention_mask, float("-inf"))
+    weights = scores.softmax(dim=-1)
+    multipliers = source_multipliers.detach().to(
+        device=weights.device,
+        dtype=weights.dtype,
+    )
+    if (
+        reverse_score_credit
+        and not reverse_value_credit
+        and attention_penalty_strength == 0
+    ):
+        live_scores = query @ key.transpose(
+            -2,
+            -1,
+        ) / query.shape[-1] ** 0.5
+        if is_causal:
+            query_length = query.shape[-2]
+            key_length = key.shape[-2]
+            causal_mask = torch.ones(
+                query_length,
+                key_length,
+                dtype=torch.bool,
+                device=query.device,
+            ).tril(diagonal=key_length - query_length)
+            live_scores = live_scores.masked_fill(
+                ~causal_mask,
+                float("-inf"),
+            )
+        if attention_mask is not None:
+            live_scores = live_scores.masked_fill(
+                ~attention_mask,
+                float("-inf"),
+            )
+        live_weights = live_scores.softmax(dim=-1)
+        edge_multipliers = multipliers[:, None, None, :]
+        routed_weights = (
+            live_weights * edge_multipliers
+            + live_weights.detach() * (1 - edge_multipliers)
+        )
+        routed_attention = routed_weights @ value
+        reversed_attended = routed_attention + (
+            attended - routed_attention
+        ).detach()
+        return reversed_attended, live_weights.detach() @ value.detach()
+    backward_attended = (
+        (
+            weights * multipliers[:, None, None, :]
+            if reverse_value_credit
+            else weights
+        )
+        @ value.detach()
+    )
+    reversed_attended = _SourceReversedAttentionBackward.apply(
+        attended.detach(),
+        query,
+        key,
+        value,
+        weights,
+        multipliers,
+        reverse_score_credit,
+        reverse_value_credit,
+        attention_penalty_strength,
+    )
+    return reversed_attended, backward_attended
+
+
+def routed_linear(
+    input: Tensor,
+    routed_input: Tensor,
+    layer: nn.Linear,
+) -> Tensor:
+    """Use routed activations only for a linear layer's parameter gradient."""
+
+    return _RoutedLinearBackward.apply(
+        input,
+        routed_input.detach(),
+        layer.weight,
+        layer.bias,
+    )
+
+
 @dataclass(frozen=True)
 class ModelConfig:
     vocab_size: int
@@ -92,6 +562,71 @@ class RotaryEmbedding(nn.Module):
         return rotated.flatten(start_dim=-2)
 
 
+def sample_top_k_indices(
+    scores: Tensor,
+    top_k: int,
+    *,
+    share_antithetic_pairs: bool = False,
+) -> Tensor:
+    """Sample distinct indices without replacement from softmax scores."""
+
+    if not 1 <= top_k <= scores.shape[-1]:
+        raise ValueError("top_k must fit within the score dimension")
+    if share_antithetic_pairs and scores.shape[0] % 2:
+        raise ValueError("antithetic sampling requires an even population")
+
+    with torch.no_grad():
+        if top_k == 1:
+            cumulative = torch.softmax(
+                scores,
+                dim=-1,
+                dtype=torch.float32,
+            ).cumsum_(dim=-1)
+            cumulative[..., -1] = 1.0
+            random_shape = (*scores.shape[:-1], 1)
+            if share_antithetic_pairs:
+                pair_count = scores.shape[0] // 2
+                uniforms = torch.rand(
+                    (pair_count, *scores.shape[1:-1], 1),
+                    device=scores.device,
+                )
+                positive = cumulative[:pair_count].lt(uniforms).sum(
+                    dim=-1,
+                    keepdim=True,
+                )
+                negative = cumulative[pair_count:].lt(uniforms).sum(
+                    dim=-1,
+                    keepdim=True,
+                )
+                return torch.cat((positive, negative), dim=0)
+            uniforms = torch.rand(random_shape, device=scores.device)
+            return cumulative.lt(uniforms).sum(dim=-1, keepdim=True)
+
+        sampling_dtype = (
+            torch.float32
+            if scores.dtype == torch.float32
+            else torch.float16
+        )
+        random_shape = scores.shape
+        if share_antithetic_pairs:
+            random_shape = (scores.shape[0] // 2, *scores.shape[1:])
+        epsilon = torch.finfo(sampling_dtype).eps
+        gumbel = torch.rand(
+            random_shape,
+            device=scores.device,
+            dtype=sampling_dtype,
+        ).clamp_(min=epsilon, max=1 - epsilon)
+        gumbel.log_().neg_().log_().neg_()
+        perturbed = scores.to(dtype=sampling_dtype).clone()
+        if share_antithetic_pairs:
+            pair_count = scores.shape[0] // 2
+            perturbed[:pair_count].add_(gumbel)
+            perturbed[pair_count:].add_(gumbel)
+        else:
+            perturbed.add_(gumbel)
+        return perturbed.topk(top_k, dim=-1).indices
+
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, config: ModelConfig, *, use_rotary: bool) -> None:
         super().__init__()
@@ -109,19 +644,68 @@ class CausalSelfAttention(nn.Module):
         )
         self.top_k: int | None = None
         self.top_k_straight_through = False
+        self.sample_top_k = False
+        self.manual_attention = False
+        self.active_head_indices = tuple(range(self.n_heads))
 
     def configure_top_k(
         self,
         top_k: int | None,
         *,
         straight_through: bool = False,
+        sample: bool = False,
     ) -> None:
         if top_k is not None and top_k < 1:
             raise ValueError("top_k must be positive")
         if straight_through and top_k is None:
             raise ValueError("straight-through attention requires top_k")
+        if sample and top_k is None:
+            raise ValueError("sampled attention requires top_k")
         self.top_k = top_k
         self.top_k_straight_through = straight_through
+        self.sample_top_k = sample
+
+    def configure_active_heads(self, active_heads: int) -> None:
+        if not 1 <= active_heads <= self.n_heads:
+            raise ValueError(
+                f"active_heads must be in [1, {self.n_heads}]"
+            )
+        self.configure_active_head_indices(tuple(range(active_heads)))
+
+    def configure_active_head_indices(
+        self,
+        active_head_indices: tuple[int, ...],
+    ) -> None:
+        if not active_head_indices:
+            raise ValueError("at least one attention head must remain active")
+        if len(set(active_head_indices)) != len(active_head_indices):
+            raise ValueError("active attention heads must be unique")
+        if any(
+            not 0 <= head_index < self.n_heads
+            for head_index in active_head_indices
+        ):
+            raise ValueError("active attention head index is out of range")
+        self.active_head_indices = tuple(sorted(active_head_indices))
+
+    @property
+    def active_heads(self) -> int:
+        return len(self.active_head_indices)
+
+    def _mask_inactive_heads(self, attended: Tensor) -> Tensor:
+        if self.active_heads == self.n_heads:
+            return attended
+        head_indices = torch.arange(
+            self.n_heads,
+            device=attended.device,
+        )
+        mask = torch.zeros(
+            self.n_heads,
+            dtype=torch.bool,
+            device=attended.device,
+        )
+        for active_head_index in self.active_head_indices:
+            mask |= head_indices == active_head_index
+        return attended * mask.view(1, self.n_heads, 1, 1)
 
     def _top_k_attention(
         self,
@@ -146,15 +730,16 @@ class CausalSelfAttention(nn.Module):
         if attention_mask is not None:
             scores = scores.masked_fill(~attention_mask, float("-inf"))
 
-        soft_weights = scores.softmax(dim=-1)
-        selected = scores.topk(
-            min(self.top_k or key_length, key_length),
-            dim=-1,
-        ).indices
+        selected_count = min(self.top_k or key_length, key_length)
+        if self.sample_top_k and self.training:
+            selected = sample_top_k_indices(scores, selected_count)
+        else:
+            selected = scores.topk(selected_count, dim=-1).indices
         hard_scores = torch.full_like(scores, float("-inf"))
         hard_scores.scatter_(-1, selected, scores.gather(-1, selected))
         hard_weights = hard_scores.softmax(dim=-1)
         if self.top_k_straight_through and self.training:
+            soft_weights = scores.softmax(dim=-1)
             weights = soft_weights + (hard_weights - soft_weights).detach()
         else:
             weights = hard_weights
@@ -211,10 +796,33 @@ class CausalSelfAttention(nn.Module):
         *,
         cache: KeyValueCache | None = None,
         attention_mask: Tensor | None = None,
+        backward_attention_gate: Tensor | None = None,
+        signed_backward_attention: bool = False,
+        backward_source_multipliers: Tensor | None = None,
+        reverse_source_score_credit: bool = True,
+        reverse_source_value_credit: bool = True,
+        source_attention_penalty_strength: float = 0.0,
+        route_source_output_projection: bool = True,
+        route_output_projection: bool = False,
     ) -> tuple[Tensor, KeyValueCache]:
         batch_size, sequence_length, model_dim = hidden.shape
         if cache is not None and attention_mask is not None:
             raise ValueError("custom attention masks are not supported with a cache")
+        if cache is not None and backward_attention_gate is not None:
+            raise ValueError("backward attention routing is not cacheable")
+        if cache is not None and backward_source_multipliers is not None:
+            raise ValueError("source-gradient reversal is not cacheable")
+        if (
+            backward_attention_gate is not None
+            and backward_source_multipliers is not None
+        ):
+            raise ValueError(
+                "attention routing and source-gradient reversal are exclusive"
+            )
+        if signed_backward_attention and backward_attention_gate is None:
+            raise ValueError(
+                "signed backward attention requires an attention gate"
+            )
         query, key, value = self.qkv(hidden).chunk(3, dim=-1)
         query = self._split_heads(query)
         key = self._split_heads(key)
@@ -256,16 +864,89 @@ class CausalSelfAttention(nn.Module):
                 dtype=torch.bool,
             ).tril()
             combined_mask = combined_mask.to(device=hidden.device) & causal_mask
-        if self.top_k is None:
-            attended = F.scaled_dot_product_attention(
-                query,
-                key,
-                value,
-                attn_mask=combined_mask,
-                dropout_p=self.dropout if self.training else 0.0,
-                is_causal=cache is None and combined_mask is None,
+        if backward_attention_gate is not None:
+            if self.top_k is not None:
+                raise ValueError(
+                    "backward attention routing does not support top-k attention"
+                )
+            if self.dropout and self.training:
+                raise ValueError(
+                    "backward attention routing requires zero attention dropout"
+                )
+            if signed_backward_attention:
+                attended, routed_attended = (
+                    signed_routed_scaled_dot_product_attention(
+                        query,
+                        key,
+                        value,
+                        backward_multipliers=backward_attention_gate,
+                        attention_mask=combined_mask,
+                        is_causal=combined_mask is None,
+                        manual_attention=self.manual_attention,
+                    )
+                )
+            else:
+                attended, routed_attended = (
+                    routed_scaled_dot_product_attention(
+                        query,
+                        key,
+                        value,
+                        backward_gate=backward_attention_gate,
+                        attention_mask=combined_mask,
+                        is_causal=combined_mask is None,
+                        manual_attention=self.manual_attention,
+                    )
+                )
+        elif backward_source_multipliers is not None:
+            if self.top_k is not None:
+                raise ValueError(
+                    "source-gradient reversal does not support top-k attention"
+                )
+            if self.dropout and self.training:
+                raise ValueError(
+                    "source-gradient reversal requires zero attention dropout"
+                )
+            attended, routed_attended = (
+                source_reversed_scaled_dot_product_attention(
+                    query,
+                    key,
+                    value,
+                    source_multipliers=backward_source_multipliers,
+                    reverse_score_credit=reverse_source_score_credit,
+                    reverse_value_credit=reverse_source_value_credit,
+                    attention_penalty_strength=(
+                        source_attention_penalty_strength
+                    ),
+                    attention_mask=combined_mask,
+                    is_causal=combined_mask is None,
+                )
             )
+        elif self.top_k is None:
+            routed_attended = None
+            if self.manual_attention:
+                weights = _attention_weights(
+                    query,
+                    key,
+                    attention_mask=combined_mask,
+                    is_causal=cache is None and combined_mask is None,
+                )
+                weights = F.dropout(
+                    weights,
+                    p=self.dropout,
+                    training=self.training,
+                )
+                attended = weights @ value
+            else:
+                attended = F.scaled_dot_product_attention(
+                    query,
+                    key,
+                    value,
+                    attn_mask=combined_mask,
+                    dropout_p=self.dropout if self.training else 0.0,
+                    is_causal=cache is None and combined_mask is None,
+                )
         else:
+            routed_attended = None
             attended = self._top_k_attention(
                 query,
                 key,
@@ -273,22 +954,68 @@ class CausalSelfAttention(nn.Module):
                 attention_mask=combined_mask,
                 is_causal=cache is None and combined_mask is None,
             )
+        attended = self._mask_inactive_heads(attended)
+        if routed_attended is not None:
+            routed_attended = self._mask_inactive_heads(routed_attended)
         attended = attended.transpose(1, 2).contiguous().view(
             batch_size,
             sequence_length,
             model_dim,
         )
-        return self.output(attended), (key, value)
+        if (
+            route_output_projection
+            or (
+                backward_source_multipliers is not None
+                and route_source_output_projection
+            )
+        ):
+            if routed_attended is None:
+                raise ValueError(
+                    "output-projection routing requires backward routing"
+                )
+            routed_attended = routed_attended.transpose(
+                1, 2
+            ).contiguous().view(
+                batch_size,
+                sequence_length,
+                model_dim,
+            )
+            projected = routed_linear(
+                attended,
+                routed_attended,
+                self.output,
+            )
+        else:
+            projected = self.output(attended)
+        return projected, (key, value)
 
     def forward(
         self,
         hidden: Tensor,
         *,
         attention_mask: Tensor | None = None,
+        backward_attention_gate: Tensor | None = None,
+        signed_backward_attention: bool = False,
+        backward_source_multipliers: Tensor | None = None,
+        reverse_source_score_credit: bool = True,
+        reverse_source_value_credit: bool = True,
+        source_attention_penalty_strength: float = 0.0,
+        route_source_output_projection: bool = True,
+        route_output_projection: bool = False,
     ) -> Tensor:
         attended, _ = self.forward_with_cache(
             hidden,
             attention_mask=attention_mask,
+            backward_attention_gate=backward_attention_gate,
+            signed_backward_attention=signed_backward_attention,
+            backward_source_multipliers=backward_source_multipliers,
+            reverse_source_score_credit=reverse_source_score_credit,
+            reverse_source_value_credit=reverse_source_value_credit,
+            source_attention_penalty_strength=(
+                source_attention_penalty_strength
+            ),
+            route_source_output_projection=route_source_output_projection,
+            route_output_projection=route_output_projection,
         )
         return attended
 
@@ -320,11 +1047,29 @@ class TransformerBlock(nn.Module):
         hidden: Tensor,
         *,
         attention_mask: Tensor | None = None,
+        backward_attention_gate: Tensor | None = None,
+        signed_backward_attention: bool = False,
+        backward_source_multipliers: Tensor | None = None,
+        reverse_source_score_credit: bool = True,
+        reverse_source_value_credit: bool = True,
+        source_attention_penalty_strength: float = 0.0,
+        route_source_output_projection: bool = True,
+        route_output_projection: bool = False,
     ) -> Tensor:
         hidden = hidden + self.dropout(
             self.attention(
                 self.attention_norm(hidden),
                 attention_mask=attention_mask,
+                backward_attention_gate=backward_attention_gate,
+                signed_backward_attention=signed_backward_attention,
+                backward_source_multipliers=backward_source_multipliers,
+                reverse_source_score_credit=reverse_source_score_credit,
+                reverse_source_value_credit=reverse_source_value_credit,
+                source_attention_penalty_strength=(
+                    source_attention_penalty_strength
+                ),
+                route_source_output_projection=route_source_output_projection,
+                route_output_projection=route_output_projection,
             )
         )
         hidden = hidden + self.dropout(self.ffn(self.ffn_norm(hidden)))

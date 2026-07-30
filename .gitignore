@@ -4,5 +4,5 @@ __pycache__/
 .scratch/
 wandb/
 *.egg-info/
-artifacts/**/*.pt
-artifacts/**/run.log
+artifacts/
+experiments/language_model_transfer/results/*.png

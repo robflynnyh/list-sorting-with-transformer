@@ -1,0 +1,25 @@
+{
+  "generation": 71,
+  "horizon": 3600,
+  "population_size": 64,
+  "selected_candidate_index": 45,
+  "selected_trajectory": {
+    "center_worst_checkpoint_mode_loss": 0.48785971850156784,
+    "proposal_worst_checkpoint_mode_loss": 0.4212389662861824,
+    "center_final_min_mode_accuracy": 0.953125,
+    "proposal_final_min_mode_accuracy": 0.95703125,
+    "fitness_delta": 0.06662075221538544
+  },
+  "independent_acceptance_deltas": [
+    0.006650209426879883,
+    -0.028395026922225952,
+    -0.008289717137813568
+  ],
+  "independent_acceptance_mean_delta": -0.010011511544386545,
+  "logged_decision_included_ranking_trajectory": "accepted",
+  "corrected_independent_only_decision": "rejected",
+  "corrected_next_sigma": 0.0065625,
+  "candidate_fixed_to_heldout_correlation": 0.9917493462562561,
+  "generation_seconds": 3427.142926299013,
+  "wandb_run": "https://wandb.ai/wobrob101/list-sorting-learned-backward/runs/wr74mcwg"
+}

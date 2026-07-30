@@ -1,0 +1,16 @@
+{
+  "comparison/center_accuracy_win_fraction": 0.1,
+  "comparison/center_loss_win_fraction": 0.25,
+  "mean/center_rule/clean_loss": 3.3253706607967617,
+  "mean/center_rule/correct_leak_accuracy": 0.969921875,
+  "mean/center_rule/min_mode_accuracy": 0.01796875,
+  "mean/comparison/center_clean_loss_improvement_over_ordinary": -0.28006375916302206,
+  "mean/comparison/center_minus_ordinary_min_accuracy": -0.0376953125,
+  "mean/masked_training/clean_loss": 2.059197642840445,
+  "mean/masked_training/correct_leak_accuracy": 0.43515625,
+  "mean/masked_training/min_mode_accuracy": 0.24765625,
+  "mean/ordinary_rule/clean_loss": 3.0453069016337393,
+  "mean/ordinary_rule/correct_leak_accuracy": 0.953125,
+  "mean/ordinary_rule/min_mode_accuracy": 0.0556640625,
+  "replicates": 20.0
+}

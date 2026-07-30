@@ -1,0 +1,49 @@
+{
+  "dense_no_entropy": {
+    "horizon_80": [
+      {
+        "generation": 6,
+        "oracle_reverse_probability": 0.42185044288635254,
+        "other_reverse_probability": 0.3567347228527069,
+        "reward_oracle_selection_correlation": -0.5140411257743835,
+        "reward_other_selection_correlation": -0.05426248535513878,
+        "reward_standard_deviation": 0.0011362447403371334
+      },
+      {
+        "generation": 7,
+        "oracle_reverse_probability": 0.38603562116622925,
+        "other_reverse_probability": 0.31890299916267395,
+        "reward_oracle_selection_correlation": -0.44294509291648865,
+        "reward_other_selection_correlation": -0.2521234452724457,
+        "reward_standard_deviation": 0.00365604180842638
+      }
+    ],
+    "outcome": "rejected_global_turnoff"
+  },
+  "runtime_benchmark": {
+    "group_size": 16,
+    "horizon": 40,
+    "original_wall_seconds": 49.92,
+    "shared_selector_forward_wall_seconds": 20.57,
+    "speedup": 2.427807486630044
+  },
+  "sparse_initialization": {
+    "initial_reverse_probability": 0.05,
+    "probes": [
+      {
+        "group_size": 64,
+        "horizon": 80,
+        "reward_oracle_selection_correlation": -0.04243352636694908,
+        "reward_other_selection_correlation": -0.09810458868741989,
+        "reward_standard_deviation": 0.0007128000725060701
+      },
+      {
+        "group_size": 64,
+        "horizon": 160,
+        "reward_oracle_selection_correlation": 0.034696318209171295,
+        "reward_other_selection_correlation": -0.10346770286560059,
+        "reward_standard_deviation": 0.0027561557944864035
+      }
+    ]
+  }
+}

@@ -1,7 +1,7 @@
 [project]
-name = "list-sorting-with-transformer"
+name = "length-generalisation-and-shortcut-learning"
 version = "0.1.0"
-description = "A decoder-only Transformer benchmark for sorting digit lists."
+description = "Reproducible experiments in sequence-length generalisation and shortcut-resistant credit assignment."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -33,6 +33,14 @@ sort-compiled-pointer-compare = "list_sorting_transformer.compiled_pointer_compa
 sort-residual-pointer-compare = "list_sorting_transformer.residual_pointer_compare:main"
 sort-rasp-transfer = "list_sorting_transformer.rasp_transfer:main"
 sort-language-model-transfer = "list_sorting_transformer.language_model_transfer:main"
+sort-shortcut-credit = "list_sorting_transformer.shortcut_credit_experiment:main"
+sort-shortcut-credit-plot = "list_sorting_transformer.shortcut_credit_plot:main"
+sort-shortcut-credit-compare-plot = "list_sorting_transformer.shortcut_credit_compare_plot:main"
+sort-shortcut-credit-routing-plot = "list_sorting_transformer.shortcut_credit_routing_plot:main"
+sort-maml-length = "list_sorting_transformer.maml_length_generalization:main"
+sort-hard-attention-eggroll = "list_sorting_transformer.hard_attention_eggroll:main"
+sort-hard-attention-sweep = "list_sorting_transformer.hard_attention_sweep:main"
+sort-sparse-attention-adam = "list_sorting_transformer.sparse_attention_adam:main"
 
 [build-system]
 requires = ["setuptools>=68"]

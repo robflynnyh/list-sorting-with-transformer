@@ -1,0 +1,401 @@
+generation,length,examples,loss,accuracy,current_max_length,attention_top_k,active_heads,active_head_indices,checkpoint
+8000,2,256,9.126553968030748e-05,1.0,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,5,256,3.106395524810068e-05,1.0,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,10,256,0.00023180971356850932,1.0,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,20,256,0.01272436272847699,0.99609375,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,40,256,0.1198047511279583,0.96875,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,80,256,0.3356999568641186,0.92578125,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,100,256,0.7640416175127029,0.8671875,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,200,256,1.3525773733854294,0.7890625,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,400,256,2.565119504928589,0.63671875,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,600,64,2.5065656900405884,0.671875,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,800,64,4.179598569869995,0.46875,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,1000,64,4.16804286709521,0.5,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,1500,64,4.836642116308212,0.40625,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,2000,64,5.217383831739426,0.34375,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,2500,64,6.209669053554535,0.28125,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,3000,64,5.556568197906017,0.328125,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,3500,64,6.543285369873047,0.234375,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,4000,64,4.913325097411871,0.359375,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,4500,64,7.362620949745178,0.1875,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8000,5000,64,6.399536162614822,0.203125,20,1,4,"[[0, 1, 2, 3], [0, 1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-b64-bf16-2gpu-chunk256-trainstreak10-lr3e-1-seed7/checkpoint_008000.pt
+8361,2,256,0.1392697263509035,0.95703125,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,5,256,0.0650916313752532,0.984375,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,10,256,0.0835609557107091,0.9609375,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,20,256,0.10675237607210875,0.94921875,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,40,256,0.12674695439636707,0.953125,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,80,256,0.17588902823626995,0.95703125,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,100,256,0.3818896934390068,0.890625,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,200,256,0.654738262295723,0.828125,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,400,256,1.0418553352355957,0.8125,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,600,64,1.2497941255569458,0.65625,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,800,64,2.2416536808013916,0.59375,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,1000,64,1.7020390629768372,0.671875,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,1500,64,3.023594856262207,0.5,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,2000,64,3.9220970943570137,0.515625,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,2500,64,2.937690645456314,0.609375,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,3000,64,3.125756651163101,0.578125,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,3500,64,3.7315059304237366,0.4375,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,4000,64,4.017810970544815,0.40625,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,4500,64,2.408383978456186,0.515625,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8361,5000,64,4.286281943321228,0.359375,20,1,3,"[[1, 2, 3], [1, 2, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008361.pt
+8589,2,256,0.5350314602255821,0.8828125,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,5,256,0.11184488981962204,0.96875,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,10,256,0.11110525391995907,0.96484375,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,20,256,0.1254089865833521,0.95703125,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,40,256,0.14743111096322536,0.97265625,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,80,256,0.14726315811276436,0.953125,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,100,256,0.18878232687711716,0.94921875,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,200,256,0.2647160105407238,0.9375,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,400,256,0.30066607147455215,0.9296875,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,600,64,0.5732181668281555,0.890625,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,800,64,0.9706215858459473,0.828125,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,1000,64,0.38487500324845314,0.90625,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,1500,64,1.2855964601039886,0.78125,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,2000,64,2.169329345226288,0.640625,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,2500,64,2.1743762493133545,0.640625,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,3000,64,1.769813559949398,0.765625,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,3500,64,2.070384830236435,0.65625,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,4000,64,1.7815222702920437,0.703125,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,4500,64,1.8849490582942963,0.671875,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8589,5000,64,1.6614627689123154,0.6875,20,1,2,"[[1, 2], [1, 3]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008589.pt
+8743,2,256,3.391683280467987,0.40234375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,5,256,1.5810064375400543,0.57421875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,10,256,1.410709261894226,0.57421875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,20,256,1.2776247262954712,0.578125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,40,256,1.2531205415725708,0.60546875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,80,256,1.3190867602825165,0.6015625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,100,256,1.1630166620016098,0.60546875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,200,256,1.3871700167655945,0.58984375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,400,256,1.216172531247139,0.6171875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,600,64,1.7120436429977417,0.53125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,800,64,1.3832547664642334,0.59375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,1000,64,1.7650370597839355,0.53125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,1500,64,1.4646352529525757,0.609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,2000,64,2.9177204817533493,0.328125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,2500,64,2.1038379669189453,0.5,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,3000,64,2.4827436208724976,0.5,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,3500,64,3.1107633113861084,0.328125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,4000,64,2.5728019177913666,0.421875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,4500,64,2.468471586704254,0.453125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+8743,5000,64,2.1212480664253235,0.484375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_008743.pt
+9000,2,256,0.02223676210269332,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,5,256,0.015311070950701833,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,10,256,0.020234929397702217,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,20,256,0.017899513011798263,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,40,256,0.03018340514972806,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,80,256,0.02559837093576789,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,100,256,0.022280071396380663,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,200,256,0.06242873799055815,0.98828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,400,256,0.14251415338367224,0.97265625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,600,64,0.03812164440751076,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,800,64,0.2450326532125473,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,1000,64,0.2276301383972168,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,1500,64,0.6423233151435852,0.90625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,2000,64,0.4432539754488971,0.90625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,2500,64,0.7448852360248566,0.84375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,3000,64,1.0300184488296509,0.828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,3500,64,0.5756143033504486,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,4000,64,0.5675677614635788,0.875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,4500,64,1.0885626072995365,0.796875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+9000,5000,64,0.6775183295831084,0.84375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_009000.pt
+10000,2,256,0.002461229159962386,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,5,256,0.002422449499135837,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,10,256,0.0023596303653903306,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,20,256,0.0015765959105920047,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,40,256,0.013234172365628183,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,80,256,0.0049098607851192355,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,100,256,0.001896658621262759,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,200,256,0.06135052000172436,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,400,256,0.018024812074145302,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,600,64,0.001789370784536004,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,800,64,0.14109814167022705,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,1000,64,0.006763185374438763,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,1500,64,0.4718133807182312,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,2000,64,0.7505840863761932,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,2500,64,0.31254269927740097,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,3000,64,0.823695033788681,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,3500,64,0.3510360554791987,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,4000,64,0.17589811670723066,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,4500,64,0.2844697492546402,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+10000,5000,64,0.40363286808133125,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_010000.pt
+11000,2,256,0.001187399888294749,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,5,256,0.0014423572138184682,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,10,256,0.0012323558621574193,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,20,256,0.0010064555535791442,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,40,256,0.0011753545404644683,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,80,256,0.001154318466433324,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,100,256,0.0010149966547032818,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,200,256,0.028013875271426514,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,400,256,0.0010424568463349715,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,600,64,0.5147348046302795,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,800,64,0.05685596168041229,0.984375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,1000,64,0.2172134667634964,0.984375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,1500,64,0.12259143590927124,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,2000,64,0.5547170731990718,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,2500,64,0.5632318556308746,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,3000,64,0.5835355174203869,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,3500,64,0.3999193385243416,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,4000,64,0.8753832447980585,0.90625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,4500,64,0.5723464637994766,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+11000,5000,64,0.7459883689880371,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_011000.pt
+12000,2,256,0.0006559538014698774,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,5,256,0.0019231949700042605,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,10,256,0.0007692872022744268,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,20,256,0.0005197938153287396,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,40,256,0.0004298937856219709,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,80,256,0.0009391605708515272,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,100,256,0.0008522503921994939,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,200,256,0.0007887527463026345,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,400,256,0.07586308981990442,0.9921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,600,64,0.22733061015605927,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,800,64,0.0012646703980863094,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,1000,64,0.09956724941730499,0.984375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,1500,64,0.39185455441474915,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,2000,64,0.30482554189620714,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,2500,64,0.07614348456263542,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,3000,64,0.8814480602741241,0.90625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,3500,64,0.489973321557045,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,4000,64,0.8601376331453139,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,4500,64,0.6607807502150536,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+12000,5000,64,1.5369416773319244,0.84375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_012000.pt
+13000,2,256,0.0024286784464493394,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,5,256,0.005705451359972358,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,10,256,0.010229775274638087,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,20,256,0.009291908441809937,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,40,256,0.0030658165051136166,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,80,256,0.004790167644387111,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,100,256,0.046406783163547516,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,200,256,0.0015106455830391496,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,400,256,0.14696347777498886,0.984375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,600,64,0.008248166181147099,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,800,64,0.0866522490978241,0.984375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,1000,64,0.011760259047150612,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,1500,64,0.27387741208076477,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,2000,64,0.390845541471208,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,2500,64,0.37821977585554123,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,3000,64,0.9713724553585052,0.90625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,3500,64,0.9753805100917816,0.90625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,4000,64,0.8657111573847942,0.90625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,4500,64,0.9893927723169327,0.90625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+13000,5000,64,1.290222480893135,0.875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_013000.pt
+14000,2,256,0.00021174270659685135,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,5,256,0.00020572300854837522,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,10,256,0.00030912506190361455,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,20,256,0.0003186503890901804,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,40,256,0.00023667185814701952,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,80,256,0.0003263648395659402,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,100,256,0.058659449703554856,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,200,256,0.004098779147170717,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,400,256,0.1310316158560454,0.98828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,600,64,0.16671408712863922,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,800,64,0.35018759965896606,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,1000,64,0.0001883526856545359,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,1500,64,0.43503233790397644,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,2000,64,0.8820646816766384,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,2500,64,0.28159279376268387,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,3000,64,0.7642167210578918,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,3500,64,0.512591227889061,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,4000,64,0.886181740090251,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,4500,64,1.260699063539505,0.875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+14000,5000,64,0.7739549318794161,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_014000.pt
+15000,2,256,0.00011170694870088482,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,5,256,0.00017388358901371248,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,10,256,0.00012332797086855862,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,20,256,0.0001632250023249071,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,40,256,0.0001414243979525054,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,80,256,0.00017902738909469917,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,100,256,0.00020856570699834265,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,200,256,0.14654342632456974,0.98828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,400,256,0.07197930948495923,0.9921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,600,64,0.00010529992869123816,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,800,64,0.42733490467071533,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,1000,64,0.26186174154281616,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,1500,64,0.847807765007019,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,2000,64,1.8446542414949363,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,2500,64,0.7574948817491531,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,3000,64,1.4266006350517273,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,3500,64,1.0905623733997345,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,4000,64,0.178128362500388,0.984375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,4500,64,2.235785126686096,0.84375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+15000,5000,64,1.7436879202723503,0.828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_015000.pt
+16000,2,256,6.881570698169526e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,5,256,5.856938878423534e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,10,256,0.0002009889158216538,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,20,256,0.0005153838083060691,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,40,256,0.00011709426325978711,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,80,256,0.000136755479616113,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,100,256,0.03252074326883303,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,200,256,0.052958831593059585,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,400,256,0.016052275168476626,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,600,64,0.07848723977804184,0.984375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,800,64,0.0005533310468308628,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,1000,64,0.11886165291070938,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,1500,64,0.667974054813385,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,2000,64,1.6592448146141123,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,2500,64,1.6477210521697998,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,3000,64,0.9313759197248146,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,3500,64,0.9135652482509613,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,4000,64,0.48954026587233557,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,4500,64,2.237382233142853,0.828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+16000,5000,64,0.8178850263357162,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_016000.pt
+17000,2,256,8.35461360111367e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,5,256,5.374060947360704e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,10,256,7.821959934517508e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,20,256,5.364417484088335e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,40,256,9.584441795595922e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,80,256,8.052925295487512e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,100,256,6.311068227660144e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,200,256,0.07758450523488136,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,400,256,0.08160618985311885,0.98828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,600,64,0.5763822793960571,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,800,64,0.540790319442749,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,1000,64,0.27735286951065063,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,1500,64,0.5356112122535706,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,2000,64,0.846126962452864,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,2500,64,1.598329871892929,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,3000,64,0.8375804573297501,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,3500,64,1.5691735744476318,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,4000,64,1.747394010424614,0.828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,4500,64,0.8136124014854431,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+17000,5000,64,2.076490953564644,0.828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_017000.pt
+18000,2,256,9.301816862716805e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,5,256,3.772858872252982e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,10,256,7.491109499824233e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,20,256,5.482647793542128e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,40,256,0.00010241937525279354,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,80,256,6.181423941598041e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,100,256,9.306117408414138e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,200,256,0.07441713861408061,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,400,256,0.2690281068862532,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,600,64,0.10465704649686813,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,800,64,0.49967193603515625,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,1000,64,0.36122214794158936,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,1500,64,1.2729789018630981,0.90625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,2000,64,0.5920381117608713,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,2500,64,1.2008104622364044,0.875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,3000,64,2.010765016078949,0.8125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,3500,64,2.5160988569259644,0.78125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,4000,64,1.8253448009490967,0.796875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,4500,64,1.7186903730034828,0.84375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+18000,5000,64,2.6611819565296173,0.765625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_018000.pt
+19000,2,256,0.001140805339673534,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,5,256,0.0017998899129452184,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,10,256,0.00077080748451408,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,20,256,0.0009311752000940032,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,40,256,0.02264686303533381,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,80,256,0.0009805972476897296,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,100,256,0.000263498819549568,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,200,256,0.07776697324334236,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,400,256,0.10941492336860392,0.984375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,600,64,0.48671263456344604,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,800,64,0.2588815987110138,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,1000,64,0.07573068886995316,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,1500,64,0.8048821091651917,0.90625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,2000,64,0.7263414354174529,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,2500,64,1.5736108422279358,0.84375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,3000,64,1.8426475822925568,0.8125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,3500,64,0.8755951821804047,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,4000,64,1.192050501704216,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,4500,64,1.5919972956180573,0.828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+19000,5000,64,1.7096359729766846,0.78125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_019000.pt
+20000,2,256,2.768052218016237e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,5,256,2.1102910068293568e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,10,256,7.62994054639421e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,20,256,4.769637735080323e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,40,256,0.00740792219312425,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,80,256,0.008271104691630171,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,100,256,2.5689980702736648e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,200,256,0.08306153133753469,0.9921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,400,256,0.18107376992702484,0.97265625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,600,64,0.20428818464279175,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,800,64,0.5122987031936646,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,1000,64,0.6323938965797424,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,1500,64,0.5136225819587708,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,2000,64,1.4762853868305044,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,2500,64,0.9365778416395187,0.875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,3000,64,1.8423581719398499,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,3500,64,1.83072167634964,0.828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,4000,64,1.295144446194172,0.84375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,4500,64,1.8721272349357605,0.828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+20000,5000,64,1.8043630421161652,0.796875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_020000.pt
+21000,2,256,2.0031940493936418e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,5,256,1.5206454918370582e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,10,256,4.9323239636578364e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,20,256,1.7015230469041853e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,40,256,0.00026213101136818295,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,80,256,1.5878733393037692e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,100,256,2.1583031866612146e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,200,256,0.04347841629669347,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,400,256,0.08673698273742048,0.98046875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,600,64,0.6357247829437256,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,800,64,2.4106871933327056e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,1000,64,1.0657844543457031,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,1500,64,0.6249780058860779,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,2000,64,1.282077213748849,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,2500,64,1.431717187166214,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,3000,64,1.4537753760814667,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,3500,64,1.9493306875228882,0.84375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,4000,64,2.619854688644409,0.765625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,4500,64,2.839799553155899,0.71875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+21000,5000,64,1.4059801697731018,0.8125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_021000.pt
+22000,2,256,2.616763936202915e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,5,256,2.55450363511045e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,10,256,1.851381921369466e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,20,256,1.34009692374093e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,40,256,2.531602740418748e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,80,256,0.011902065384219895,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,100,256,2.7770230190071743e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,200,256,0.2590308804064989,0.9765625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,400,256,0.2620836367791526,0.98046875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,600,64,0.45409706234931946,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,800,64,0.2795839309692383,0.96875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,1000,64,0.3613298237323761,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,1500,64,0.7590956687927246,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,2000,64,1.8390125557772024,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,2500,64,1.4020822048187256,0.875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,3000,64,1.7497741281986237,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,3500,64,2.522825837135315,0.8125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,4000,64,3.1137247532606125,0.765625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,4500,64,1.188190996646881,0.859375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+22000,5000,64,2.2583304047584534,0.765625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_022000.pt
+23000,2,256,2.2230480681173503e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,5,256,1.166981644473708e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,10,256,1.208919525197416e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,20,256,1.7020575796777848e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,40,256,9.385143471263291e-06,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,80,256,2.4648215003253426e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,100,256,0.0038830411190247105,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,200,256,0.30660153180360794,0.98046875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,400,256,0.1913321401571011,0.984375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,600,64,0.041189078241586685,0.984375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,800,64,0.42736226320266724,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,1000,64,0.5182422995567322,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,1500,64,0.580337405204773,0.953125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,2000,64,1.5934318061915533,0.875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,2500,64,1.0243236869573593,0.921875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,3000,64,2.1376539170742035,0.8125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,3500,64,1.8647930324077606,0.8125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,4000,64,3.017448289319873,0.765625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,4500,64,2.0575131624937057,0.828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+23000,5000,64,2.0931203365325928,0.796875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_023000.pt
+24000,2,256,2.043278709606966e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,5,256,1.2423251178006467e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,10,256,5.1443867278067046e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,20,256,1.8181337964051636e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,40,256,0.011717973725808406,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,80,256,3.039114903913287e-05,1.0,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,100,256,0.013787961991056363,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,200,256,0.034574503350313535,0.99609375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,400,256,0.25943466224180156,0.9765625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,600,64,0.6714913249015808,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,800,64,0.739101767539978,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,1000,64,0.6732321977615356,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,1500,64,1.057250738143921,0.875,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,2000,64,0.9825912266969627,0.9375,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,2500,64,1.4250798225402832,0.890625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,3000,64,1.4395859241485596,0.828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,3500,64,2.016398847103119,0.8125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,4000,64,2.3098285640589893,0.828125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,4500,64,2.479113459587097,0.765625,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
+24000,5000,64,2.01320680975914,0.8125,20,1,1,"[[2], [1]]",artifacts/hard_attention_eggroll/cartesian-p8192-sampled-smartprune-ddpsync-from8k-seed7/checkpoint_024000.pt
