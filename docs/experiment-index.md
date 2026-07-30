@@ -94,7 +94,7 @@ seed replication.
 | Task | Pointer-next with ASEntmax, dense softmax, and positional-head ablations |
 | Train / eval | L2-20 training; recurring evaluations through L2,000 |
 | Result | Eight mixed ALiBi/NoPE heads reached 100% at sampled L2,000 with either entmax or softmax; removing adaptive scaling did not hurt; all-NoPE and all-ALiBi failed OOD |
-| Evidence | [Ablation table](../experiments/sparse_attention_adam/README.md#key-difference-ablation), [W&B project](https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation) |
+| Evidence | [Ablation table](../experiments/sparse_attention_adam/README.md#key-difference-ablation), [machine-readable summary](../experiments/sparse_attention_adam/results/key_difference_ablation_summary.json), [W&B project](https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation) |
 | Reproduce | `bash experiments/sparse_attention_adam/run_key_difference_ablations.sh` |
 
 Sparse normalization has no demonstrated accuracy benefit on this pointer task.

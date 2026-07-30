@@ -205,7 +205,8 @@
       ],
       "artifact_roots": [],
       "evidence": [
-        "experiments/sparse_attention_adam/README.md"
+        "experiments/sparse_attention_adam/README.md",
+        "experiments/sparse_attention_adam/results/key_difference_ablation_summary.json"
       ],
       "wandb": [
         "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation"

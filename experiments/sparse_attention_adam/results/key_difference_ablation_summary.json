@@ -1,0 +1,161 @@
+{
+  "task": "pointer_next",
+  "seed": 4,
+  "step": 5000,
+  "training_lengths": [
+    2,
+    20
+  ],
+  "evaluation_examples": {
+    "2": 512,
+    "5": 512,
+    "10": 512,
+    "20": 512,
+    "40": 512,
+    "100": 512,
+    "400": 512,
+    "1000": 64,
+    "2000": 64
+  },
+  "runs": {
+    "mixed_alibi_nope_entmax_adaptive": {
+      "wandb": "https://wandb.ai/wobrob101/list-sorting-sparse-attention-adam/runs/gtjlqz5k",
+      "input_position_mode": "nape_only",
+      "attention_normalizer": "entmax15",
+      "scaling_mode": "adaptive",
+      "heads": 8,
+      "alibi_heads": 4,
+      "accuracy": {
+        "2": 1.0,
+        "5": 1.0,
+        "10": 1.0,
+        "20": 1.0,
+        "40": 1.0,
+        "100": 1.0,
+        "400": 1.0,
+        "1000": 1.0,
+        "2000": 1.0
+      }
+    },
+    "mixed_alibi_nope_softmax_adaptive": {
+      "wandb": "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation/runs/5iabgr6h",
+      "input_position_mode": "nape_only",
+      "attention_normalizer": "softmax",
+      "scaling_mode": "adaptive",
+      "heads": 8,
+      "alibi_heads": 4,
+      "accuracy": {
+        "2": 1.0,
+        "5": 1.0,
+        "10": 1.0,
+        "20": 1.0,
+        "40": 1.0,
+        "100": 1.0,
+        "400": 1.0,
+        "1000": 1.0,
+        "2000": 1.0
+      }
+    },
+    "mixed_alibi_nope_softmax_fixed_scaling": {
+      "wandb": "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation/runs/nxfdvxfw",
+      "input_position_mode": "nape_only",
+      "attention_normalizer": "softmax",
+      "scaling_mode": "none",
+      "heads": 8,
+      "alibi_heads": 4,
+      "accuracy": {
+        "2": 1.0,
+        "5": 1.0,
+        "10": 1.0,
+        "20": 1.0,
+        "40": 1.0,
+        "100": 1.0,
+        "400": 1.0,
+        "1000": 1.0,
+        "2000": 1.0
+      }
+    },
+    "all_nope_softmax_adaptive": {
+      "wandb": "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation/runs/xc97ipse",
+      "input_position_mode": "nape_only",
+      "attention_normalizer": "softmax",
+      "scaling_mode": "adaptive",
+      "heads": 8,
+      "alibi_heads": 0,
+      "accuracy": {
+        "2": 1.0,
+        "5": 1.0,
+        "10": 0.998046875,
+        "20": 0.921875,
+        "40": 0.62109375,
+        "100": 0.3125,
+        "400": 0.142578125,
+        "1000": 0.0625,
+        "2000": 0.09375
+      }
+    },
+    "all_alibi_softmax_fixed_scaling": {
+      "wandb": "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation/runs/p35eznyj",
+      "input_position_mode": "nape_only",
+      "attention_normalizer": "softmax",
+      "scaling_mode": "none",
+      "heads": 8,
+      "alibi_heads": 8,
+      "accuracy": {
+        "2": 1.0,
+        "5": 1.0,
+        "10": 1.0,
+        "20": 1.0,
+        "40": 0.994140625,
+        "100": 0.4453125,
+        "400": 0.208984375,
+        "1000": 0.15625,
+        "2000": 0.109375
+      }
+    },
+    "modular_input_mixed_alibi_nope_softmax_fixed_scaling": {
+      "wandb": "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation/runs/qhx6ankx",
+      "input_position_mode": "modular",
+      "attention_normalizer": "softmax",
+      "scaling_mode": "none",
+      "heads": 8,
+      "alibi_heads": 4,
+      "accuracy": {
+        "2": 1.0,
+        "5": 1.0,
+        "10": 1.0,
+        "20": 1.0,
+        "40": 1.0,
+        "100": 1.0,
+        "400": 1.0,
+        "1000": 0.984375,
+        "2000": 1.0
+      }
+    },
+    "modular_input_all_nope_softmax_fixed_scaling": {
+      "wandb": "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation/runs/iwfcodfl",
+      "input_position_mode": "modular",
+      "attention_normalizer": "softmax",
+      "scaling_mode": "none",
+      "heads": 8,
+      "alibi_heads": 0,
+      "accuracy": {
+        "2": 1.0,
+        "5": 1.0,
+        "10": 1.0,
+        "20": 1.0,
+        "40": 0.998046875,
+        "100": 0.796875,
+        "400": 0.369140625,
+        "1000": 0.203125,
+        "2000": 0.09375
+      }
+    }
+  },
+  "interpretation_limits": [
+    "Every row is a single seed.",
+    "The longest evaluations use 64 examples and are noisier than shorter cells.",
+    "The ablation establishes dependencies in this pointer-next model, not universal architectural necessity.",
+    "Head roles are inferred from interventions and were not directly decoded."
+  ]
+}

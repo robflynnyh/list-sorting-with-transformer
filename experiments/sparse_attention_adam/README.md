@@ -149,6 +149,11 @@ ALiBi/NoPE attention bias.
 Controls and their individual W&B runs are in:
 <https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation>.
 
+The exact step-5,000 cells, sample counts, effective positional/scaling
+configuration, and direct W&B run URLs are recorded in
+[`results/key_difference_ablation_summary.json`](results/key_difference_ablation_summary.json).
+This compact summary is the durable source for the table above.
+
 Paper: <https://arxiv.org/abs/2506.16640>
 
 Reference implementation: <https://github.com/deep-spin/asentmax>
