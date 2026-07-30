@@ -20,7 +20,7 @@ from .compiled_pointer_compare import (
 )
 from .data import PointerNextBatch, make_pointer_next_batch
 from .evaluate import resolve_device
-from .model import ModelConfig, SplitInputDecoderTransformer
+from .model import DecoderTransformer, ModelConfig, SplitInputDecoderTransformer
 from .positions import ModularPositionEmbedding, sample_position_offsets
 from .tokens import PointerNextVocabulary
 
@@ -50,6 +50,9 @@ class SparseAttentionAdamConfig:
     entmax_alpha: float = 1.5
     scale_delta: float = 1.0
     scale_gamma_range: float = 2.0
+    architecture: str = "standard"
+    input_position_mode: str = "modular"
+    value_input_mode: str = "embedding_plus_scalar"
     position_moduli: tuple[int, ...] = DEFAULT_POSITION_MODULI
     position_offset_min: int = -1_000_000
     position_offset_max: int = 1_000_000
@@ -61,6 +64,7 @@ class SparseAttentionAdamConfig:
     minimum_lr_ratio: float = 0.1
     gradient_clip: float = 1.0
     precision: str = "bfloat16"
+    optimizer_name: str = "adam"
     log_interval: int = 50
     eval_interval: int = 500
     checkpoint_interval: int = 1_000
@@ -101,22 +105,41 @@ class SparseAttentionAdamConfig:
             raise ValueError("evaluation lengths must be at least two")
         if len(set(all_eval_lengths)) != len(all_eval_lengths):
             raise ValueError("evaluation lengths must be unique")
-        if self.d_model % 2 or self.d_model % self.heads:
-            raise ValueError("d_model must divide evenly across inputs and heads")
-        position_dim = self.d_model // 2
-        if position_dim != 8 * len(self.position_moduli):
+        if self.d_model % self.heads:
+            raise ValueError("d_model must divide evenly across attention heads")
+        if self.architecture not in {"standard", "paper_gemma2"}:
+            raise ValueError("architecture must be standard or paper_gemma2")
+        if self.input_position_mode not in {"modular", "nape_only"}:
+            raise ValueError("input_position_mode must be modular or nape_only")
+        if self.value_input_mode not in {"embedding", "embedding_plus_scalar"}:
             raise ValueError(
-                "fixed modular Fourier positions require eight dimensions "
-                "per modulus"
+                "value_input_mode must be embedding or embedding_plus_scalar"
             )
-        required_span = (
-            self.position_offset_max
-            - self.position_offset_min
-            + 2 * max(all_eval_lengths)
-            + 4
-        )
-        if math.prod(self.position_moduli) < required_span:
-            raise ValueError("modular position period is too short")
+        if self.input_position_mode == "modular":
+            if self.d_model % 2:
+                raise ValueError("modular split inputs require an even d_model")
+            position_dim = self.d_model // 2
+            if position_dim != 8 * len(self.position_moduli):
+                raise ValueError(
+                    "fixed modular Fourier positions require eight dimensions "
+                    "per modulus"
+                )
+            required_span = (
+                self.position_offset_max
+                - self.position_offset_min
+                + 2 * max(all_eval_lengths)
+                + 4
+            )
+            if math.prod(self.position_moduli) < required_span:
+                raise ValueError("modular position period is too short")
+        if self.architecture == "paper_gemma2" and (
+            self.input_position_mode != "nape_only"
+            or self.value_input_mode != "embedding"
+        ):
+            raise ValueError(
+                "paper_gemma2 requires NAPE-only positions and embedding-only "
+                "value inputs"
+            )
         if self.position_offset_min > self.position_offset_max:
             raise ValueError("position offset bounds are reversed")
         if not 0 < self.alibi_heads < self.heads:
@@ -127,14 +150,18 @@ class SparseAttentionAdamConfig:
             raise ValueError("invalid adaptive-scaling configuration")
         if self.learning_rate <= 0 or self.weight_decay < 0:
             raise ValueError("invalid optimizer configuration")
-        if not 0 <= self.warmup_steps < self.steps:
-            raise ValueError("warmup_steps must be in [0, steps)")
-        if not 0 < self.minimum_lr_ratio <= 1:
-            raise ValueError("minimum_lr_ratio must be in (0, 1]")
+        if self.warmup_steps < 0:
+            raise ValueError("warmup_steps must be non-negative")
+        if not 0 <= self.minimum_lr_ratio <= 1:
+            raise ValueError("minimum_lr_ratio must be in [0, 1]")
         if self.gradient_clip <= 0:
             raise ValueError("gradient_clip must be positive")
-        if self.precision not in {"float32", "bfloat16"}:
-            raise ValueError("precision must be float32 or bfloat16")
+        if self.precision not in {"float32", "bfloat16", "bfloat16-true"}:
+            raise ValueError(
+                "precision must be float32, bfloat16, or bfloat16-true"
+            )
+        if self.optimizer_name not in {"adam", "adamw"}:
+            raise ValueError("optimizer_name must be adam or adamw")
 
 
 def _entmax15_probabilities(scores: Tensor) -> Tensor:
@@ -365,6 +392,83 @@ class AdaptiveEntmaxSelfAttention(nn.Module):
         return self.output(attended)
 
 
+class PaperMatchedRMSNorm(nn.Module):
+    """Gemma-2 RMSNorm, including its zero-initialized additive scale."""
+
+    def __init__(self, dimension: int, *, epsilon: float = 1e-6) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(dimension))
+        self.epsilon = epsilon
+
+    def forward(self, hidden: Tensor) -> Tensor:
+        normalized = hidden.float() * torch.rsqrt(
+            hidden.float().square().mean(dim=-1, keepdim=True) + self.epsilon
+        )
+        return (normalized * (1.0 + self.weight.float())).to(hidden.dtype)
+
+
+class PaperMatchedGatedFeedForward(nn.Module):
+    """Gemma-2 gated GELU feed-forward layer."""
+
+    def __init__(self, config: SparseAttentionAdamConfig) -> None:
+        super().__init__()
+        intermediate_size = int(config.d_model * config.ffn_multiplier)
+        self.gate = nn.Linear(config.d_model, intermediate_size, bias=False)
+        self.up = nn.Linear(config.d_model, intermediate_size, bias=False)
+        self.down = nn.Linear(intermediate_size, config.d_model, bias=False)
+
+    def forward(self, hidden: Tensor) -> Tensor:
+        return self.down(F.gelu(self.gate(hidden), approximate="tanh") * self.up(hidden))
+
+
+class PaperMatchedDecoderBlock(nn.Module):
+    """Gemma-2 residual/norm layout with ASEntmax self-attention."""
+
+    def __init__(self, config: SparseAttentionAdamConfig) -> None:
+        super().__init__()
+        self.input_norm = PaperMatchedRMSNorm(config.d_model)
+        self.attention = AdaptiveEntmaxSelfAttention(config)
+        self.post_attention_norm = PaperMatchedRMSNorm(config.d_model)
+        self.pre_feedforward_norm = PaperMatchedRMSNorm(config.d_model)
+        self.feedforward = PaperMatchedGatedFeedForward(config)
+        self.post_feedforward_norm = PaperMatchedRMSNorm(config.d_model)
+
+    def forward(self, hidden: Tensor) -> Tensor:
+        attention_output = self.attention(self.input_norm(hidden))
+        hidden = hidden + self.post_attention_norm(attention_output)
+        feedforward_output = self.feedforward(self.pre_feedforward_norm(hidden))
+        return hidden + self.post_feedforward_norm(feedforward_output)
+
+
+class PaperMatchedDecoder(nn.Module):
+    """Small Gemma-2-style decoder body for the paper-matched task variant."""
+
+    def __init__(
+        self,
+        config: SparseAttentionAdamConfig,
+        *,
+        vocabulary_size: int,
+    ) -> None:
+        super().__init__()
+        self.token_embedding = nn.Embedding(vocabulary_size, config.d_model)
+        self.blocks = nn.ModuleList(
+            PaperMatchedDecoderBlock(config) for _ in range(config.layers)
+        )
+        self.final_norm = PaperMatchedRMSNorm(config.d_model)
+        self.apply(self._initialize)
+
+    @staticmethod
+    def _initialize(module: nn.Module) -> None:
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def hidden_states(self, token_ids: Tensor) -> Tensor:
+        hidden = self.token_embedding(token_ids)
+        for block in self.blocks:
+            hidden = block(hidden)
+        return self.final_norm(hidden)
+
+
 class SparseAttentionPointerTransformer(nn.Module):
     """Matched pointer-next Transformer using ASEntmax instead of top-k."""
 
@@ -375,7 +479,11 @@ class SparseAttentionPointerTransformer(nn.Module):
         model_config = ModelConfig(
             vocab_size=self.vocabulary.size,
             symbol_count=config.symbol_count,
-            representation="numbers",
+            representation=(
+                "numbers"
+                if config.value_input_mode == "embedding_plus_scalar"
+                else "alphabet"
+            ),
             d_model=config.d_model,
             n_layers=config.layers,
             n_heads=config.heads,
@@ -383,24 +491,43 @@ class SparseAttentionPointerTransformer(nn.Module):
             dropout=0.0,
             position_pattern="none",
         )
-        self.encoder = SplitInputDecoderTransformer(
-            model_config,
-            content_dim=config.d_model // 2,
-        )
-        for block in self.encoder.blocks:
-            block.attention = AdaptiveEntmaxSelfAttention(config)
-        self.position_embedding = ModularPositionEmbedding(
-            self.encoder.position_dim,
-            config.position_moduli,
-        )
-        with torch.no_grad():
-            _set_modular_fourier_codebooks(self.position_embedding)
-        self.position_embedding.requires_grad_(False)
+        if config.architecture == "paper_gemma2":
+            self.encoder = PaperMatchedDecoder(
+                config,
+                vocabulary_size=self.vocabulary.size,
+            )
+        elif config.input_position_mode == "modular":
+            self.encoder = SplitInputDecoderTransformer(
+                model_config,
+                content_dim=config.d_model // 2,
+            )
+            for block in self.encoder.blocks:
+                block.attention = AdaptiveEntmaxSelfAttention(config)
+        else:
+            self.encoder = DecoderTransformer(model_config)
+            for block in self.encoder.blocks:
+                block.attention = AdaptiveEntmaxSelfAttention(config)
+
+        if config.input_position_mode == "modular":
+            position_dimension = config.d_model // 2
+            self.position_embedding: ModularPositionEmbedding | None = (
+                ModularPositionEmbedding(
+                    position_dimension,
+                    config.position_moduli,
+                )
+            )
+            with torch.no_grad():
+                _set_modular_fourier_codebooks(self.position_embedding)
+            self.position_embedding.requires_grad_(False)
+        else:
+            self.position_embedding = None
         self.output = nn.Linear(config.d_model, config.symbol_count)
         nn.init.normal_(self.output.weight, mean=0.0, std=0.02)
         nn.init.zeros_(self.output.bias)
 
     def position_embeddings(self, prompt_ids: Tensor, offsets: Tensor) -> Tensor:
+        if self.position_embedding is None:
+            raise ValueError("NAPE-only models have no modular position embeddings")
         token_offsets = torch.arange(
             prompt_ids.shape[1],
             device=prompt_ids.device,
@@ -410,10 +537,16 @@ class SparseAttentionPointerTransformer(nn.Module):
         )
 
     def forward(self, prompt_ids: Tensor, *, offsets: Tensor) -> Tensor:
-        hidden = self.encoder.hidden_states(
-            prompt_ids,
-            extra_input_embeddings=self.position_embeddings(prompt_ids, offsets),
-        )
+        if self.position_embedding is None:
+            hidden = self.encoder.hidden_states(prompt_ids)
+        else:
+            hidden = self.encoder.hidden_states(
+                prompt_ids,
+                extra_input_embeddings=self.position_embeddings(
+                    prompt_ids,
+                    offsets,
+                ),
+            )
         return self.output(hidden[:, -1])
 
     def attention_metrics(self) -> dict[str, float]:
@@ -432,6 +565,24 @@ class SparseAttentionPointerTransformer(nn.Module):
 
 def pointer_targets(batch: PointerNextBatch) -> Tensor:
     return batch.values.gather(1, (batch.pointers + 1).unsqueeze(1)).squeeze(1)
+
+
+def make_position_offsets(
+    config: SparseAttentionAdamConfig,
+    examples: int,
+    *,
+    generator: torch.Generator,
+    device: torch.device,
+) -> Tensor:
+    if config.input_position_mode == "nape_only":
+        return torch.zeros(examples, dtype=torch.long, device=device)
+    return sample_position_offsets(
+        examples,
+        minimum=config.position_offset_min,
+        maximum=config.position_offset_max,
+        generator=generator,
+        device=device,
+    )
 
 
 def make_evaluation_data(
@@ -460,7 +611,8 @@ def make_evaluation_data(
                     config.symbol_count,
                 ),
             ),
-            sample_position_offsets(
+            make_position_offsets(
+                config,
                 (
                     long_examples
                     if long_examples is not None
@@ -468,8 +620,6 @@ def make_evaluation_data(
                     and length >= long_min_length
                     else examples
                 ),
-                minimum=config.position_offset_min,
-                maximum=config.position_offset_max,
                 generator=generator,
                 device=torch.device("cpu"),
             ),
@@ -514,7 +664,9 @@ def evaluate_model(
             with torch.autocast(
                 device_type=device.type,
                 dtype=torch.bfloat16,
-                enabled=config.precision == "bfloat16" and device.type == "cuda",
+                enabled=(
+                    config.precision == "bfloat16" and device.type == "cuda"
+                ),
             ):
                 logits = model(
                     batch.prompt_ids[start:end].to(device),
@@ -611,7 +763,14 @@ def run(config: SparseAttentionAdamConfig) -> Path:
     metrics_path = output_dir / "metrics.jsonl"
 
     model = SparseAttentionPointerTransformer(config).to(device)
-    optimizer = torch.optim.Adam(
+    if config.precision == "bfloat16-true":
+        if device.type != "cuda":
+            raise ValueError("bfloat16-true precision requires a CUDA device")
+        model = model.to(dtype=torch.bfloat16)
+    optimizer_class = (
+        torch.optim.AdamW if config.optimizer_name == "adamw" else torch.optim.Adam
+    )
+    optimizer = optimizer_class(
         model.parameters(),
         lr=config.learning_rate,
         betas=(config.beta1, config.beta2),
@@ -678,10 +837,9 @@ def run(config: SparseAttentionAdamConfig) -> Path:
             vocabulary=model.vocabulary,
             device=device,
         )
-        offsets = sample_position_offsets(
+        offsets = make_position_offsets(
+            config,
             config.batch_size,
-            minimum=config.position_offset_min,
-            maximum=config.position_offset_max,
             generator=data_generator,
             device=device,
         )
@@ -840,6 +998,51 @@ def build_parser() -> argparse.ArgumentParser:
         default=SparseAttentionAdamConfig.eval_attention_element_budget,
     )
     parser.add_argument(
+        "--symbol-count",
+        type=int,
+        default=SparseAttentionAdamConfig.symbol_count,
+    )
+    parser.add_argument(
+        "--d-model",
+        type=int,
+        default=SparseAttentionAdamConfig.d_model,
+    )
+    parser.add_argument(
+        "--layers",
+        type=int,
+        default=SparseAttentionAdamConfig.layers,
+    )
+    parser.add_argument(
+        "--heads",
+        type=int,
+        default=SparseAttentionAdamConfig.heads,
+    )
+    parser.add_argument(
+        "--ffn-multiplier",
+        type=float,
+        default=SparseAttentionAdamConfig.ffn_multiplier,
+    )
+    parser.add_argument(
+        "--alibi-heads",
+        type=int,
+        default=SparseAttentionAdamConfig.alibi_heads,
+    )
+    parser.add_argument(
+        "--architecture",
+        choices=("standard", "paper_gemma2"),
+        default=SparseAttentionAdamConfig.architecture,
+    )
+    parser.add_argument(
+        "--input-position-mode",
+        choices=("modular", "nape_only"),
+        default=SparseAttentionAdamConfig.input_position_mode,
+    )
+    parser.add_argument(
+        "--value-input-mode",
+        choices=("embedding", "embedding_plus_scalar"),
+        default=SparseAttentionAdamConfig.value_input_mode,
+    )
+    parser.add_argument(
         "--learning-rate",
         type=float,
         default=SparseAttentionAdamConfig.learning_rate,
@@ -866,8 +1069,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--precision",
-        choices=("float32", "bfloat16"),
+        choices=("float32", "bfloat16", "bfloat16-true"),
         default=SparseAttentionAdamConfig.precision,
+    )
+    parser.add_argument(
+        "--optimizer-name",
+        choices=("adam", "adamw"),
+        default=SparseAttentionAdamConfig.optimizer_name,
     )
     parser.add_argument(
         "--log-interval",

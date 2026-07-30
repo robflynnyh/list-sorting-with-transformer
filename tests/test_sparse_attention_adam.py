@@ -7,11 +7,15 @@ from list_sorting_transformer.data import make_pointer_next_batch
 from list_sorting_transformer.positions import sample_position_offsets
 from list_sorting_transformer.sparse_attention_adam import (
     AdaptiveEntmaxSelfAttention,
+    PaperMatchedDecoder,
+    PaperMatchedRMSNorm,
     SparseAttentionAdamConfig,
     SparseAttentionPointerTransformer,
     entmax15,
     evaluation_batch_size,
+    learning_rate_at_step,
     make_evaluation_data,
+    make_position_offsets,
     pointer_targets,
 )
 
@@ -152,3 +156,65 @@ def test_long_recurring_evaluations_use_smaller_fixed_sets() -> None:
     assert data[2][0].values.shape[0] == 7
     assert data[4][0].values.shape[0] == 7
     assert data[8][0].values.shape[0] == 3
+
+
+def test_paper_matched_model_uses_nape_only_gemma_style_inputs() -> None:
+    config = small_config(
+        architecture="paper_gemma2",
+        input_position_mode="nape_only",
+        value_input_mode="embedding",
+        minimum_lr_ratio=0.0,
+        optimizer_name="adamw",
+    )
+    model = SparseAttentionPointerTransformer(config)
+
+    assert isinstance(model.encoder, PaperMatchedDecoder)
+    assert model.position_embedding is None
+    assert sum(
+        isinstance(module, PaperMatchedRMSNorm) for module in model.modules()
+    ) == 4 * config.layers + 1
+    generator = torch.Generator().manual_seed(19)
+    batch = make_pointer_next_batch(
+        config.batch_size,
+        config.train_max_length,
+        generator=generator,
+        vocabulary=model.vocabulary,
+    )
+    offsets = make_position_offsets(
+        config,
+        config.batch_size,
+        generator=generator,
+        device=torch.device("cpu"),
+    )
+    logits = model(batch.prompt_ids, offsets=offsets)
+    loss = F.cross_entropy(logits, pointer_targets(batch))
+    loss.backward()
+
+    assert torch.equal(offsets, torch.zeros_like(offsets))
+    assert logits.shape == (config.batch_size, config.symbol_count)
+    assert all(
+        parameter.grad is None or torch.isfinite(parameter.grad).all()
+        for parameter in model.parameters()
+    )
+
+
+def test_paper_cosine_schedule_reaches_zero() -> None:
+    config = small_config(
+        steps=20,
+        warmup_steps=4,
+        minimum_lr_ratio=0.0,
+    )
+
+    assert learning_rate_at_step(config, 4) == config.learning_rate
+    assert learning_rate_at_step(config, 20) == 0.0
+
+
+def test_short_ablation_can_remain_inside_long_warmup() -> None:
+    config = small_config(
+        steps=5_000,
+        warmup_steps=20_000,
+    )
+
+    assert learning_rate_at_step(config, 5_000) == (
+        config.learning_rate * 0.25
+    )
