@@ -50,6 +50,7 @@ class SparseAttentionAdamConfig:
     final_eval_examples: int = 64
     eval_batch_size: int = 128
     eval_attention_element_budget: int = 128_000_000
+    eval_attention_query_chunk_size: int = 0
     symbol_count: int = 10
     d_model: int = 128
     layers: int = 2
@@ -91,11 +92,12 @@ class SparseAttentionAdamConfig:
         if self.task not in {
             "pointer_next",
             "pointer_compare",
+            "pointer_pair_trace",
             "pointer_compare_trace",
         }:
             raise ValueError(
                 "task must be pointer_next, pointer_compare, or "
-                "pointer_compare_trace"
+                "pointer_pair_trace, or pointer_compare_trace"
             )
         positive_integers = (
             self.steps,
@@ -118,6 +120,10 @@ class SparseAttentionAdamConfig:
         )
         if any(value < 1 for value in positive_integers):
             raise ValueError("integer configuration values must be positive")
+        if self.eval_attention_query_chunk_size < 0:
+            raise ValueError(
+                "eval_attention_query_chunk_size must be non-negative"
+            )
         if not 2 <= self.train_min_length <= self.train_max_length:
             raise ValueError("invalid training length range")
         all_eval_lengths = self.eval_lengths + self.final_eval_lengths
@@ -284,6 +290,7 @@ class AdaptiveEntmaxSelfAttention(nn.Module):
         self.scaling_mode = config.scaling_mode
         self.scale_delta = config.scale_delta
         self.scale_gamma_range = config.scale_gamma_range
+        self.eval_query_chunk_size = config.eval_attention_query_chunk_size
         self.qkv = nn.Linear(config.d_model, 3 * config.d_model, bias=False)
         self.output = nn.Linear(config.d_model, config.d_model, bias=False)
         self.beta_projection = (
@@ -385,37 +392,58 @@ class AdaptiveEntmaxSelfAttention(nn.Module):
             gamma = hidden.new_zeros(())
             scaler = hidden.new_ones(())
 
-        scores = query @ key.transpose(-2, -1) / math.sqrt(self.head_dim)
         positions = torch.arange(length, device=hidden.device)
-        relative_distance = positions[None, :] - positions[:, None]
-        scores = scores + (
-            self.slopes.to(scores.dtype)[None, :, None, None]
-            * relative_distance[None, None].to(scores.dtype)
+        query_chunk_size = (
+            self.eval_query_chunk_size
+            if not self.training and self.eval_query_chunk_size
+            else length
         )
-        causal_mask = positions[None, :] <= positions[:, None]
-        scores = scores.float().masked_fill(
-            ~causal_mask[None, None],
-            -1e9,
-        )
-        if self.attention_normalizer == "entmax15":
-            weights = entmax15(scores)
-        else:
-            weights = scores.softmax(dim=-1)
-        weights = weights.masked_fill(~causal_mask[None, None], 0)
-        weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(
-            torch.finfo(weights.dtype).tiny
-        )
-        attended = weights.to(value.dtype) @ value
-
-        with torch.no_grad():
-            support = weights.gt(0) & causal_mask[None, None]
-            allowed = causal_mask.sum() * batch
-            per_head_support = support.sum(dim=(0, 2, 3)) / (
-                batch * length
+        attended_chunks = []
+        support_by_head = hidden.new_zeros(self.heads, dtype=torch.float32)
+        allowed = hidden.new_zeros((), dtype=torch.float32)
+        for start in range(0, length, query_chunk_size):
+            end = min(start + query_chunk_size, length)
+            query_positions = positions[start:end]
+            scores = (
+                query[:, :, start:end]
+                @ key.transpose(-2, -1)
+                / math.sqrt(self.head_dim)
             )
+            relative_distance = (
+                positions[None, :] - query_positions[:, None]
+            )
+            scores = scores + (
+                self.slopes.to(scores.dtype)[None, :, None, None]
+                * relative_distance[None, None].to(scores.dtype)
+            )
+            causal_mask = positions[None, :] <= query_positions[:, None]
+            scores = scores.float().masked_fill(
+                ~causal_mask[None, None],
+                -1e9,
+            )
+            if self.attention_normalizer == "entmax15":
+                weights = entmax15(scores)
+            else:
+                weights = scores.softmax(dim=-1)
+            weights = weights.masked_fill(~causal_mask[None, None], 0)
+            weights = weights / weights.sum(
+                dim=-1, keepdim=True
+            ).clamp_min(torch.finfo(weights.dtype).tiny)
+            attended_chunks.append(weights.to(value.dtype) @ value)
+
+            with torch.no_grad():
+                support = weights.gt(0) & causal_mask[None, None]
+                support_by_head += support.sum(dim=(0, 2, 3))
+                allowed += causal_mask.sum() * batch
+
+        attended = torch.cat(attended_chunks, dim=2)
+        with torch.no_grad():
+            support_sum = support_by_head.sum()
+            per_head_support = support_by_head / (batch * length)
             self.last_metrics = {
-                "support_size": support.sum() / (batch * self.heads * length),
-                "support_fraction": support.sum() / (allowed * self.heads),
+                "support_size": support_sum
+                / (batch * self.heads * length),
+                "support_fraction": support_sum / (allowed * self.heads),
                 "alibi_support_size": (
                     per_head_support[: self.alibi_heads].mean()
                     if self.alibi_heads
@@ -656,6 +684,10 @@ def comparison_trace_targets(
     return torch.cat((value_tokens, action_tokens), dim=1)
 
 
+def pointer_pair_trace_targets(batch: PointerNextBatch) -> Tensor:
+    return pointer_pair_value_targets(batch) + VALUE_OFFSET
+
+
 def task_targets(
     config: SparseAttentionAdamConfig,
     batch: PointerNextBatch,
@@ -666,7 +698,9 @@ def task_targets(
     if config.task == "pointer_compare":
         return comparison_targets(batch)
     if not isinstance(vocabulary, PointerCompareVocabulary):
-        raise ValueError("pointer_compare_trace requires a comparison vocabulary")
+        raise ValueError("pointer trace tasks require a comparison vocabulary")
+    if config.task == "pointer_pair_trace":
+        return pointer_pair_trace_targets(batch)
     return comparison_trace_targets(batch, vocabulary)
 
 
@@ -766,9 +800,13 @@ def teacher_forced_trace_logits(
 ) -> tuple[Tensor, Tensor]:
     if not isinstance(model.vocabulary, PointerCompareVocabulary):
         raise ValueError("comparison traces require a comparison vocabulary")
-    targets = comparison_trace_targets(batch, model.vocabulary)
-    inputs = torch.cat((batch.prompt_ids, targets[:, :2]), dim=1)
-    logits = model.sequence_logits(inputs, offsets=offsets)[:, -3:]
+    targets = task_targets(model.config, batch, model.vocabulary)
+    if targets.ndim != 2:
+        raise ValueError("teacher-forced traces require sequence targets")
+    inputs = torch.cat((batch.prompt_ids, targets[:, :-1]), dim=1)
+    logits = model.sequence_logits(inputs, offsets=offsets)[
+        :, -targets.shape[1] :
+    ]
     return logits, targets
 
 
@@ -777,13 +815,16 @@ def generate_comparison_trace(
     prompt_ids: Tensor,
     *,
     offsets: Tensor,
+    steps: int = 3,
 ) -> Tensor:
+    if steps < 1:
+        raise ValueError("trace steps must be positive")
     generated = []
     inputs = prompt_ids
-    for step in range(3):
+    for step in range(steps):
         predictions = model(inputs, offsets=offsets).argmax(dim=-1)
         generated.append(predictions)
-        if step < 2:
+        if step + 1 < steps:
             inputs = torch.cat((inputs, predictions[:, None]), dim=1)
     return torch.stack(generated, dim=1)
 
@@ -816,8 +857,9 @@ def evaluate_model(
         batch_size = evaluation_batch_size(
             config,
             prompt_length=(
-                batch.prompt_length + 2
-                if config.task == "pointer_compare_trace"
+                batch.prompt_length + targets.shape[1] - 1
+                if config.task
+                in {"pointer_pair_trace", "pointer_compare_trace"}
                 else batch.prompt_length
             ),
         )
@@ -847,7 +889,10 @@ def evaluate_model(
                     config.precision == "bfloat16" and device.type == "cuda"
                 ),
             ):
-                if config.task == "pointer_compare_trace":
+                if config.task in {
+                    "pointer_pair_trace",
+                    "pointer_compare_trace",
+                }:
                     batch_slice = PointerNextBatch(
                         token_ids=batch_slice.token_ids.to(device),
                         labels=batch_slice.labels.to(device),
@@ -865,6 +910,7 @@ def evaluate_model(
                         model,
                         batch_slice.prompt_ids,
                         offsets=batch_offsets,
+                        steps=target.shape[1],
                     )
                 else:
                     logits = model(
@@ -881,20 +927,24 @@ def evaluate_model(
                 )
             )
             matches = predictions.eq(target)
-            if config.task == "pointer_compare_trace":
+            if config.task in {
+                "pointer_pair_trace",
+                "pointer_compare_trace",
+            }:
                 complete_matches = matches.all(dim=1)
                 correct += int(complete_matches.sum())
                 marked_correct += int(matches[:, 0].sum())
                 following_correct += int(matches[:, 1].sum())
                 retrieved = matches[:, :2].all(dim=1)
                 retrieval_correct += int(retrieved.sum())
-                action_given_retrieval_correct += int(
-                    (retrieved & matches[:, 2]).sum()
-                )
-                action_matches = matches[:, 2]
-                action_target_classes = (
-                    target[:, 2] - model.vocabulary.action_token_offset
-                )
+                if config.task == "pointer_compare_trace":
+                    action_given_retrieval_correct += int(
+                        (retrieved & matches[:, 2]).sum()
+                    )
+                    action_matches = matches[:, 2]
+                    action_target_classes = (
+                        target[:, 2] - model.vocabulary.action_token_offset
+                    )
             else:
                 correct += int(matches.sum())
                 action_matches = matches
@@ -926,7 +976,10 @@ def evaluate_model(
             summary[f"eval/length_{length}/swap_examples"] = float(
                 action_examples[1]
             )
-        if config.task == "pointer_compare_trace":
+        if config.task in {
+            "pointer_pair_trace",
+            "pointer_compare_trace",
+        }:
             summary[f"eval/length_{length}/marked_value_accuracy"] = (
                 marked_correct / targets.shape[0]
             )
@@ -936,9 +989,10 @@ def evaluate_model(
             summary[f"eval/length_{length}/retrieval_accuracy"] = (
                 retrieval_correct / targets.shape[0]
             )
-            summary[f"eval/length_{length}/action_accuracy"] = (
-                sum(action_correct) / targets.shape[0]
-            )
+        if config.task == "pointer_compare_trace":
+            summary[f"eval/length_{length}/action_accuracy"] = sum(
+                action_correct
+            ) / targets.shape[0]
             summary[
                 f"eval/length_{length}/action_accuracy_given_retrieval"
             ] = action_given_retrieval_correct / max(retrieval_correct, 1)
@@ -1122,7 +1176,10 @@ def run(config: SparseAttentionAdamConfig) -> Path:
             dtype=torch.bfloat16,
             enabled=config.precision == "bfloat16" and device.type == "cuda",
         ):
-            if config.task == "pointer_compare_trace":
+            if config.task in {
+                "pointer_pair_trace",
+                "pointer_compare_trace",
+            }:
                 logits, target = teacher_forced_trace_logits(
                     model,
                     batch,
@@ -1155,7 +1212,8 @@ def run(config: SparseAttentionAdamConfig) -> Path:
                 "train/accuracy": float(
                     (
                         matches.all(dim=1)
-                        if config.task == "pointer_compare_trace"
+                        if config.task
+                        in {"pointer_pair_trace", "pointer_compare_trace"}
                         else matches
                     )
                     .float()
@@ -1179,13 +1237,17 @@ def run(config: SparseAttentionAdamConfig) -> Path:
                 summary["train/swap_fraction"] = float(
                     action_targets.eq(1).float().mean()
                 )
-            if config.task == "pointer_compare_trace":
+            if config.task in {
+                "pointer_pair_trace",
+                "pointer_compare_trace",
+            }:
                 summary["train/marked_value_accuracy"] = float(
                     matches[:, 0].float().mean()
                 )
                 summary["train/following_value_accuracy"] = float(
                     matches[:, 1].float().mean()
                 )
+            if config.task == "pointer_compare_trace":
                 summary["train/action_accuracy"] = float(
                     matches[:, 2].float().mean()
                 )
@@ -1251,6 +1313,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=(
             "pointer_next",
             "pointer_compare",
+            "pointer_pair_trace",
             "pointer_compare_trace",
         ),
         default=SparseAttentionAdamConfig.task,
@@ -1312,6 +1375,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--eval-attention-element-budget",
         type=int,
         default=SparseAttentionAdamConfig.eval_attention_element_budget,
+    )
+    parser.add_argument(
+        "--eval-attention-query-chunk-size",
+        type=int,
+        default=SparseAttentionAdamConfig.eval_attention_query_chunk_size,
     )
     parser.add_argument(
         "--symbol-count",

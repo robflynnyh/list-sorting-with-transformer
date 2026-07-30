@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import torch
 import torch.nn.functional as F
 
@@ -23,6 +24,7 @@ from list_sorting_transformer.length_generalisation.sparse_attention_adam import
     make_evaluation_data,
     make_position_offsets,
     make_task_batch,
+    pointer_pair_trace_targets,
     pointer_targets,
     task_targets,
     teacher_forced_trace_logits,
@@ -263,6 +265,40 @@ def test_softmax_attention_is_dense_on_causally_allowed_positions() -> None:
     )
 
 
+def test_chunked_eval_attention_matches_unchunked_attention() -> None:
+    config = small_config(
+        attention_normalizer="entmax15",
+        eval_attention_query_chunk_size=2,
+    )
+    model = SparseAttentionPointerTransformer(config)
+    generator = torch.Generator().manual_seed(27)
+    batch = make_pointer_next_batch(
+        config.batch_size,
+        config.train_max_length,
+        generator=generator,
+        vocabulary=model.vocabulary,
+    )
+    offsets = make_position_offsets(
+        config,
+        config.batch_size,
+        generator=generator,
+        device=torch.device("cpu"),
+    )
+
+    model.eval()
+    chunked = model(batch.prompt_ids, offsets=offsets)
+    chunked_metrics = model.attention_metrics()
+    for block in model.encoder.blocks:
+        block.attention.eval_query_chunk_size = 0
+    unchunked = model(batch.prompt_ids, offsets=offsets)
+    unchunked_metrics = model.attention_metrics()
+
+    torch.testing.assert_close(chunked, unchunked)
+    assert chunked_metrics.keys() == unchunked_metrics.keys()
+    for name, value in chunked_metrics.items():
+        assert value == pytest.approx(unchunked_metrics[name])
+
+
 def test_softmax_without_scaling_has_unit_scale() -> None:
     config = small_config(
         attention_normalizer="softmax",
@@ -470,6 +506,32 @@ def test_pointer_compare_trace_predicts_values_then_action() -> None:
     assert logits.shape == (3, 3, model.vocabulary.size)
     F.cross_entropy(logits.flatten(0, 1), teacher_targets.flatten()).backward()
     assert model.output.weight.grad is not None
+
+
+def test_pointer_pair_trace_uses_the_same_autoregressive_value_targets() -> None:
+    config = small_config(
+        task="pointer_pair_trace",
+        attention_normalizer="softmax",
+        scaling_mode="none",
+        input_position_mode="nape_only",
+        value_input_mode="embedding",
+    )
+    model = SparseAttentionPointerTransformer(config)
+    batch = make_task_batch(
+        config,
+        3,
+        3,
+        generator=torch.Generator().manual_seed(47),
+        vocabulary=model.vocabulary,
+    )
+    offsets = torch.zeros(3, dtype=torch.long)
+    expected = pointer_pair_trace_targets(batch)
+
+    logits, targets = teacher_forced_trace_logits(model, batch, offsets)
+
+    assert torch.equal(targets, expected)
+    assert torch.equal(task_targets(config, batch, model.vocabulary), expected)
+    assert logits.shape == (3, 2, model.vocabulary.size)
 
 
 def test_pointer_compare_trace_decoding_is_autoregressive() -> None:

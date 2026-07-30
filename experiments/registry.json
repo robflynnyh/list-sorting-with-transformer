@@ -270,9 +270,12 @@
         "bash experiments/sparse_attention_adam/run_key_difference_ablations.sh",
         "bash experiments/sparse_attention_adam/run_alibi_nope_mechanism.sh",
         "bash experiments/sparse_attention_adam/run_pointer_compare_alibi_nope.sh",
-        "bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh"
+        "bash experiments/sparse_attention_adam/run_pointer_pair_trace_alibi_nope.sh",
+        "bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh",
+        "ATTENTION_NORMALIZER=entmax15 bash experiments/sparse_attention_adam/run_pointer_pair_trace_alibi_nope.sh",
+        "ATTENTION_NORMALIZER=entmax15 bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh"
       ],
-      "summary": "Dense softmax and fixed scaling are sufficient in the successful eight-head model. Direct KEEP/SWAP prediction retained 92.2% at length 5,000, while an autoregressive retrieve-then-compare trace fell to 14.1% because successor retrieval failed."
+      "summary": "Dense softmax and fixed scaling are sufficient for pointer-next. On matched 20,000-step autoregressive traces, entmax reached 100% exact accuracy through sampled length 5,000 with and without a final KEEP/SWAP target; softmax reached 10.9% and 46.9%, respectively."
     },
     {
       "id": "learned-backward-length",

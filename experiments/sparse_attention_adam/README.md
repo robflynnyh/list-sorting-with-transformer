@@ -207,39 +207,59 @@ ABLATION_PHASE=fourth \
 ## KEEP/SWAP extension
 
 The successful two-layer, eight-head mixed ALiBi/NoPE setup was also trained
-on two comparison variants. Both train on list lengths 2 through 20 for 5,000
-steps with seed 4:
+on comparison traces. The matched experiment trains on list lengths 2 through
+20 for 20,000 steps with seed 4 and compares:
 
-- **Direct:** predict only `KEEP` when the marked value is no greater than its
-  successor, otherwise predict `SWAP`.
-- **Staged:** autoregressively emit the marked value, its successor, and then
-  `KEEP` or `SWAP`. All three outputs receive cross-entropy loss. Evaluation
-  feeds each generated value back into the model rather than teacher forcing.
+- **Pair only:** autoregressively emit the marked value and its successor.
+- **Pair + action:** emit both values and then `KEEP` when the marked value is
+  no greater than its successor, otherwise `SWAP`.
 
-| Length | Direct action | Staged exact trace | Staged action | Action given correct retrieval |
+All trace tokens receive cross-entropy loss. Evaluation is fully
+autoregressive: each generated value is fed back to the model. The only
+difference between columns below is the attention normalizer or the additional
+action target.
+
+| Length | Softmax pair | Softmax pair + action | Entmax pair | Entmax pair + action |
 | --- | ---: | ---: | ---: | ---: |
 | 100 | 100% | 100% | 100% | 100% |
-| 400 | 98.2% | 88.7% | 94.9% | 100% |
-| 1,000 | 93.8% | 68.8% | 84.4% | 100% |
-| 2,000 | 92.2% | 39.1% | 68.8% | 100% |
-| 5,000 | 92.2% | 14.1% | 54.7% | 100% |
+| 400 | 100% | 100% | 100% | 100% |
+| 1,000 | 75.0% | 98.4% | 100% | 100% |
+| 2,000 | 26.6% | 93.8% | 100% | 100% |
+| 5,000 | 10.9% | 46.9% | 100% | 100% |
 
-In the staged run, marked-value retrieval is 100% at every reported length.
-Successor retrieval equals complete-trace accuracy at lengths 100 through
-5,000, and the action is always correct on examples where both values were
-retrieved correctly. The staged model therefore learns the comparison, but
-its autoregressive successor-routing step extrapolates much less strongly
-than the direct action model. This is a single-seed result.
+These are exact complete-trace accuracies. The entmax models retrieve both
+values perfectly on all sampled examples through length 5,000; the action
+model also predicts every `KEEP`/`SWAP` token correctly. Under softmax, adding
+the action target improves retrieval substantially rather than causing the
+failure seen in the earlier 5,000-step snapshot. At length 5,000, its action
+accuracy is 82.8%, and it remains 100% conditional on correct retrieval.
+
+This changes two earlier interpretations. Training for only 5,000 steps was
+insufficient for the staged task, and sparse normalization does show a large
+benefit on the harder autoregressive trace despite tying softmax on the
+simpler pointer-next task. The comparison is still single-seed evidence.
+
+For historical context, a separate 5,000-step direct-action model that emits
+only `KEEP`/`SWAP` reached 92.2% at length 5,000. It is not directly matched to
+the 20,000-step trace comparison.
 
 Run the matched experiments with:
 
 ```bash
 bash experiments/sparse_attention_adam/run_pointer_compare_alibi_nope.sh
+bash experiments/sparse_attention_adam/run_pointer_pair_trace_alibi_nope.sh
 bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh
+ATTENTION_NORMALIZER=entmax15 \
+  bash experiments/sparse_attention_adam/run_pointer_pair_trace_alibi_nope.sh
+ATTENTION_NORMALIZER=entmax15 \
+  bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh
 ```
 
-W&B: [direct](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/w09ea7ww),
-[staged](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/sg2e5w8c).
+W&B: [direct action](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/w09ea7ww),
+[softmax pair](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/skghvgx2),
+[softmax pair + action](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/sg2e5w8c),
+[entmax pair](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/bkkraz7p),
+and [entmax pair + action](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/eqlg590i).
 Exact metrics, sample counts, and checkpoint hashes are in
 [`results/pointer_compare_summary.json`](results/pointer_compare_summary.json).
 

@@ -7,10 +7,10 @@ GPU_POOL="${GPU_POOL:-all}"
 PYTHON_BIN="${PYTHON_BIN:-/store/store4/software/bin/anaconda3/envs/flash_attn_pytorch2/bin/python}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${ROOT}/artifacts/sparse_attention_adam}"
 STEPS="${STEPS:-20000}"
-RUN_NAME="${RUN_NAME:-pointer-compare-trace-softmax-nape-fixed-seed4}"
-RESUME="${RESUME:-}"
+RUN_NAME="${RUN_NAME:-pointer-pair-trace-softmax-nape-fixed-seed4}"
 ATTENTION_NORMALIZER="${ATTENTION_NORMALIZER:-softmax}"
 EVAL_ATTENTION_QUERY_CHUNK_SIZE="${EVAL_ATTENTION_QUERY_CHUNK_SIZE:-}"
+RESUME="${RESUME:-}"
 if [[ -z "${EVAL_ATTENTION_QUERY_CHUNK_SIZE}" ]]; then
   if [[ "${ATTENTION_NORMALIZER}" == "entmax15" ]]; then
     EVAL_ATTENTION_QUERY_CHUNK_SIZE=512
@@ -33,7 +33,7 @@ fi
 exec env PYTHONPATH="${ROOT}/src" \
   "${PYTHON_BIN}" -u \
   -m list_sorting_transformer.length_generalisation.sparse_attention_adam \
-  --task pointer_compare_trace \
+  --task pointer_pair_trace \
   --run-name "${RUN_NAME}" \
   --output-dir "${OUTPUT_ROOT}" \
   --steps "${STEPS}" \
