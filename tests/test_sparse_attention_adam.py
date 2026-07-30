@@ -218,3 +218,33 @@ def test_short_ablation_can_remain_inside_long_warmup() -> None:
     assert learning_rate_at_step(config, 5_000) == (
         config.learning_rate * 0.25
     )
+
+
+def test_softmax_attention_is_dense_on_causally_allowed_positions() -> None:
+    config = small_config(attention_normalizer="softmax")
+    model = SparseAttentionPointerTransformer(config)
+    generator = torch.Generator().manual_seed(23)
+    batch = make_pointer_next_batch(
+        config.batch_size,
+        config.train_max_length,
+        generator=generator,
+        vocabulary=model.vocabulary,
+    )
+    offsets = make_position_offsets(
+        config,
+        config.batch_size,
+        generator=generator,
+        device=torch.device("cpu"),
+    )
+
+    loss = F.cross_entropy(
+        model(batch.prompt_ids, offsets=offsets),
+        pointer_targets(batch),
+    )
+    loss.backward()
+
+    assert model.attention_metrics()["attention/support_fraction"] == 1.0
+    assert all(
+        parameter.grad is None or torch.isfinite(parameter.grad).all()
+        for parameter in model.parameters()
+    )

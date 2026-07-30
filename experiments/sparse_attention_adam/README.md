@@ -95,7 +95,8 @@ at step 5,000 with seed 4:
 4. paper model width and head count;
 5. Gemma2-style blocks at the original capacity;
 6. width 256 with four heads;
-7. width 128 with eight heads.
+7. width 128 with eight heads;
+8. dense softmax in place of entmax for the successful eight-head model.
 
 Results:
 
@@ -108,6 +109,7 @@ Results:
 | NAPE input, width 256, 4 standard heads | 100% | 97.7% | 78.9% | 56.2% | 50.0% |
 | NAPE input, width 256, 8 standard heads | 100% | 100% | 100% | 100% | 98.4% |
 | NAPE input, width 128, 8 standard heads | 100% | 100% | 100% | 100% | 100% |
+| NAPE input, width 128, 8 standard heads, softmax | 100% | 100% | 100% | 100% | 100% |
 | NAPE input, width 256, 8 Gemma2 heads | 100% | 100% | 100% | 100% | 100% |
 
 The decisive tested factor is eight attention heads, not increased model width
@@ -115,6 +117,10 @@ or the Gemma2 block. With the standard small `d_model=128` Transformer,
 changing four 32-dimensional heads to eight 16-dimensional heads is sufficient
 for perfect accuracy through length 2,000. This ablation does not yet separate
 the benefit of more heads from the benefit of a smaller per-head dimension.
+Replacing entmax with dense softmax leaves accuracy at 100% throughout, so
+sparse normalization provides no demonstrated accuracy or length-generalization
+benefit on this task. It may still have computational benefits with the paper's
+sparse kernel, which this local closed-form implementation does not use.
 
 Controls and their individual W&B runs are in:
 <https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation>.

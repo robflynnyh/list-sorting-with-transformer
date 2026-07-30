@@ -156,3 +156,21 @@ if [[ "${ABLATION_PHASE}" == "all" || "${ABLATION_PHASE}" == "second" ]]; then
     --optimizer-name adamw \
     --final-eval-lengths ""
 fi
+
+if [[ "${ABLATION_PHASE}" == "all" || "${ABLATION_PHASE}" == "third" ]]; then
+  # H: Change only the successful small eight-head model's normalizer.
+  run_variant ablate-h-paper-recipe-nape-width128-heads8-softmax-seed4 \
+    --batch-size 128 \
+    --d-model 128 \
+    --heads 8 \
+    --alibi-heads 4 \
+    --attention-normalizer softmax \
+    --architecture standard \
+    --input-position-mode nape_only \
+    --value-input-mode embedding \
+    --warmup-steps 20000 \
+    --minimum-lr-ratio 0 \
+    --precision bfloat16-true \
+    --optimizer-name adamw \
+    --final-eval-lengths ""
+fi

@@ -47,6 +47,7 @@ class SparseAttentionAdamConfig:
     heads: int = 4
     ffn_multiplier: float = 4.0
     alibi_heads: int = 2
+    attention_normalizer: str = "entmax15"
     entmax_alpha: float = 1.5
     scale_delta: float = 1.0
     scale_gamma_range: float = 2.0
@@ -144,6 +145,10 @@ class SparseAttentionAdamConfig:
             raise ValueError("position offset bounds are reversed")
         if not 0 < self.alibi_heads < self.heads:
             raise ValueError("NAPE requires both ALiBi and NoPE heads")
+        if self.attention_normalizer not in {"entmax15", "softmax"}:
+            raise ValueError(
+                "attention_normalizer must be entmax15 or softmax"
+            )
         if self.entmax_alpha != 1.5:
             raise ValueError("this implementation supports entmax alpha=1.5")
         if self.scale_delta < 0 or self.scale_gamma_range <= 0:
@@ -250,6 +255,7 @@ class AdaptiveEntmaxSelfAttention(nn.Module):
         self.alibi_heads = config.alibi_heads
         self.nope_heads = config.heads - config.alibi_heads
         self.head_dim = config.d_model // config.heads
+        self.attention_normalizer = config.attention_normalizer
         self.scale_delta = config.scale_delta
         self.scale_gamma_range = config.scale_gamma_range
         self.qkv = nn.Linear(config.d_model, 3 * config.d_model, bias=False)
@@ -357,7 +363,10 @@ class AdaptiveEntmaxSelfAttention(nn.Module):
             ~causal_mask[None, None],
             -1e9,
         )
-        weights = entmax15(scores)
+        if self.attention_normalizer == "entmax15":
+            weights = entmax15(scores)
+        else:
+            weights = scores.softmax(dim=-1)
         weights = weights.masked_fill(~causal_mask[None, None], 0)
         weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(
             torch.finfo(weights.dtype).tiny
@@ -1026,6 +1035,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--alibi-heads",
         type=int,
         default=SparseAttentionAdamConfig.alibi_heads,
+    )
+    parser.add_argument(
+        "--attention-normalizer",
+        choices=("entmax15", "softmax"),
+        default=SparseAttentionAdamConfig.attention_normalizer,
     )
     parser.add_argument(
         "--architecture",
