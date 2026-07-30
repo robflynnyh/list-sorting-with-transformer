@@ -110,11 +110,11 @@ seed replication.
 | Field | Value |
 | --- | --- |
 | Status | Preliminary |
-| Task | Pointer-next with ASEntmax, dense softmax, and positional-head ablations |
+| Task | Pointer-next and KEEP/SWAP comparison with sparse/dense attention and positional-head ablations |
 | Train / eval | L2-20 training; recurring evaluations through L2,000 |
-| Result | Eight mixed ALiBi/NoPE heads reached 100% at sampled L2,000 with either entmax or softmax; removing adaptive scaling did not hurt; direct interventions show layer-1 ALiBi routing followed by layer-2 NoPE retrieval |
-| Evidence | [Ablation and mechanism report](../experiments/sparse_attention_adam/README.md#measured-alibinope-circuit), [ablation summary](../experiments/sparse_attention_adam/results/key_difference_ablation_summary.json), [mechanism JSON](../experiments/sparse_attention_adam/results/alibi_nope_mechanism.json), [W&B project](https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation) |
-| Reproduce | `bash experiments/sparse_attention_adam/run_key_difference_ablations.sh`; `bash experiments/sparse_attention_adam/run_alibi_nope_mechanism.sh` |
+| Result | Eight mixed ALiBi/NoPE heads reached 100% at sampled L2,000 with either entmax or softmax; direct interventions show layer-1 ALiBi routing followed by layer-2 NoPE retrieval. Direct KEEP/SWAP retained 92.2% at L5,000, while the staged retrieve-then-compare trace reached 14.1% because successor retrieval failed. |
+| Evidence | [Ablation, mechanism, and comparison report](../experiments/sparse_attention_adam/README.md), [ablation summary](../experiments/sparse_attention_adam/results/key_difference_ablation_summary.json), [mechanism JSON](../experiments/sparse_attention_adam/results/alibi_nope_mechanism.json), [comparison JSON](../experiments/sparse_attention_adam/results/pointer_compare_summary.json), [comparison W&B](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope) |
+| Reproduce | `bash experiments/sparse_attention_adam/run_key_difference_ablations.sh`; `bash experiments/sparse_attention_adam/run_alibi_nope_mechanism.sh`; `bash experiments/sparse_attention_adam/run_pointer_compare_alibi_nope.sh`; `bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh` |
 
 Sparse normalization has no demonstrated accuracy benefit on this pointer task.
 The measured circuit remains a single-checkpoint, single-seed result.

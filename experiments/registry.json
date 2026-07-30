@@ -243,8 +243,8 @@
       "id": "sparse-attention-adam",
       "track": "length_generalisation",
       "status": "preliminary",
-      "question": "Are sparse normalization, adaptive scaling, or mixed positional head roles responsible for pointer-next length extrapolation?",
-      "training_domain": "Pointer-next lists of length 2-20, one seed per ablation.",
+      "question": "Which attention and output-trace choices support pointer retrieval and local comparison beyond the training lengths?",
+      "training_domain": "Pointer-next and pointer-comparison lists of length 2-20, one seed per ablation.",
       "evaluation_domain": "Recurring evaluations through length 2,000 and selected final evaluations at 5,000.",
       "locations": [
         "experiments/sparse_attention_adam"
@@ -258,17 +258,21 @@
         "experiments/sparse_attention_adam/README.md",
         "experiments/sparse_attention_adam/results/key_difference_ablation_summary.json",
         "experiments/sparse_attention_adam/results/alibi_nope_mechanism.json",
-        "experiments/sparse_attention_adam/results/alibi_nope_head_ablation.svg"
+        "experiments/sparse_attention_adam/results/alibi_nope_head_ablation.svg",
+        "experiments/sparse_attention_adam/results/pointer_compare_summary.json"
       ],
       "wandb": [
-        "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation"
+        "https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation",
+        "https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope"
       ],
       "reproduce": [
         "bash experiments/sparse_attention_adam/run_pointer_next.sh",
         "bash experiments/sparse_attention_adam/run_key_difference_ablations.sh",
-        "bash experiments/sparse_attention_adam/run_alibi_nope_mechanism.sh"
+        "bash experiments/sparse_attention_adam/run_alibi_nope_mechanism.sh",
+        "bash experiments/sparse_attention_adam/run_pointer_compare_alibi_nope.sh",
+        "bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh"
       ],
-      "summary": "Dense softmax and fixed scaling are sufficient in the successful eight-head model; intervention analysis finds layer-1 ALiBi routing followed by layer-2 NoPE retrieval."
+      "summary": "Dense softmax and fixed scaling are sufficient in the successful eight-head model. Direct KEEP/SWAP prediction retained 92.2% at length 5,000, while an autoregressive retrieve-then-compare trace fell to 14.1% because successor retrieval failed."
     },
     {
       "id": "learned-backward-length",

@@ -204,6 +204,45 @@ ABLATION_PHASE=fourth \
   bash experiments/sparse_attention_adam/run_key_difference_ablations.sh
 ```
 
+## KEEP/SWAP extension
+
+The successful two-layer, eight-head mixed ALiBi/NoPE setup was also trained
+on two comparison variants. Both train on list lengths 2 through 20 for 5,000
+steps with seed 4:
+
+- **Direct:** predict only `KEEP` when the marked value is no greater than its
+  successor, otherwise predict `SWAP`.
+- **Staged:** autoregressively emit the marked value, its successor, and then
+  `KEEP` or `SWAP`. All three outputs receive cross-entropy loss. Evaluation
+  feeds each generated value back into the model rather than teacher forcing.
+
+| Length | Direct action | Staged exact trace | Staged action | Action given correct retrieval |
+| --- | ---: | ---: | ---: | ---: |
+| 100 | 100% | 100% | 100% | 100% |
+| 400 | 98.2% | 88.7% | 94.9% | 100% |
+| 1,000 | 93.8% | 68.8% | 84.4% | 100% |
+| 2,000 | 92.2% | 39.1% | 68.8% | 100% |
+| 5,000 | 92.2% | 14.1% | 54.7% | 100% |
+
+In the staged run, marked-value retrieval is 100% at every reported length.
+Successor retrieval equals complete-trace accuracy at lengths 100 through
+5,000, and the action is always correct on examples where both values were
+retrieved correctly. The staged model therefore learns the comparison, but
+its autoregressive successor-routing step extrapolates much less strongly
+than the direct action model. This is a single-seed result.
+
+Run the matched experiments with:
+
+```bash
+bash experiments/sparse_attention_adam/run_pointer_compare_alibi_nope.sh
+bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh
+```
+
+W&B: [direct](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/w09ea7ww),
+[staged](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/sg2e5w8c).
+Exact metrics, sample counts, and checkpoint hashes are in
+[`results/pointer_compare_summary.json`](results/pointer_compare_summary.json).
+
 Controls and their individual W&B runs are in:
 <https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation>.
 
