@@ -48,6 +48,18 @@ Once the screening sweep finishes, replicate only the smallest successful
 size and the adjacent failing size across additional seeds. Do not interpret
 the one-seed screen as a confirmed sample-complexity threshold.
 
+For the adjacent failed/successful EGGROLL conditions, the longer-horizon
+audit first selects among saved checkpoints using only the fixed clean
+fitness set at horizon 160. It then evaluates the selected rule at horizon
+320 on fresh forward initializations and fresh held-out examples. Selection
+never uses held-out accuracy. The audit also runs matched ordinary shortcut
+training and direct masked training controls:
+
+```bash
+with-gpu 2 --num 1 -- \
+  bash experiments/shortcut_clean_set_scaling/run_horizon_320_audits.sh
+```
+
 ## Run
 
 All GPU work must go through `with-gpu`:
