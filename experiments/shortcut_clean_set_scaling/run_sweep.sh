@@ -6,8 +6,8 @@ SIZES="${SIZES:-256 24 8 2 1 4 16 64}"
 METHODS="${METHODS:-maml eggroll}"
 
 cd "${ROOT}"
-for size in ${SIZES}; do
-  for method in ${METHODS}; do
+for method in ${METHODS}; do
+  for size in ${SIZES}; do
     if [[ "${method}" == "maml" ]]; then
       expected_steps="${MAML_STEPS:-1000}"
       if [[ "${size}" == "256" ]]; then
