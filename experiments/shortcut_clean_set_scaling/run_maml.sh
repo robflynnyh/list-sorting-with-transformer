@@ -11,6 +11,7 @@ CLEAN_EXAMPLES_PER_MODE="$1"
 SEED="${SEED:-7}"
 PYTHON_BIN="${PYTHON_BIN:-/store/store4/software/bin/anaconda3/envs/flash_attn_pytorch2/bin/python}"
 RUN_NAME="maml-clean${CLEAN_EXAMPLES_PER_MODE}-per-mode-seed${SEED}"
+MAML_STEPS="${MAML_STEPS:-500}"
 
 cd "${ROOT}"
 export PYTHONPATH="${ROOT}/src:${PYTHONPATH:-}"
@@ -21,7 +22,7 @@ exec "${PYTHON_BIN}" -u -m \
   --run-name "${RUN_NAME}" \
   --output-dir artifacts/shortcut_clean_set_scaling/maml \
   --method router_maml \
-  --steps 2000 \
+  --steps "${MAML_STEPS}" \
   --lookahead-steps 24 \
   --batch-size 64 \
   --min-length 8 \
@@ -52,4 +53,3 @@ exec "${PYTHON_BIN}" -u -m \
   --wandb-project list-sorting-shortcut-clean-set-scaling \
   --wandb-entity wobrob101 \
   --wandb-group maml-seed${SEED}
-

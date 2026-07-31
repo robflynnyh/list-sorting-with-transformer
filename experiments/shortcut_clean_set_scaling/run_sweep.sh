@@ -9,10 +9,14 @@ cd "${ROOT}"
 for size in ${SIZES}; do
   for method in ${METHODS}; do
     echo "Starting ${method} with ${size} clean examples per mode" >&2
-    bash "experiments/shortcut_clean_set_scaling/run_${method}.sh" "${size}"
+    if [[ "${method}" == "maml" && "${size}" == "256" ]]; then
+      MAML_STEPS=2000 \
+        bash "experiments/shortcut_clean_set_scaling/run_${method}.sh" "${size}"
+    else
+      bash "experiments/shortcut_clean_set_scaling/run_${method}.sh" "${size}"
+    fi
   done
 done
 
 "${PYTHON_BIN:-/store/store4/software/bin/anaconda3/envs/flash_attn_pytorch2/bin/python}" \
   experiments/shortcut_clean_set_scaling/summarize.py
-

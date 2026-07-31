@@ -31,8 +31,11 @@ sigma adaptation, or stopping.
 ## Screening Protocol
 
 The screening sweep uses one seed (`7`) to identify the transition region.
-MAML runs for the original 2,000 persistent updates with a 24-step lookahead.
-EGGROLL runs for 60 generations at the original 160-update inner horizon,
+The 256-per-mode MAML reference runs for the original 2,000 persistent
+updates. It converged by step 200, so subsequent MAML conditions use 500
+updates with the same 24-step lookahead; ambiguous boundary conditions can be
+extended afterward. EGGROLL runs for 60 generations at the original
+160-update inner horizon,
 using population 64, adaptive elite-centroid updates, and strict matched
 two-trajectory acceptance.
 
@@ -62,4 +65,3 @@ Summarize completed runs with:
 ```bash
 python experiments/shortcut_clean_set_scaling/summarize.py
 ```
-
