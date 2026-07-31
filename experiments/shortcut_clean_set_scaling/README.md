@@ -48,7 +48,8 @@ Once the screening sweep finishes, replicate only the smallest successful
 size and the adjacent failing size across additional seeds. Do not interpret
 the one-seed screen as a confirmed sample-complexity threshold.
 
-For the adjacent failed/successful EGGROLL conditions, the longer-horizon
+For the adjacent failed/successful EGGROLL conditions (two and four clean
+examples per mode in the seed-7 screen), the longer-horizon
 audit first selects among saved checkpoints using only the fixed clean
 fitness set at horizon 160. It then evaluates the selected rule at horizon
 320 on fresh forward initializations and fresh held-out examples. Selection

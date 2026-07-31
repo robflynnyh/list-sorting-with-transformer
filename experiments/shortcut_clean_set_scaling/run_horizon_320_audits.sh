@@ -7,7 +7,7 @@ PYTHON_BIN="${PYTHON_BIN:-/store/store4/software/bin/anaconda3/envs/flash_attn_p
 cd "${ROOT}"
 export PYTHONPATH="${ROOT}/src:${PYTHONPATH:-}"
 
-for size in 2 8; do
+for size in 2 4; do
   run_dir="artifacts/shortcut_clean_set_scaling/eggroll/eggroll-clean${size}-per-mode-seed7"
   output="experiments/shortcut_clean_set_scaling/results/eggroll-clean${size}-h320.json"
   "${PYTHON_BIN}" -u \
