@@ -385,6 +385,11 @@ def test_zero_acceptance_examples_reuses_ranking_fitness_data() -> None:
     assert acceptance is ranking
 
 
+def test_shortcut_heldout_fitness_size_must_be_even() -> None:
+    with pytest.raises(ValueError, match="heldout_fitness_examples"):
+        ShortcutCreditExperimentConfig(heldout_fitness_examples=3)
+
+
 def test_clean_router_statistics_do_not_require_a_leak_token() -> None:
     vocabulary = PointerNextVocabulary("numbers", 10)
     rule = AttentionRoutingRule(

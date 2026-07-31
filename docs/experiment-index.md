@@ -216,6 +216,18 @@ this task. It does not solve how to discover the intervention.
 | Evidence | [MAML shortcut log](../experiments/learned_backward_shortcuts/MAML_PROGRESS.md#eight-step-lookahead-follow-up), [suppression W&B](https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/74p2kcpy), [signed W&B](https://wandb.ai/wobrob101/list-sorting-maml-shortcut/runs/mwrdb7b6) |
 | Reproduce | `python -m list_sorting_transformer.shortcut_learning.maml_shortcut_experiment --help` |
 
+<a id="exp-shortcut-clean-set-scaling"></a>
+### Shortcut clean-set scaling
+
+| Field | Value |
+| --- | --- |
+| Status | Preliminary |
+| Question | How small can the fixed clean set be before suppression-only MAML or EGGROLL stops generalising beyond it? |
+| Train / eval | Unlimited resampled shortcut training; 1-256 fixed examples per clean mode; 2,048 reporting-only examples per mode |
+| Result | Screening in progress; endpoint held-out worst-mode accuracy is primary, with the fixed-to-held-out gap used to diagnose overfitting |
+| Evidence | [Protocol and launchers](../experiments/shortcut_clean_set_scaling/README.md) |
+| Reproduce | `bash experiments/shortcut_clean_set_scaling/launch_sweep.sh` |
+
 ## Cross-Track Transfer
 
 <a id="exp-rasp-transfer"></a>

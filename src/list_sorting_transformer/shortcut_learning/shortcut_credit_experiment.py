@@ -61,6 +61,7 @@ class ShortcutCreditExperimentConfig:
     fitness_examples: int = 512
     acceptance_fitness_examples: int = 0
     fitness_batch_size: int = 64
+    heldout_fitness_examples: int | None = None
     correct_eval_examples: int = 128
     heldout_examples: int = 128
     report_interval: int = 1
@@ -352,6 +353,16 @@ class ShortcutCreditExperimentConfig:
             raise ValueError("unknown leak placement")
         if self.fitness_examples % 2:
             raise ValueError("fitness_examples must be even")
+        if (
+            self.heldout_fitness_examples is not None
+            and (
+                self.heldout_fitness_examples < 2
+                or self.heldout_fitness_examples % 2
+            )
+        ):
+            raise ValueError(
+                "heldout_fitness_examples must be positive and even"
+            )
         if self.acceptance_fitness_examples < 0:
             raise ValueError(
                 "acceptance_fitness_examples must be nonnegative"
@@ -3320,7 +3331,11 @@ def run(config: ShortcutCreditExperimentConfig) -> Path:
             if not isinstance(vocabulary, ShortcutPointerVocabulary):
                 raise TypeError("shortcut task requires shortcut vocabulary")
             heldout_fitness_batches = make_fitness_batches(
-                config.fitness_examples,
+                (
+                    config.fitness_examples
+                    if config.heldout_fitness_examples is None
+                    else config.heldout_fitness_examples
+                ),
                 min_length=config.min_length,
                 max_length=config.max_length,
                 batch_size=config.fitness_batch_size,
@@ -4769,6 +4784,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--fitness-batch-size", type=int, default=64)
+    parser.add_argument(
+        "--heldout-fitness-examples",
+        type=int,
+        help=(
+            "reporting-only masked/incorrect examples; defaults to the "
+            "fixed fitness-set size for backward compatibility"
+        ),
+    )
     parser.add_argument("--correct-eval-examples", type=int, default=128)
     parser.add_argument("--heldout-examples", type=int, default=128)
     parser.add_argument(

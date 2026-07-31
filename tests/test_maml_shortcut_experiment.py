@@ -78,6 +78,43 @@ def test_fixed_fitness_pairs_are_balanced_and_deterministic() -> None:
             )
 
 
+def test_single_example_per_mode_uses_partial_fitness_pair() -> None:
+    config = small_config(
+        fitness_examples=2,
+        fitness_batch_size=32,
+    )
+    pairs = make_fitness_pairs(
+        config,
+        vocabulary=ShortcutPointerVocabulary("numbers", 10),
+        device=torch.device("cpu"),
+        seed_offset=10_000,
+    )
+
+    assert len(pairs) == 1
+    assert [batch.batch_size for batch in pairs[0]] == [1, 1]
+
+
+def test_heldout_fitness_size_is_independent() -> None:
+    config = small_config(
+        fitness_examples=2,
+        fitness_batch_size=32,
+        heldout_fitness_examples=16,
+        heldout_fitness_batch_size=4,
+    )
+    heldout = make_fitness_pairs(
+        config,
+        vocabulary=ShortcutPointerVocabulary("numbers", 10),
+        device=torch.device("cpu"),
+        seed_offset=20_000,
+        example_count=config.heldout_fitness_examples,
+        batch_size=config.heldout_fitness_batch_size,
+    )
+
+    assert len(heldout) == 2
+    assert sum(pair[0].batch_size for pair in heldout) == 8
+    assert sum(pair[1].batch_size for pair in heldout) == 8
+
+
 @pytest.mark.parametrize("router_credit_mode", ["suppress_renorm", "signed"])
 def test_shortcut_router_receives_meta_gradient(
     router_credit_mode: str,
@@ -143,4 +180,5 @@ def test_shortcut_router_run_persists_both_networks(tmp_path: Path) -> None:
     assert row["train/lookahead_steps"] == 2
     assert "fitness_fixed/masked_accuracy" in row
     assert "fitness_heldout/incorrect_accuracy" in row
+    assert "fitness_gap/incorrect_accuracy" in row
     assert "correct_leak/accuracy" in row

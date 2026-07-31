@@ -467,6 +467,34 @@
         "python -m list_sorting_transformer.shortcut_learning.maml_shortcut_experiment --help"
       ],
       "summary": "Longer lookahead produced a strong single-seed shortcut result, but the method was less effective and less robust than the evolutionary rule."
+    },
+    {
+      "id": "shortcut-clean-set-scaling",
+      "track": "shortcut_learning",
+      "status": "preliminary",
+      "question": "How many fixed clean examples are needed for suppression-only MAML and EGGROLL to learn shortcut resistance?",
+      "training_domain": "Unlimited resampled random-position shortcut data, with 1-256 fixed masked and incorrect examples per mode for credit learning.",
+      "evaluation_domain": "A matched reporting-only set of 2,048 fresh masked and 2,048 fresh incorrect-hint examples per run.",
+      "locations": [
+        "experiments/shortcut_clean_set_scaling"
+      ],
+      "source_packages": [
+        "core",
+        "length_generalisation",
+        "shortcut_learning"
+      ],
+      "artifact_roots": [],
+      "evidence": [
+        "experiments/shortcut_clean_set_scaling/README.md"
+      ],
+      "wandb": [
+        "https://wandb.ai/wobrob101/list-sorting-shortcut-clean-set-scaling"
+      ],
+      "reproduce": [
+        "bash experiments/shortcut_clean_set_scaling/launch_sweep.sh",
+        "python experiments/shortcut_clean_set_scaling/summarize.py"
+      ],
+      "summary": "The one-seed screening sweep is designed to locate a clean-data threshold; no sample-complexity conclusion is registered until the sweep and boundary replications complete."
     }
   ]
 }

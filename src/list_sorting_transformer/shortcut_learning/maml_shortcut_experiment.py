@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -46,6 +47,8 @@ class MAMLShortcutConfig:
     max_length: int = 32
     fitness_examples: int = 512
     fitness_batch_size: int = 32
+    heldout_fitness_examples: int = 512
+    heldout_fitness_batch_size: int = 32
     eval_examples: int = 256
     eval_batch_size: int = 64
     ordinary_learning_rate: float = 3e-4
@@ -79,6 +82,8 @@ class MAMLShortcutConfig:
             self.max_length,
             self.fitness_examples,
             self.fitness_batch_size,
+            self.heldout_fitness_examples,
+            self.heldout_fitness_batch_size,
             self.eval_examples,
             self.eval_batch_size,
             self.d_model,
@@ -102,10 +107,10 @@ class MAMLShortcutConfig:
             raise ValueError("d_model must be divisible by heads")
         if self.router_d_model % self.router_heads:
             raise ValueError("router_d_model must be divisible by router_heads")
-        if self.fitness_examples % (2 * self.fitness_batch_size):
-            raise ValueError(
-                "fitness examples must divide into balanced mode pairs"
-            )
+        if self.fitness_examples % 2:
+            raise ValueError("fitness examples must be even")
+        if self.heldout_fitness_examples % 2:
+            raise ValueError("held-out fitness examples must be even")
         if self.eval_examples % self.eval_batch_size:
             raise ValueError("eval examples must divide into full batches")
         if min(
@@ -143,13 +148,28 @@ def make_fitness_pairs(
     vocabulary: ShortcutPointerVocabulary,
     device: torch.device,
     seed_offset: int,
+    example_count: int | None = None,
+    batch_size: int | None = None,
 ) -> tuple[tuple[ShortcutBatch, ShortcutBatch], ...]:
     """Build fixed balanced masked/incorrect pairs at sampled lengths."""
 
+    example_count = (
+        config.fitness_examples if example_count is None else example_count
+    )
+    batch_size = config.fitness_batch_size if batch_size is None else batch_size
+    if example_count < 2 or example_count % 2:
+        raise ValueError("fitness example count must be positive and even")
+    if batch_size < 1:
+        raise ValueError("fitness batch size must be positive")
     generator = torch.Generator().manual_seed(config.seed + seed_offset)
-    pair_count = config.fitness_examples // (2 * config.fitness_batch_size)
+    examples_per_mode = example_count // 2
+    pair_count = math.ceil(examples_per_mode / batch_size)
     pairs = []
-    for _ in range(pair_count):
+    for pair_index in range(pair_count):
+        current_batch_size = min(
+            batch_size,
+            examples_per_mode - pair_index * batch_size,
+        )
         length = int(
             torch.randint(
                 config.min_length,
@@ -161,7 +181,7 @@ def make_fitness_pairs(
         pairs.append(
             (
                 make_shortcut_batch(
-                    config.fitness_batch_size,
+                    current_batch_size,
                     length,
                     leak_mode="masked",
                     leak_placement="random_list",
@@ -170,7 +190,7 @@ def make_fitness_pairs(
                     device=device,
                 ),
                 make_shortcut_batch(
-                    config.fitness_batch_size,
+                    current_batch_size,
                     length,
                     leak_mode="incorrect",
                     leak_placement="random_list",
@@ -287,16 +307,28 @@ def evaluate_all(
             evaluation_batch_size=eval_batch_size,
         ),
     )
-    summary.update(
-        metric_summary(
-            "fitness_heldout",
-            evaluate_shortcut_batches(
-                model,
-                heldout_batches,
-                evaluation_batch_size=eval_batch_size,
-            ),
-        )
+    heldout_summary = metric_summary(
+        "fitness_heldout",
+        evaluate_shortcut_batches(
+            model,
+            heldout_batches,
+            evaluation_batch_size=eval_batch_size,
+        ),
     )
+    summary.update(heldout_summary)
+    summary["fitness_gap/loss"] = (
+        heldout_summary["fitness_heldout/loss"]
+        - summary["fitness_fixed/loss"]
+    )
+    summary["fitness_gap/accuracy"] = (
+        summary["fitness_fixed/accuracy"]
+        - heldout_summary["fitness_heldout/accuracy"]
+    )
+    for mode in ("masked", "incorrect"):
+        summary[f"fitness_gap/{mode}_accuracy"] = (
+            summary[f"fitness_fixed/{mode}_accuracy"]
+            - heldout_summary[f"fitness_heldout/{mode}_accuracy"]
+        )
     summary.update(
         metric_summary(
             "correct_leak",
@@ -411,6 +443,8 @@ def run(config: MAMLShortcutConfig) -> Path:
         vocabulary=vocabulary,
         device=device,
         seed_offset=20_000,
+        example_count=config.heldout_fitness_examples,
+        batch_size=config.heldout_fitness_batch_size,
     )
     correct_batches = make_evaluation_batches(
         config,
