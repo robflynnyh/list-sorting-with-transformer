@@ -110,14 +110,15 @@ seed replication.
 | Field | Value |
 | --- | --- |
 | Status | Preliminary |
-| Task | Pointer-next with ASEntmax, dense softmax, and positional-head ablations |
-| Train / eval | L2-20 training; recurring evaluations through L2,000 |
-| Result | Eight mixed ALiBi/NoPE heads reached 100% at sampled L2,000 with either entmax or softmax; removing adaptive scaling did not hurt; all-NoPE and all-ALiBi failed OOD |
-| Evidence | [Ablation table](../experiments/sparse_attention_adam/README.md#key-difference-ablation), [machine-readable summary](../experiments/sparse_attention_adam/results/key_difference_ablation_summary.json), [W&B project](https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation) |
-| Reproduce | `bash experiments/sparse_attention_adam/run_key_difference_ablations.sh` |
+| Task | Pointer-next and KEEP/SWAP comparison with sparse/dense attention and positional-head ablations |
+| Train / eval | L2-20 training; final evaluations through L5,000 |
+| Result | Eight mixed ALiBi/NoPE heads reached 100% at sampled L2,000 with either entmax or softmax; direct interventions show layer-1 ALiBi routing followed by layer-2 NoPE retrieval. On matched 20,000-step autoregressive traces, entmax reached 100% through sampled L5,000 with and without a final KEEP/SWAP target. A fixed external bubble-sort controller composed the latter checkpoint into 100% exact sorting on 16 sampled L100 lists across 79,200 exact local traces. |
+| Evidence | [Ablation, mechanism, comparison, and composition report](../experiments/sparse_attention_adam/README.md), [ablation summary](../experiments/sparse_attention_adam/results/key_difference_ablation_summary.json), [mechanism JSON](../experiments/sparse_attention_adam/results/alibi_nope_mechanism.json), [comparison JSON](../experiments/sparse_attention_adam/results/pointer_compare_summary.json), [sorting JSON](../experiments/sparse_attention_adam/results/pointer_trace_bubble_sort_summary.json), [comparison W&B](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope) |
+| Reproduce | See the exact softmax and entmax commands in the [experiment README](../experiments/sparse_attention_adam/README.md#keepswap-extension). |
 
-Sparse normalization has no demonstrated accuracy benefit on this pointer task.
-The mixed-head interpretation remains mechanistic inference.
+Sparse normalization tied softmax on pointer-next but strongly improved the
+harder autoregressive retrieval trace. The measured circuit and trace
+comparison remain single-checkpoint, single-seed results.
 
 <a id="exp-learned-backward-length"></a>
 ### Evolved backward rules for length

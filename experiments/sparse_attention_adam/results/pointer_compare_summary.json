@@ -1,0 +1,212 @@
+{
+  "architecture": {
+    "alibi_heads": 4,
+    "d_model": 128,
+    "heads": 8,
+    "input_position_mode": "nape_only",
+    "layers": 2,
+    "scaling_mode": "none"
+  },
+  "direct_action_5000": {
+    "checkpoint_sha256": "f9b964369abb2ab1dbee58b19c3cb06869752f2169df256075b98965c6aaaad5",
+    "metrics": {
+      "100": {
+        "action_accuracy": 1.0,
+        "examples": 512
+      },
+      "400": {
+        "action_accuracy": 0.982421875,
+        "examples": 512
+      },
+      "1000": {
+        "action_accuracy": 0.9375,
+        "examples": 64
+      },
+      "2000": {
+        "action_accuracy": 0.921875,
+        "examples": 64
+      },
+      "5000": {
+        "action_accuracy": 0.921875,
+        "examples": 64
+      }
+    },
+    "steps": 5000,
+    "target": "<KEEP/SWAP>",
+    "wandb_run_id": "w09ea7ww",
+    "wandb_url": "https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/w09ea7ww"
+  },
+  "matched_trace_20000": {
+    "evaluation": {
+      "examples_through_400": 512,
+      "examples_from_1000": 64,
+      "lengths": [
+        100,
+        400,
+        1000,
+        2000,
+        5000
+      ]
+    },
+    "pair_and_action": {
+      "entmax15": {
+        "checkpoint_sha256": "bb7d2d07ebdb2a6ad16f6ca3a747067adc48e259cb224f93cbb2adeb60a08ba4",
+        "metrics": {
+          "100": {
+            "action_accuracy": 1.0,
+            "action_accuracy_given_retrieval": 1.0,
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "400": {
+            "action_accuracy": 1.0,
+            "action_accuracy_given_retrieval": 1.0,
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "1000": {
+            "action_accuracy": 1.0,
+            "action_accuracy_given_retrieval": 1.0,
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "2000": {
+            "action_accuracy": 1.0,
+            "action_accuracy_given_retrieval": 1.0,
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "5000": {
+            "action_accuracy": 1.0,
+            "action_accuracy_given_retrieval": 1.0,
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          }
+        },
+        "wandb_run_id": "eqlg590i",
+        "wandb_url": "https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/eqlg590i"
+      },
+      "softmax": {
+        "checkpoint_sha256": "c56860d8c098aa69c119f827e292403921aa6745f34dff564cf8ef9406b35b56",
+        "metrics": {
+          "100": {
+            "action_accuracy": 1.0,
+            "action_accuracy_given_retrieval": 1.0,
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "400": {
+            "action_accuracy": 1.0,
+            "action_accuracy_given_retrieval": 1.0,
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "1000": {
+            "action_accuracy": 1.0,
+            "action_accuracy_given_retrieval": 1.0,
+            "complete_trace_accuracy": 0.984375,
+            "following_value_accuracy": 0.984375,
+            "marked_value_accuracy": 1.0
+          },
+          "2000": {
+            "action_accuracy": 0.984375,
+            "action_accuracy_given_retrieval": 1.0,
+            "complete_trace_accuracy": 0.9375,
+            "following_value_accuracy": 0.9375,
+            "marked_value_accuracy": 1.0
+          },
+          "5000": {
+            "action_accuracy": 0.828125,
+            "action_accuracy_given_retrieval": 1.0,
+            "complete_trace_accuracy": 0.46875,
+            "following_value_accuracy": 0.515625,
+            "marked_value_accuracy": 0.890625
+          }
+        },
+        "wandb_run_id": "sg2e5w8c",
+        "wandb_url": "https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/sg2e5w8c"
+      },
+      "target": "marked_value, following_value, <KEEP/SWAP>"
+    },
+    "pair_only": {
+      "entmax15": {
+        "checkpoint_sha256": "8c7840340327c55b47dcea3b9e0c919871fa298bd00233716a7473f24d6100aa",
+        "metrics": {
+          "100": {
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "400": {
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "1000": {
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "2000": {
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "5000": {
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          }
+        },
+        "wandb_run_id": "bkkraz7p",
+        "wandb_url": "https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/bkkraz7p"
+      },
+      "softmax": {
+        "checkpoint_sha256": "a741f8285c2ab0c019f3f7a5f4dcded634bd1dca406b9cb0a9df0ec41e807023",
+        "metrics": {
+          "100": {
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "400": {
+            "complete_trace_accuracy": 1.0,
+            "following_value_accuracy": 1.0,
+            "marked_value_accuracy": 1.0
+          },
+          "1000": {
+            "complete_trace_accuracy": 0.75,
+            "following_value_accuracy": 0.9375,
+            "marked_value_accuracy": 0.8125
+          },
+          "2000": {
+            "complete_trace_accuracy": 0.265625,
+            "following_value_accuracy": 0.75,
+            "marked_value_accuracy": 0.46875
+          },
+          "5000": {
+            "complete_trace_accuracy": 0.109375,
+            "following_value_accuracy": 0.390625,
+            "marked_value_accuracy": 0.5
+          }
+        },
+        "wandb_run_id": "skghvgx2",
+        "wandb_url": "https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/skghvgx2"
+      },
+      "target": "marked_value, following_value"
+    },
+    "steps": 20000
+  },
+  "seed": 4,
+  "train_lengths": [
+    2,
+    20
+  ]
+}

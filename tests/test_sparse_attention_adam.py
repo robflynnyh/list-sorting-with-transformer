@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import pytest
 import torch
 import torch.nn.functional as F
 
-from list_sorting_transformer.core.data import make_pointer_next_batch
+from list_sorting_transformer.core.data import (
+    make_pointer_next_batch,
+    make_pointer_pair_batch,
+)
 from list_sorting_transformer.core.positions import sample_position_offsets
 from list_sorting_transformer.length_generalisation.sparse_attention_adam import (
     AdaptiveEntmaxSelfAttention,
@@ -11,12 +15,23 @@ from list_sorting_transformer.length_generalisation.sparse_attention_adam import
     PaperMatchedRMSNorm,
     SparseAttentionAdamConfig,
     SparseAttentionPointerTransformer,
+    comparison_trace_targets,
+    comparison_targets,
     entmax15,
     evaluation_batch_size,
+    generate_comparison_trace,
     learning_rate_at_step,
     make_evaluation_data,
     make_position_offsets,
+    make_task_batch,
+    pointer_pair_trace_targets,
     pointer_targets,
+    task_targets,
+    teacher_forced_trace_logits,
+)
+from list_sorting_transformer.core.tokens import (
+    VALUE_OFFSET,
+    PointerCompareVocabulary,
 )
 
 
@@ -250,6 +265,40 @@ def test_softmax_attention_is_dense_on_causally_allowed_positions() -> None:
     )
 
 
+def test_chunked_eval_attention_matches_unchunked_attention() -> None:
+    config = small_config(
+        attention_normalizer="entmax15",
+        eval_attention_query_chunk_size=2,
+    )
+    model = SparseAttentionPointerTransformer(config)
+    generator = torch.Generator().manual_seed(27)
+    batch = make_pointer_next_batch(
+        config.batch_size,
+        config.train_max_length,
+        generator=generator,
+        vocabulary=model.vocabulary,
+    )
+    offsets = make_position_offsets(
+        config,
+        config.batch_size,
+        generator=generator,
+        device=torch.device("cpu"),
+    )
+
+    model.eval()
+    chunked = model(batch.prompt_ids, offsets=offsets)
+    chunked_metrics = model.attention_metrics()
+    for block in model.encoder.blocks:
+        block.attention.eval_query_chunk_size = 0
+    unchunked = model(batch.prompt_ids, offsets=offsets)
+    unchunked_metrics = model.attention_metrics()
+
+    torch.testing.assert_close(chunked, unchunked)
+    assert chunked_metrics.keys() == unchunked_metrics.keys()
+    for name, value in chunked_metrics.items():
+        assert value == pytest.approx(unchunked_metrics[name])
+
+
 def test_softmax_without_scaling_has_unit_scale() -> None:
     config = small_config(
         attention_normalizer="softmax",
@@ -345,3 +394,173 @@ def test_all_alibi_heads_work_without_adaptive_scaling() -> None:
         for block in model.encoder.blocks
     )
     assert model.attention_metrics()["attention/nope_support_size"] == 0.0
+
+
+def test_pointer_compare_task_uses_action_vocabulary_and_targets() -> None:
+    config = small_config(
+        task="pointer_compare",
+        attention_normalizer="softmax",
+        scaling_mode="none",
+        input_position_mode="nape_only",
+        value_input_mode="embedding",
+    )
+    model = SparseAttentionPointerTransformer(config)
+    batch = make_task_batch(
+        config,
+        3,
+        3,
+        generator=torch.Generator().manual_seed(41),
+        vocabulary=model.vocabulary,
+    )
+    batch.values[:] = torch.tensor(
+        [
+            [1, 2, 9],
+            [7, 7, 0],
+            [8, 3, 4],
+        ]
+    )
+    batch.pointers[:] = 0
+    offsets = torch.zeros(3, dtype=torch.long)
+
+    assert isinstance(model.vocabulary, PointerCompareVocabulary)
+    assert torch.equal(comparison_targets(batch), torch.tensor([0, 0, 1]))
+    assert torch.equal(task_targets(config, batch), torch.tensor([0, 0, 1]))
+    assert model(batch.prompt_ids, offsets=offsets).shape == (3, 2)
+
+
+def test_pointer_compare_evaluation_batches_hide_pair_outputs() -> None:
+    config = small_config(task="pointer_compare")
+    data = make_evaluation_data(
+        config,
+        lengths=(4,),
+        examples=5,
+    )
+    batch, _ = data[4]
+    direct = make_pointer_pair_batch(
+        5,
+        4,
+        generator=torch.Generator().manual_seed(config.seed + 30_400),
+        vocabulary=PointerCompareVocabulary("numbers", config.symbol_count),
+    )
+
+    assert torch.equal(batch.prompt_ids, direct.prompt_ids)
+    assert batch.prompt_length == direct.prompt_length
+
+
+def test_pointer_compare_trace_predicts_values_then_action() -> None:
+    config = small_config(
+        task="pointer_compare_trace",
+        attention_normalizer="softmax",
+        scaling_mode="none",
+        input_position_mode="nape_only",
+        value_input_mode="embedding",
+    )
+    model = SparseAttentionPointerTransformer(config)
+    batch = make_task_batch(
+        config,
+        3,
+        3,
+        generator=torch.Generator().manual_seed(43),
+        vocabulary=model.vocabulary,
+    )
+    batch.values[:] = torch.tensor(
+        [
+            [1, 2, 9],
+            [7, 7, 0],
+            [8, 3, 4],
+        ]
+    )
+    batch.pointers[:] = 0
+    offsets = torch.zeros(3, dtype=torch.long)
+
+    assert isinstance(model.vocabulary, PointerCompareVocabulary)
+    expected = torch.tensor(
+        [
+            [
+                VALUE_OFFSET + 1,
+                VALUE_OFFSET + 2,
+                model.vocabulary.action_token("KEEP"),
+            ],
+            [
+                VALUE_OFFSET + 7,
+                VALUE_OFFSET + 7,
+                model.vocabulary.action_token("KEEP"),
+            ],
+            [
+                VALUE_OFFSET + 8,
+                VALUE_OFFSET + 3,
+                model.vocabulary.action_token("SWAP"),
+            ],
+        ]
+    )
+    targets = comparison_trace_targets(batch, model.vocabulary)
+    logits, teacher_targets = teacher_forced_trace_logits(
+        model,
+        batch,
+        offsets,
+    )
+
+    assert torch.equal(targets, expected)
+    assert torch.equal(task_targets(config, batch, model.vocabulary), expected)
+    assert torch.equal(teacher_targets, expected)
+    assert logits.shape == (3, 3, model.vocabulary.size)
+    F.cross_entropy(logits.flatten(0, 1), teacher_targets.flatten()).backward()
+    assert model.output.weight.grad is not None
+
+
+def test_pointer_pair_trace_uses_the_same_autoregressive_value_targets() -> None:
+    config = small_config(
+        task="pointer_pair_trace",
+        attention_normalizer="softmax",
+        scaling_mode="none",
+        input_position_mode="nape_only",
+        value_input_mode="embedding",
+    )
+    model = SparseAttentionPointerTransformer(config)
+    batch = make_task_batch(
+        config,
+        3,
+        3,
+        generator=torch.Generator().manual_seed(47),
+        vocabulary=model.vocabulary,
+    )
+    offsets = torch.zeros(3, dtype=torch.long)
+    expected = pointer_pair_trace_targets(batch)
+
+    logits, targets = teacher_forced_trace_logits(model, batch, offsets)
+
+    assert torch.equal(targets, expected)
+    assert torch.equal(task_targets(config, batch, model.vocabulary), expected)
+    assert logits.shape == (3, 2, model.vocabulary.size)
+
+
+def test_pointer_compare_trace_decoding_is_autoregressive() -> None:
+    class ScriptedModel:
+        def __init__(self) -> None:
+            self.input_lengths: list[int] = []
+
+        def __call__(
+            self,
+            token_ids: torch.Tensor,
+            *,
+            offsets: torch.Tensor,
+        ) -> torch.Tensor:
+            del offsets
+            self.input_lengths.append(token_ids.shape[1])
+            logits = torch.zeros(token_ids.shape[0], 20)
+            logits[:, 5 + len(self.input_lengths)] = 1
+            return logits
+
+    model = ScriptedModel()
+    prompt = torch.tensor([[1, 5, 2], [1, 6, 2]])
+    generated = generate_comparison_trace(
+        model,  # type: ignore[arg-type]
+        prompt,
+        offsets=torch.zeros(2, dtype=torch.long),
+    )
+
+    assert model.input_lengths == [3, 4, 5]
+    assert torch.equal(
+        generated,
+        torch.tensor([[6, 7, 8], [6, 7, 8]]),
+    )
