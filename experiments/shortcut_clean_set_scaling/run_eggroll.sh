@@ -65,6 +65,4 @@ exec "${PYTHON_BIN}" -u -m \
   --vectorized-chunk-size 22 \
   --wandb \
   --wandb-project list-sorting-shortcut-clean-set-scaling \
-  --wandb-entity wobrob101 \
-  --wandb-group eggroll-seed${SEED}
-
+  --wandb-entity wobrob101

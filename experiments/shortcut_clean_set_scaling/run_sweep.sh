@@ -8,6 +8,19 @@ METHODS="${METHODS:-maml eggroll}"
 cd "${ROOT}"
 for size in ${SIZES}; do
   for method in ${METHODS}; do
+    if [[ "${method}" == "maml" ]]; then
+      expected_steps="${MAML_STEPS:-1000}"
+      if [[ "${size}" == "256" ]]; then
+        expected_steps=2000
+      fi
+      checkpoint="artifacts/shortcut_clean_set_scaling/maml/maml-clean${size}-per-mode-seed${SEED:-7}/checkpoint_$(printf '%06d' "${expected_steps}").pt"
+    else
+      checkpoint="artifacts/shortcut_clean_set_scaling/eggroll/eggroll-clean${size}-per-mode-seed${SEED:-7}/checkpoint_000060.pt"
+    fi
+    if [[ -f "${checkpoint}" ]]; then
+      echo "Skipping completed ${method} condition at clean/mode=${size}" >&2
+      continue
+    fi
     echo "Starting ${method} with ${size} clean examples per mode" >&2
     if [[ "${method}" == "maml" && "${size}" == "256" ]]; then
       MAML_STEPS=2000 \
