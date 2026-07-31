@@ -204,6 +204,100 @@ ABLATION_PHASE=fourth \
   bash experiments/sparse_attention_adam/run_key_difference_ablations.sh
 ```
 
+## KEEP/SWAP extension
+
+The successful two-layer, eight-head mixed ALiBi/NoPE setup was also trained
+on comparison traces. The matched experiment trains on list lengths 2 through
+20 for 20,000 steps with seed 4 and compares:
+
+- **Pair only:** autoregressively emit the marked value and its successor.
+- **Pair + action:** emit both values and then `KEEP` when the marked value is
+  no greater than its successor, otherwise `SWAP`.
+
+All trace tokens receive cross-entropy loss. Evaluation is fully
+autoregressive: each generated value is fed back to the model. The only
+difference between columns below is the attention normalizer or the additional
+action target.
+
+| Length | Softmax pair | Softmax pair + action | Entmax pair | Entmax pair + action |
+| --- | ---: | ---: | ---: | ---: |
+| 100 | 100% | 100% | 100% | 100% |
+| 400 | 100% | 100% | 100% | 100% |
+| 1,000 | 75.0% | 98.4% | 100% | 100% |
+| 2,000 | 26.6% | 93.8% | 100% | 100% |
+| 5,000 | 10.9% | 46.9% | 100% | 100% |
+
+These are exact complete-trace accuracies. The entmax models retrieve both
+values perfectly on all sampled examples through length 5,000; the action
+model also predicts every `KEEP`/`SWAP` token correctly. Under softmax, adding
+the action target improves retrieval substantially rather than causing the
+failure seen in the earlier 5,000-step snapshot. At length 5,000, its action
+accuracy is 82.8%, and it remains 100% conditional on correct retrieval.
+
+This changes two earlier interpretations. Training for only 5,000 steps was
+insufficient for the staged task, and sparse normalization does show a large
+benefit on the harder autoregressive trace despite tying softmax on the
+simpler pointer-next task. The comparison is still single-seed evidence.
+
+For historical context, a separate 5,000-step direct-action model that emits
+only `KEEP`/`SWAP` reached 92.2% at length 5,000. It is not directly matched to
+the 20,000-step trace comparison.
+
+Run the matched experiments with:
+
+```bash
+bash experiments/sparse_attention_adam/run_pointer_compare_alibi_nope.sh
+bash experiments/sparse_attention_adam/run_pointer_pair_trace_alibi_nope.sh
+bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh
+ATTENTION_NORMALIZER=entmax15 \
+  bash experiments/sparse_attention_adam/run_pointer_pair_trace_alibi_nope.sh
+ATTENTION_NORMALIZER=entmax15 \
+  bash experiments/sparse_attention_adam/run_pointer_compare_trace_alibi_nope.sh
+```
+
+W&B: [direct action](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/w09ea7ww),
+[softmax pair](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/skghvgx2),
+[softmax pair + action](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/sg2e5w8c),
+[entmax pair](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/bkkraz7p),
+and [entmax pair + action](https://wandb.ai/wobrob101/list-sorting-pointer-compare-alibi-nope/runs/eqlg590i).
+Exact metrics, sample counts, and checkpoint hashes are in
+[`results/pointer_compare_summary.json`](results/pointer_compare_summary.json).
+
+### Full bubble-sort composition
+
+The 20,000-step entmax pair + action checkpoint was composed with a fixed
+external bubble-sort controller. Before every comparison, the controller
+builds a fresh full-list prompt with the current pointer. The model
+autoregressively emits the marked value, following value, and `KEEP` or
+`SWAP`; the controller applies that action and advances to the next comparison.
+It runs exactly \(N-1\) shrinking passes and does not provide early stopping.
+
+| Length | Lists | Comparisons per list | Total traces | Sorted exactly | Every trace exact |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 | 64 | 1 | 64 | 100% | 100% |
+| 3 | 64 | 3 | 192 | 100% | 100% |
+| 5 | 64 | 10 | 640 | 100% | 100% |
+| 10 | 64 | 45 | 2,880 | 100% | 100% |
+| 20 | 64 | 190 | 12,160 | 100% | 100% |
+| 40 | 64 | 780 | 49,920 | 100% | 100% |
+| 100 | 16 | 4,950 | 79,200 | 100% | 100% |
+
+At length 100, all 79,200 sequential decisions and all 237,600 generated
+trace tokens were correct, so all 16 final lists were exactly sorted. This
+demonstrates composition into a complete sorting procedure for the tested
+0-9 symbol lists. The loop schedule, pointer movement, and stopping condition
+remain external; this is not evidence that the model learned loop control.
+It is also a single-checkpoint evaluation with only 16 length-100 lists.
+
+Run the evaluation with:
+
+```bash
+bash experiments/sparse_attention_adam/run_pointer_trace_bubble_sort.sh
+```
+
+The fixed seed, per-pass metrics, throughput, and checkpoint hash are in
+[`results/pointer_trace_bubble_sort_summary.json`](results/pointer_trace_bubble_sort_summary.json).
+
 Controls and their individual W&B runs are in:
 <https://wandb.ai/wobrob101/list-sorting-sparse-attention-ablation>.
 
