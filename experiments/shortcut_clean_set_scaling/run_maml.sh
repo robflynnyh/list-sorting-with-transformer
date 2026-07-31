@@ -11,7 +11,7 @@ CLEAN_EXAMPLES_PER_MODE="$1"
 SEED="${SEED:-7}"
 PYTHON_BIN="${PYTHON_BIN:-/store/store4/software/bin/anaconda3/envs/flash_attn_pytorch2/bin/python}"
 RUN_NAME="maml-clean${CLEAN_EXAMPLES_PER_MODE}-per-mode-seed${SEED}"
-MAML_STEPS="${MAML_STEPS:-500}"
+MAML_STEPS="${MAML_STEPS:-1000}"
 
 cd "${ROOT}"
 export PYTHONPATH="${ROOT}/src:${PYTHONPATH:-}"

@@ -32,7 +32,7 @@ sigma adaptation, or stopping.
 
 The screening sweep uses one seed (`7`) to identify the transition region.
 The 256-per-mode MAML reference runs for the original 2,000 persistent
-updates. It converged by step 200, so subsequent MAML conditions use 500
+updates. It converged by step 200, so subsequent MAML conditions use 1,000
 updates with the same 24-step lookahead; ambiguous boundary conditions can be
 extended afterward. EGGROLL runs for 60 generations at the original
 160-update inner horizon,
