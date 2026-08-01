@@ -44,6 +44,25 @@ accuracy. Fixed-set accuracy and the fixed-to-held-out gap diagnose
 overfitting. Endpoint accuracy is primary; selecting the best held-out
 checkpoint would leak reporting data into model selection.
 
+## Seed-7 Screen
+
+The completed 160-step EGGROLL screen and 1,000-step MAML screen gave:
+
+| Clean examples per mode | MAML robust accuracy | EGGROLL robust accuracy |
+| ---: | ---: | ---: |
+| 1 | 1.3% | 8.1% |
+| 2 | 0.0% | 43.1% |
+| 4 | 0.0% | 94.0% |
+| 8 | 0.0% | 94.0% |
+| 16 | 93.4% | 94.0% |
+| 24 | 93.4% | 94.0% |
+| 64 | 93.4% | 94.0% |
+| 256 | 93.4% at 2,000 steps | 94.0% |
+
+For this screening seed, the transition is between 8 and 16 examples per
+mode for MAML and between 2 and 4 for EGGROLL. This is a boundary estimate,
+not a replicated sample-complexity claim.
+
 Once the screening sweep finishes, replicate only the smallest successful
 size and the adjacent failing size across additional seeds. Do not interpret
 the one-seed screen as a confirmed sample-complexity threshold.
@@ -60,6 +79,22 @@ training and direct masked training controls:
 with-gpu 2 --num 1 -- \
   bash experiments/shortcut_clean_set_scaling/run_horizon_320_audits.sh
 ```
+
+The 320-step audit selected checkpoint 20 for the two-example condition and
+checkpoint 60 for the four-example condition. Means over five fresh matched
+trajectories were:
+
+| Clean examples per mode | EGGROLL | Ordinary shortcut training | Direct masked training |
+| ---: | ---: | ---: | ---: |
+| 2 | 48.4% | 2.9% | 94.2% |
+| 4 | 94.0% | 2.9% | 94.2% |
+
+Longer training therefore does not rescue the two-example rule. The
+four-example rule remains stable and matches direct masked training at 320
+updates. Direct masked training uses fresh clean training examples, whereas
+EGGROLL uses unlimited shortcut-bearing training examples and only four fixed
+clean examples per mode for fitness, so this comparison tests different clean
+data budgets rather than equal total compute.
 
 ## Run
 

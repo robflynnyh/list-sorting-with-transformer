@@ -1,0 +1,17 @@
+method,seed,clean_examples_per_mode,endpoint,fixed_masked_accuracy,fixed_incorrect_accuracy,heldout_masked_accuracy,heldout_incorrect_accuracy,heldout_worst_mode_accuracy,fixed_to_heldout_accuracy_gap,run_dir
+eggroll,7,1,60,1.0,0.0,0.51416015625,0.0810546875,0.0810546875,-0.0810546875,artifacts/shortcut_clean_set_scaling/eggroll/eggroll-clean1-per-mode-seed7
+eggroll,7,2,60,1.0,0.0,0.9736328125,0.4306640625,0.4306640625,-0.4306640625,artifacts/shortcut_clean_set_scaling/eggroll/eggroll-clean2-per-mode-seed7
+eggroll,7,4,60,0.75,1.0,0.98291015625,0.93994140625,0.93994140625,-0.18994140625,artifacts/shortcut_clean_set_scaling/eggroll/eggroll-clean4-per-mode-seed7
+eggroll,7,8,60,1.0,0.875,0.9921875,0.93994140625,0.93994140625,-0.06494140625,artifacts/shortcut_clean_set_scaling/eggroll/eggroll-clean8-per-mode-seed7
+eggroll,7,16,60,1.0,0.9375,0.986328125,0.93994140625,0.93994140625,-0.00244140625,artifacts/shortcut_clean_set_scaling/eggroll/eggroll-clean16-per-mode-seed7
+eggroll,7,24,60,1.0,0.9583333333333334,0.9833984375,0.93994140625,0.93994140625,0.01839192708333337,artifacts/shortcut_clean_set_scaling/eggroll/eggroll-clean24-per-mode-seed7
+eggroll,7,64,60,0.984375,0.953125,0.98828125,0.93994140625,0.93994140625,0.01318359375,artifacts/shortcut_clean_set_scaling/eggroll/eggroll-clean64-per-mode-seed7
+eggroll,7,256,60,0.98828125,0.953125,0.9892578125,0.93994140625,0.93994140625,0.01318359375,artifacts/shortcut_clean_set_scaling/eggroll/eggroll-clean256-per-mode-seed7
+maml,7,1,1000,0.0,0.0,0.4169921875,0.01318359375,0.01318359375,-0.215087890625,artifacts/shortcut_clean_set_scaling/maml/maml-clean1-per-mode-seed7
+maml,7,2,1000,0.0,0.0,0.1591796875,0.0,0.0,-0.07958984375,artifacts/shortcut_clean_set_scaling/maml/maml-clean2-per-mode-seed7
+maml,7,4,1000,0.25,0.0,0.17578125,0.0,0.0,0.037109375,artifacts/shortcut_clean_set_scaling/maml/maml-clean4-per-mode-seed7
+maml,7,8,1000,0.0,0.0,0.19970703125,0.0,0.0,-0.099853515625,artifacts/shortcut_clean_set_scaling/maml/maml-clean8-per-mode-seed7
+maml,7,16,1000,1.0,1.0,0.9736328125,0.93408203125,0.93408203125,0.046142578125,artifacts/shortcut_clean_set_scaling/maml/maml-clean16-per-mode-seed7
+maml,7,24,1000,1.0,1.0,0.9970703125,0.93408203125,0.93408203125,0.034423828125,artifacts/shortcut_clean_set_scaling/maml/maml-clean24-per-mode-seed7
+maml,7,64,1000,1.0,0.984375,0.9931640625,0.93408203125,0.93408203125,0.028564453125,artifacts/shortcut_clean_set_scaling/maml/maml-clean64-per-mode-seed7
+maml,7,256,2000,0.98046875,0.95703125,0.98876953125,0.93359375,0.93359375,0.007568359375,artifacts/shortcut_clean_set_scaling/maml/maml-clean256-per-mode-seed7
